@@ -39,10 +39,9 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
 }
 
 function registerPrefsPane() {
-  const rootURI = Zotero.Plugins.getRootURI(addon.data.config.addonID);
   Zotero.PreferencePanes.register({
     pluginID: addon.data.config.addonID,
-    src: rootURI + "content/preferences.xhtml",
+    src: `chrome://${addon.data.config.addonRef}/content/preferences.xhtml`,
     label: "zotero-llm",
     image: `chrome://${addon.data.config.addonRef}/content/icons/neuron.jpg`,
   });

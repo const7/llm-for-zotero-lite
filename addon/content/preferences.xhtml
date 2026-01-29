@@ -1,14 +1,13 @@
-<linkset>
-  <html:link rel="localization" href="__addonRef__-preferences.ftl" />
-</linkset>
 <vbox
   id="__addonRef__-prefs"
-  onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
+  onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window: this.ownerDocument.defaultView })"
   xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
   xmlns:html="http://www.w3.org/1999/xhtml"
 >
+  <linkset>
+    <html:link rel="localization" href="__addonRef__-preferences.ftl" />
+  </linkset>
   <groupbox>
-    <!-- <label><html:h2>zotero-llm</html:h2></label> -->
 
     <html:div
       style="display: flex; flex-direction: column; gap: 16px; padding: 10px"

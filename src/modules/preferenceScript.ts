@@ -12,7 +12,12 @@ const getPref = (key: PrefKey): string => {
 const setPref = (key: PrefKey, value: string) =>
   Zotero.Prefs.set(pref(key), value, true);
 
-export async function registerPrefsScripts(_window: Window) {
+export async function registerPrefsScripts(_window: Window | undefined | null) {
+  if (!_window) {
+    ztoolkit.log("Preferences window not available");
+    return;
+  }
+
   const doc = _window.document;
 
   // Wait a bit for DOM to be ready
