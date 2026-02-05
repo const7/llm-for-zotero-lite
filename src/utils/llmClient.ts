@@ -97,14 +97,32 @@ const getPref = (key: string) => Zotero.Prefs.get(prefKey(key), true) as string;
 function resolveEndpoint(baseOrUrl: string, path: string): string {
   const cleaned = baseOrUrl.replace(/\/$/, "");
   if (!cleaned) return "";
-  if (/\/v1\/.+/.test(cleaned)) {
-    if (cleaned.includes("/chat/completions") && path === EMBEDDINGS_ENDPOINT) {
-      return cleaned.replace(/\/chat\/completions$/, "/embeddings");
-    }
-    if (cleaned.endsWith(path)) return cleaned;
-    return cleaned;
+  const chatSuffix = "/chat/completions";
+  const embeddingSuffix = "/embeddings";
+  const hasChat = cleaned.endsWith(chatSuffix);
+  const hasEmbeddings = cleaned.endsWith(embeddingSuffix);
+
+  if (hasChat) {
+    return path === EMBEDDINGS_ENDPOINT
+      ? cleaned.replace(/\/chat\/completions$/, embeddingSuffix)
+      : cleaned;
   }
-  return `${cleaned}${path}`;
+
+  if (hasEmbeddings) {
+    return path === API_ENDPOINT
+      ? cleaned.replace(/\/embeddings$/, chatSuffix)
+      : cleaned;
+  }
+
+  // If a version segment is already present (e.g., /v1 or /v1beta),
+  // avoid appending a second /v1 from the default OpenAI path.
+  const hasVersion = /\/v\d+(?:beta)?\b/.test(cleaned);
+  const normalizedPath =
+    hasVersion && path.startsWith("/v1/")
+      ? path.replace(/^\/v1\//, "/")
+      : path;
+
+  return `${cleaned}${normalizedPath}`;
 }
 
 function getApiConfig(overrides?: {
