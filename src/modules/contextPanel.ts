@@ -35,13 +35,16 @@ const FONT_SCALE_STEP_PERCENT = 10;
 const DEFAULT_TEMPERATURE = 0.3;
 const DEFAULT_MAX_TOKENS = 2048;
 const MAX_ALLOWED_TOKENS = 65536;
+const SELECTED_TEXT_MAX_LENGTH = 4000;
+const SELECTED_TEXT_PREVIEW_LENGTH = 240;
+const INCLUDE_SELECTED_TEXT_SHORTCUT_ID = "include-selected-text";
 
 const SHORTCUT_FILES = [
   { id: "summarize", label: "Summarize", file: "summarize.txt" },
   { id: "key-points", label: "Key Points", file: "key-points.txt" },
   { id: "methodology", label: "Methodology", file: "methodology.txt" },
   { id: "limitations", label: "Limitations", file: "limitations.txt" },
-  { id: "future-work", label: "Future Work", file: "future-work.txt" },
+  { id: INCLUDE_SELECTED_TEXT_SHORTCUT_ID, label: "Add Text Selection", file: "" },
 ] as const;
 
 // =============================================================================
@@ -120,6 +123,8 @@ let responseMenuTarget: {
 
 // Screenshot selection state (per item)
 const selectedImageCache = new Map<number, string>();
+const selectedTextCache = new Map<number, string>();
+const recentReaderSelectionCache = new Map<number, string>();
 
 const STOPWORDS = new Set([
   "the",
@@ -725,6 +730,39 @@ export function registerReaderContextPanel() {
   });
 }
 
+export function registerReaderSelectionTracking() {
+  const readerAPI = Zotero.Reader as _ZoteroTypes.Reader & {
+    __llmSelectionTrackingRegistered?: boolean;
+  };
+  if (!readerAPI || readerAPI.__llmSelectionTrackingRegistered) return;
+
+  const handler: _ZoteroTypes.Reader.EventHandler<"renderTextSelectionPopup"> = (
+    event,
+  ) => {
+    const selectedText = normalizeSelectedText(event.params?.annotation?.text || "");
+    const itemId = event.reader?._item?.id || event.reader?.itemID;
+    if (typeof itemId !== "number") return;
+    const item = Zotero.Items.get(itemId) || null;
+    const cacheKeys = getItemSelectionCacheKeys(item);
+    if (selectedText) {
+      if (cacheKeys.length) {
+        for (const key of cacheKeys) {
+          recentReaderSelectionCache.set(key, selectedText);
+        }
+      } else {
+        recentReaderSelectionCache.set(itemId, selectedText);
+      }
+    }
+  };
+
+  Zotero.Reader.registerEventListener(
+    "renderTextSelectionPopup",
+    handler,
+    config.addonID,
+  );
+  readerAPI.__llmSelectionTrackingRegistered = true;
+}
+
 function buildUI(body: Element, item?: Zotero.Item | null) {
   body.textContent = "";
   const doc = body.ownerDocument!;
@@ -816,6 +854,36 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
 
   // Input section
   const inputSection = createElement(doc, "div", "llm-input-section");
+  const selectedContext = createElement(doc, "div", "llm-selected-context", {
+    id: "llm-selected-context",
+  });
+  selectedContext.style.display = "none";
+  const selectedContextTop = createElement(doc, "div", "llm-selected-context-top");
+  const selectedContextLabel = createElement(doc, "div", "llm-selected-context-label", {
+    textContent: "Selected Context",
+  });
+  const selectedContextClear = createElement(
+    doc,
+    "button",
+    "llm-selected-context-clear",
+    {
+      id: "llm-selected-context-clear",
+      type: "button",
+      textContent: "Clear",
+    },
+  );
+  const selectedContextText = createElement(
+    doc,
+    "div",
+    "llm-selected-context-text",
+    {
+      id: "llm-selected-context-text",
+    },
+  );
+  selectedContextTop.append(selectedContextLabel, selectedContextClear);
+  selectedContext.append(selectedContextTop, selectedContextText);
+  inputSection.appendChild(selectedContext);
+
   const inputBox = createElement(doc, "textarea", "llm-input", {
     id: "llm-input",
     placeholder: hasItem
@@ -1372,6 +1440,117 @@ function sanitizeText(text: string) {
   return out;
 }
 
+function normalizeSelectedText(text: string): string {
+  return sanitizeText(text).replace(/\s+/g, " ").trim().slice(0, SELECTED_TEXT_MAX_LENGTH);
+}
+
+function truncateSelectedText(text: string): string {
+  if (text.length <= SELECTED_TEXT_PREVIEW_LENGTH) return text;
+  return `${text.slice(0, SELECTED_TEXT_PREVIEW_LENGTH - 1)}\u2026`;
+}
+
+function buildQuestionWithSelectedText(
+  selectedText: string,
+  userPrompt: string,
+): string {
+  const normalizedPrompt = userPrompt.trim() || "Please explain this selected text.";
+  return `Selected text from the PDF reader:\n"""\n${selectedText}\n"""\n\nUser question:\n${normalizedPrompt}`;
+}
+
+function getItemSelectionCacheKeys(item: Zotero.Item | null | undefined): number[] {
+  if (!item) return [];
+  const keys = new Set<number>();
+  keys.add(item.id);
+  if (item.isAttachment() && item.parentID) {
+    keys.add(item.parentID);
+  } else {
+    const attachments = item.getAttachments();
+    for (const attId of attachments) {
+      const att = Zotero.Items.get(attId);
+      if (att && att.attachmentContentType === "application/pdf") {
+        keys.add(att.id);
+      }
+    }
+  }
+  return Array.from(keys);
+}
+
+function getActiveReaderSelectionText(
+  panelDoc: Document,
+  currentItem?: Zotero.Item | null,
+): string {
+  const selectedTabId = (
+    Zotero as unknown as { Tabs?: { selectedID?: string | number } }
+  ).Tabs?.selectedID;
+  const reader = (
+    Zotero as unknown as {
+      Reader?: { getByTabID?: (id: string | number) => any };
+    }
+  ).Reader?.getByTabID?.(selectedTabId as string | number);
+
+  const selectionFrom = (doc?: Document | null): string => {
+    if (!doc) return "";
+    const selected = doc.defaultView?.getSelection?.()?.toString() || "";
+    return normalizeSelectedText(selected);
+  };
+
+  const readerDoc =
+    (reader?._iframeWindow?.document as Document | undefined) ||
+    (reader?._iframe?.contentDocument as Document | undefined) ||
+    (reader?._window?.document as Document | undefined);
+  const fromReaderDoc = selectionFrom(readerDoc);
+  if (fromReaderDoc) return fromReaderDoc;
+
+  const fromSelectionPopup = normalizeSelectedText(
+    reader?._internalReader?._state?.selectionPopup?.annotation?.text || "",
+  );
+  if (fromSelectionPopup) return fromSelectionPopup;
+
+  const fromPanelDoc = selectionFrom(panelDoc);
+  if (fromPanelDoc) return fromPanelDoc;
+
+  const iframes = Array.from(panelDoc.querySelectorAll("iframe")) as HTMLIFrameElement[];
+  for (const frame of iframes) {
+    const fromFrame = selectionFrom(frame.contentDocument);
+    if (fromFrame) return fromFrame;
+  }
+
+  const itemId = reader?._item?.id || reader?.itemID;
+  if (typeof itemId === "number") {
+    const readerItem = Zotero.Items.get(itemId) || null;
+    const readerKeys = getItemSelectionCacheKeys(readerItem);
+    for (const key of readerKeys) {
+      const fromCache = recentReaderSelectionCache.get(key) || "";
+      if (fromCache) return fromCache;
+    }
+  }
+
+  const panelKeys = getItemSelectionCacheKeys(currentItem || null);
+  for (const key of panelKeys) {
+    const fromCache = recentReaderSelectionCache.get(key) || "";
+    if (fromCache) return fromCache;
+  }
+  return "";
+}
+
+function applySelectedTextPreview(body: Element, itemId: number) {
+  const previewBox = body.querySelector(
+    "#llm-selected-context",
+  ) as HTMLDivElement | null;
+  const previewText = body.querySelector(
+    "#llm-selected-context-text",
+  ) as HTMLDivElement | null;
+  if (!previewBox || !previewText) return;
+  const selectedText = selectedTextCache.get(itemId) || "";
+  if (!selectedText) {
+    previewBox.style.display = "none";
+    previewText.textContent = "";
+    return;
+  }
+  previewBox.style.display = "flex";
+  previewText.textContent = truncateSelectedText(selectedText);
+}
+
 function escapeNoteHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -1709,12 +1888,16 @@ async function renderShortcuts(body: Element, item?: Zotero.Item | null) {
   };
 
   for (const shortcut of SHORTCUT_FILES) {
-    let promptText = overrides[shortcut.id];
-    if (!promptText) {
-      try {
-        promptText = (await loadShortcutText(shortcut.file)).trim();
-      } catch {
-        promptText = "";
+    const isIncludeSelected = shortcut.id === INCLUDE_SELECTED_TEXT_SHORTCUT_ID;
+    let promptText = "";
+    if (!isIncludeSelected) {
+      promptText = overrides[shortcut.id];
+      if (!promptText) {
+        try {
+          promptText = (await loadShortcutText(shortcut.file)).trim();
+        } catch {
+          promptText = "";
+        }
       }
     }
 
@@ -1731,17 +1914,48 @@ async function renderShortcuts(body: Element, item?: Zotero.Item | null) {
     btn.dataset.prompt = promptText || "";
     btn.dataset.label = labelText;
     btn.dataset.defaultLabel = shortcut.label;
-    btn.disabled = !item || !promptText;
+    btn.disabled = !item || (!promptText && !isIncludeSelected);
+    let pendingSelectedText = "";
+
+    if (isIncludeSelected) {
+      const cacheSelectionBeforeFocusShift = () => {
+        pendingSelectedText = getActiveReaderSelectionText(
+          body.ownerDocument as Document,
+          item,
+        );
+      };
+      btn.addEventListener("pointerdown", cacheSelectionBeforeFocusShift);
+      btn.addEventListener("mousedown", cacheSelectionBeforeFocusShift);
+    }
 
     btn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
+      if (!item) return;
+      if (isIncludeSelected) {
+        const selectedText =
+          pendingSelectedText ||
+          getActiveReaderSelectionText(body.ownerDocument as Document, item);
+        pendingSelectedText = "";
+        const status = body.querySelector("#llm-status") as HTMLElement | null;
+        if (!selectedText) {
+          if (status) setStatus(status, "No text selected in reader", "error");
+          return;
+        }
+        selectedTextCache.set(item.id, selectedText);
+        applySelectedTextPreview(body, item.id);
+        if (status) setStatus(status, "Selected text included", "ready");
+        const inputEl = body.querySelector("#llm-input") as HTMLTextAreaElement | null;
+        inputEl?.focus();
+        return;
+      }
       const nextPrompt = (btn.dataset.prompt || "").trim();
-      if (!item || !nextPrompt) return;
+      if (!nextPrompt) return;
       sendQuestion(body, item, nextPrompt);
     });
 
     btn.addEventListener("contextmenu", (e: Event) => {
+      if (isIncludeSelected) return;
       e.preventDefault();
       e.stopPropagation();
       if (!menu) return;
@@ -1921,6 +2135,9 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
   const imagePreview = body.querySelector(
     "#llm-image-preview",
   ) as HTMLDivElement | null;
+  const selectedContextClear = body.querySelector(
+    "#llm-selected-context-clear",
+  ) as HTMLButtonElement | null;
   const previewImg = body.querySelector(
     "#llm-preview-img",
   ) as HTMLImageElement | null;
@@ -2043,6 +2260,11 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
       screenshotBtn.disabled = false;
       screenshotBtn.textContent = "📷 Select Screenshot";
     }
+  };
+
+  const updateSelectedTextPreview = () => {
+    if (!item) return;
+    applySelectedTextPreview(body, item.id);
   };
 
   const getModelChoices = () => {
@@ -2232,6 +2454,7 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
 
   // Initialize image preview state
   updateImagePreview();
+  updateSelectedTextPreview();
   syncModelFromPrefs();
 
   // Preferences can change outside this panel (e.g., settings window).
@@ -2270,25 +2493,37 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
   const doSend = async () => {
     if (!item) return;
     const text = inputBox.value.trim();
-    if (!text) return;
+    const selectedText = selectedTextCache.get(item.id) || "";
+    if (!text && !selectedText) return;
+    const composedQuestion = selectedText
+      ? buildQuestionWithSelectedText(selectedText, text)
+      : text;
+    const displayQuestion = selectedText
+      ? `[Selected text included]\n${text || "Please explain this selected text."}`
+      : text;
     inputBox.value = "";
     const image = selectedImageCache.get(item.id);
     // Clear the selected image after sending
     selectedImageCache.delete(item.id);
     updateImagePreview();
+    if (selectedText) {
+      selectedTextCache.delete(item.id);
+      updateSelectedTextPreview();
+    }
     const selectedProfile = getSelectedProfile();
     const selectedReasoning = getSelectedReasoning();
     const advancedParams = getAdvancedModelParams(selectedProfile?.key);
     await sendQuestion(
       body,
       item,
-      text,
+      composedQuestion,
       image,
       selectedProfile?.model,
       selectedProfile?.apiBase,
       selectedProfile?.apiKey,
       selectedReasoning,
       advancedParams,
+      displayQuestion,
     );
   };
 
@@ -2646,6 +2881,17 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
     });
   }
 
+  if (selectedContextClear) {
+    selectedContextClear.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!item) return;
+      selectedTextCache.delete(item.id);
+      updateSelectedTextPreview();
+      if (status) setStatus(status, "Selected text removed", "ready");
+    });
+  }
+
   // Cancel button
   if (cancelBtn) {
     cancelBtn.addEventListener("click", (e: Event) => {
@@ -2675,7 +2921,9 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
       if (item) {
         chatHistory.delete(item.id);
         selectedImageCache.delete(item.id);
+        selectedTextCache.delete(item.id);
         updateImagePreview();
+        updateSelectedTextPreview();
         refreshChat(body, item);
         const status = body.querySelector("#llm-status") as HTMLElement | null;
         if (status) setStatus(status, "Cleared", "ready");
@@ -2694,6 +2942,7 @@ async function sendQuestion(
   apiKey?: string,
   reasoning?: LLMReasoningConfig,
   advanced?: AdvancedModelParams,
+  displayQuestion?: string,
 ) {
   const inputBox = body.querySelector(
     "#llm-input",
@@ -2737,7 +2986,10 @@ async function sendQuestion(
     reasoning || getSelectedReasoningForItem(item.id, effectiveModel);
   const effectiveAdvanced =
     advanced || getAdvancedModelParamsForProfile(fallbackProfile.key);
-  const userMessageText = image ? `${question}\n[📷 Image attached]` : question;
+  const shownQuestion = displayQuestion || question;
+  const userMessageText = image
+    ? `${shownQuestion}\n[📷 Image attached]`
+    : shownQuestion;
   history.push({ role: "user", text: userMessageText, timestamp: Date.now() });
   const assistantMessage: Message = {
     role: "assistant",

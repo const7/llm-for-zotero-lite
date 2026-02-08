@@ -3,6 +3,7 @@ import { registerPrefsScripts } from "./modules/preferenceScript";
 import {
   registerReaderContextPanel,
   registerLLMStyles,
+  registerReaderSelectionTracking,
 } from "./modules/contextPanel";
 import { createZToolkit } from "./utils/ztoolkit";
 
@@ -36,6 +37,7 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
 
   registerLLMStyles(win);
   registerReaderContextPanel();
+  registerReaderSelectionTracking();
 }
 
 function registerPrefsPane() {
