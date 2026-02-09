@@ -118,6 +118,11 @@
 }
 
 /* Messages Area */
+.llm-messages,
+.llm-input {
+  resize: vertical;
+}
+
 .llm-messages {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -131,7 +136,7 @@
   gap: 12px;
   height: 50vh;
   min-height: 320px;
-  max-height: 70vh;
+  max-height: 100vh;
   user-select: text;
 }
 
@@ -697,7 +702,6 @@
 
 .llm-input {
   width: 100%;
-  resize: vertical;
   min-height: 90px;
   max-height: 220px;
   font: inherit;
