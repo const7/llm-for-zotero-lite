@@ -831,8 +831,9 @@ export function registerReaderContextPanel() {
       setupHandlers(body, item);
       refreshChat(body, item);
       // Defer PDF extraction so the panel becomes interactive sooner.
-      if (item) {
-        void ensurePDFTextCached(item);
+      const activeContextItem = getActiveContextAttachmentFromTabs();
+      if (activeContextItem) {
+        void ensurePDFTextCached(activeContextItem);
       }
     },
   });
@@ -1200,26 +1201,14 @@ async function cachePDFText(item: Zotero.Item) {
     const mainItem =
       item.isAttachment() && item.parentID
         ? Zotero.Items.get(item.parentID)
-        : item;
+        : null;
 
-    const title = mainItem?.getField("title") || "";
+    const title = mainItem?.getField("title") || item.getField("title") || "";
 
-    let pdfItem: Zotero.Item | null = null;
-    if (
-      item.isAttachment() &&
-      item.attachmentContentType === "application/pdf"
-    ) {
-      pdfItem = item;
-    } else if (mainItem) {
-      const attachments = mainItem.getAttachments();
-      for (const attId of attachments) {
-        const att = Zotero.Items.get(attId);
-        if (att && att.attachmentContentType === "application/pdf") {
-          pdfItem = att;
-          break;
-        }
-      }
-    }
+    const pdfItem =
+      item.isAttachment() && item.attachmentContentType === "application/pdf"
+        ? item
+        : null;
 
     if (pdfItem) {
       try {
@@ -1671,9 +1660,8 @@ function buildQuestionWithSelectedText(
 }
 
 function getActiveReaderForSelectedTab(): any | null {
-  const selectedTabId = (
-    Zotero as unknown as { Tabs?: { selectedID?: string | number } }
-  ).Tabs?.selectedID;
+  const tabs = getZoteroTabsState();
+  const selectedTabId = tabs?.selectedID;
   if (selectedTabId === undefined || selectedTabId === null) return null;
   return (
     (
@@ -1684,8 +1672,182 @@ function getActiveReaderForSelectedTab(): any | null {
   );
 }
 
-function getActiveTabMode(): "reader" | "library" {
-  return getActiveReaderForSelectedTab() ? "reader" : "library";
+function parseItemID(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+type ZoteroTabsState = {
+  selectedID?: string | number;
+  selectedType?: string;
+  _tabs?: Array<{ id?: string | number; type?: string; data?: any }>;
+};
+
+function isTabsState(value: unknown): value is ZoteroTabsState {
+  if (!value || typeof value !== "object") return false;
+  const obj = value as any;
+  return (
+    "selectedID" in obj ||
+    "selectedType" in obj ||
+    Array.isArray(obj._tabs)
+  );
+}
+
+function getZoteroTabsStateWithSource(): {
+  tabs: ZoteroTabsState | null;
+  source: string;
+} {
+  const candidates: Array<{ source: string; value: unknown }> = [];
+  const push = (source: string, value: unknown) => {
+    candidates.push({ source, value });
+  };
+
+  push(
+    "local.Zotero.Tabs",
+    (Zotero as unknown as { Tabs?: ZoteroTabsState }).Tabs,
+  );
+
+  let mainWindow: any = null;
+  try {
+    mainWindow = Zotero.getMainWindow?.() || null;
+  } catch {}
+  if (mainWindow) {
+    push("mainWindow.Zotero.Tabs", mainWindow.Zotero?.Tabs);
+    push("mainWindow.Zotero_Tabs", mainWindow.Zotero_Tabs);
+    push("mainWindow.Tabs", mainWindow.Tabs);
+  }
+
+  let activePaneWindow: any = null;
+  try {
+    activePaneWindow = Zotero.getActiveZoteroPane?.()?.document?.defaultView || null;
+  } catch {}
+  if (activePaneWindow) {
+    push("activePaneWindow.Zotero.Tabs", activePaneWindow.Zotero?.Tabs);
+    push("activePaneWindow.Zotero_Tabs", activePaneWindow.Zotero_Tabs);
+  }
+
+  let anyMainWindow: any = null;
+  try {
+    const windows = Zotero.getMainWindows?.() || [];
+    anyMainWindow = windows[0] || null;
+  } catch {}
+  if (anyMainWindow) {
+    push("mainWindows[0].Zotero.Tabs", anyMainWindow.Zotero?.Tabs);
+    push("mainWindows[0].Zotero_Tabs", anyMainWindow.Zotero_Tabs);
+  }
+
+  try {
+    const wmRecent = (Services as any).wm?.getMostRecentWindow?.(
+      "navigator:browser",
+    ) as any;
+    push("wm:navigator:browser.Zotero.Tabs", wmRecent?.Zotero?.Tabs);
+    push("wm:navigator:browser.Zotero_Tabs", wmRecent?.Zotero_Tabs);
+  } catch {}
+  try {
+    const wmAny = (Services as any).wm?.getMostRecentWindow?.("") as any;
+    push("wm:any.Zotero.Tabs", wmAny?.Zotero?.Tabs);
+    push("wm:any.Zotero_Tabs", wmAny?.Zotero_Tabs);
+  } catch {}
+
+  const globalAny = globalThis as any;
+  push("globalThis.Zotero_Tabs", globalAny.Zotero_Tabs);
+  push("globalThis.window.Zotero_Tabs", globalAny.window?.Zotero_Tabs);
+
+  for (const candidate of candidates) {
+    if (isTabsState(candidate.value)) {
+      return { tabs: candidate.value, source: candidate.source };
+    }
+  }
+  return { tabs: null, source: "none" };
+}
+
+function getZoteroTabsState(): ZoteroTabsState | null {
+  return getZoteroTabsStateWithSource().tabs;
+}
+
+function collectCandidateItemIDsFromObject(source: any): number[] {
+  if (!source || typeof source !== "object") return [];
+  const directCandidates = [
+    source.itemID,
+    source.itemId,
+    source.attachmentID,
+    source.attachmentId,
+    source.readerItemID,
+    source.readerItemId,
+    source.id,
+  ];
+  const nestedObjects = [
+    source.item,
+    source.attachment,
+    source.reader,
+    source.state,
+    source.params,
+    source.extraData,
+  ];
+  const out: number[] = [];
+  const seen = new Set<number>();
+  const pushParsed = (value: unknown) => {
+    const parsed = parseItemID(value);
+    if (parsed === null || seen.has(parsed)) return;
+    seen.add(parsed);
+    out.push(parsed);
+  };
+
+  for (const candidate of directCandidates) {
+    pushParsed(candidate);
+  }
+  for (const nested of nestedObjects) {
+    if (!nested || typeof nested !== "object") continue;
+    pushParsed((nested as any).itemID);
+    pushParsed((nested as any).itemId);
+    pushParsed((nested as any).attachmentID);
+    pushParsed((nested as any).attachmentId);
+    pushParsed((nested as any).id);
+  }
+  return out;
+}
+
+function getActiveContextAttachmentFromTabs(): Zotero.Item | null {
+  const tabs = getZoteroTabsState();
+  if (!tabs) return null;
+  const selectedType = `${tabs.selectedType || ""}`.toLowerCase();
+  if (selectedType && !selectedType.includes("reader")) return null;
+
+  const selectedId =
+    tabs.selectedID === undefined || tabs.selectedID === null
+      ? ""
+      : `${tabs.selectedID}`;
+  if (!selectedId) return null;
+
+  const tabList = Array.isArray(tabs._tabs) ? tabs._tabs : [];
+  const activeTab = tabList.find((tab) => `${tab?.id || ""}` === selectedId);
+  const activeType = `${activeTab?.type || ""}`.toLowerCase();
+  if (!activeTab || (activeType && !activeType.includes("reader"))) return null;
+
+  const data = activeTab.data || {};
+  const candidateIDs = collectCandidateItemIDsFromObject(data);
+  for (const itemId of candidateIDs) {
+    const item = Zotero.Items.get(itemId);
+    if (isSupportedContextAttachment(item)) return item;
+  }
+
+  // Fallback: map selected tab id to reader instance if available.
+  const reader = (
+    Zotero as unknown as {
+      Reader?: { getByTabID?: (id: string | number) => any };
+    }
+  ).Reader?.getByTabID?.(selectedId);
+  const readerItemId = parseItemID(reader?._item?.id ?? reader?.itemID);
+  if (readerItemId !== null) {
+    const readerItem = Zotero.Items.get(readerItemId);
+    if (isSupportedContextAttachment(readerItem)) return readerItem;
+  }
+
+  return null;
 }
 
 function isSupportedContextAttachment(
@@ -1698,20 +1860,6 @@ function isSupportedContextAttachment(
   );
 }
 
-function findFirstSupportedChildAttachment(
-  parentItem: Zotero.Item | null | undefined,
-): Zotero.Item | null {
-  if (!parentItem || parentItem.isAttachment()) return null;
-  const attachments = parentItem.getAttachments();
-  for (const attId of attachments) {
-    const att = Zotero.Items.get(attId);
-    if (isSupportedContextAttachment(att)) {
-      return att;
-    }
-  }
-  return null;
-}
-
 function getContextItemLabel(item: Zotero.Item): string {
   const title = sanitizeText(item.getField("title") || "").trim();
   if (title) return title;
@@ -1719,44 +1867,28 @@ function getContextItemLabel(item: Zotero.Item): string {
 }
 
 function resolveContextSourceItem(panelItem: Zotero.Item): ResolvedContextSource {
-  if (getActiveTabMode() === "reader") {
-    const reader = getActiveReaderForSelectedTab();
-    const readerItemId = reader?._item?.id || reader?.itemID;
-    const readerItem =
-      typeof readerItemId === "number" ? Zotero.Items.get(readerItemId) : null;
-    if (isSupportedContextAttachment(readerItem)) {
-      const label = getContextItemLabel(readerItem);
-      return {
-        contextItem: readerItem,
-        statusText: `Using context: ${label} (active reader)`,
-      };
-    }
+  void panelItem;
+  const activeItem = getActiveContextAttachmentFromTabs();
+  if (activeItem) {
+    const label = getContextItemLabel(activeItem);
     return {
-      contextItem: null,
-      statusText: "No usable file context found",
+      contextItem: activeItem,
+      statusText: `Using context: ${label} (active tab)`,
     };
   }
 
-  if (isSupportedContextAttachment(panelItem)) {
-    const label = getContextItemLabel(panelItem);
-    return {
-      contextItem: panelItem,
-      statusText: `Using context: ${label} (library child selection)`,
-    };
-  }
-
-  const fallbackItem = findFirstSupportedChildAttachment(panelItem);
-  if (fallbackItem) {
-    const label = getContextItemLabel(fallbackItem);
-    return {
-      contextItem: fallbackItem,
-      statusText: `Using context: ${label} (parent fallback)`,
-    };
-  }
-
+  const selectedTab = getZoteroTabsState();
+  const selectedId =
+    selectedTab?.selectedID === undefined || selectedTab?.selectedID === null
+      ? ""
+      : `${selectedTab.selectedID}`;
+  const activeTab = Array.isArray(selectedTab?._tabs)
+    ? selectedTab!._tabs!.find((tab) => `${tab?.id || ""}` === selectedId)
+    : null;
+  const dataKeys = activeTab?.data ? Object.keys(activeTab.data).slice(0, 6) : [];
   return {
     contextItem: null,
-    statusText: "No usable file context found",
+    statusText: `No active tab PDF context (tab=${selectedTab?.selectedID ?? "?"}, type=${selectedTab?.selectedType ?? "?"}, tabType=${activeTab?.type ?? "?"}, dataKeys=${dataKeys.join("|") || "-"})`,
   };
 }
 
