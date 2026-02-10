@@ -654,8 +654,12 @@
 .llm-input-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   flex-shrink: 0;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid var(--stroke-secondary);
+  background: var(--material-background);
 }
 
 .llm-selected-context {
@@ -702,15 +706,15 @@
 
 .llm-input {
   width: 100%;
-  min-height: 90px;
+  min-height: 96px;
   max-height: 220px;
   font: inherit;
   font-size: var(--llm-fs-12);
-  padding: 10px 12px;
+  padding: 12px 14px;
   box-sizing: border-box;
-  border-radius: 10px;
+  border-radius: 14px;
   border: 1px solid var(--stroke-secondary);
-  background: var(--fill-quinary);
+  background: var(--fill-quaternary);
   color: var(--fill-primary);
   transition: border-color 0.15s;
 }
@@ -730,26 +734,44 @@
 
 /* Actions Bar */
 .llm-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: stretch;
-  justify-items: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
-  min-height: 40px;
+  min-height: 42px;
+}
+
+.llm-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.llm-actions-left::-webkit-scrollbar {
+  height: 4px;
+}
+
+.llm-actions-left::-webkit-scrollbar-thumb {
+  background: var(--fill-quaternary);
+  border-radius: 999px;
+}
+
+.llm-actions-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
 }
 
 .llm-actions button {
-  width: 100%;
+  width: auto;
   height: auto;
-  min-height: 40px;
+  min-height: 34px;
   line-height: normal;
-  box-sizing: border-box;
-}
-
-.llm-actions > * {
-  min-width: 0;
-  width: 100%;
-  justify-self: stretch;
   box-sizing: border-box;
 }
 
@@ -757,21 +779,17 @@
   --llm-action-bg: var(--fill-quinary);
   --llm-action-border: var(--stroke-secondary);
   --llm-action-fg: var(--fill-primary);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  width: 100%;
+  width: auto;
   min-width: 0;
-  min-height: 40px;
-  padding: 10px 12px;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  text-overflow: clip;
-  overflow: visible;
+  min-height: 34px;
+  padding: 7px 12px;
+  white-space: nowrap;
   line-height: 1.2;
-  border-radius: 8px;
+  border-radius: 999px;
   border: 1px solid var(--llm-action-border);
   background: var(--llm-action-bg);
   color: var(--llm-action-fg);
@@ -832,6 +850,32 @@
   --llm-action-fg: var(--fill-primary);
 }
 
+.llm-action-btn-active {
+  border-color: var(--color-accent);
+  background: var(--color-accent10);
+}
+
+.llm-send-btn {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.llm-cancel-btn {
+  width: auto;
+  min-width: 82px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: var(--llm-fs-12);
+}
+
 .llm-send-icon {
   font-size: var(--llm-fs-11);
 }
@@ -840,7 +884,6 @@
 .llm-status {
   font-size: var(--llm-fs-11);
   color: var(--fill-tertiary);
-  grid-column: 1 / -1;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -890,6 +933,13 @@
   font-weight: 500;
 }
 
+.llm-model-btn::after,
+.llm-reasoning-btn::after {
+  content: "▾";
+  font-size: var(--llm-fs-10);
+  opacity: 0.8;
+}
+
 .llm-reasoning-btn-unavailable {
   background: var(--fill-quaternary);
   color: var(--fill-tertiary);
@@ -909,20 +959,15 @@
 .llm-action-slot {
   position: relative;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   min-width: 0;
-  width: 100%;
+  width: auto;
+  flex: 0 0 auto;
 }
 
 .llm-action-slot > button {
-  flex: 1 1 0;
+  flex: 0 0 auto;
   min-width: 0;
-}
-
-@media (max-width: 260px) {
-  .llm-actions {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 .llm-model-menu,

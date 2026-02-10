@@ -1109,6 +1109,22 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
 
   // Actions row
   const actionsRow = createElement(doc, "div", "llm-actions");
+  const actionsLeft = createElement(doc, "div", "llm-actions-left");
+  const actionsRight = createElement(doc, "div", "llm-actions-right");
+
+  const selectTextBtn = createElement(
+    doc,
+    "button",
+    "llm-action-btn llm-action-btn-secondary llm-select-text-btn",
+    {
+      id: "llm-select-text",
+      textContent: "+ Text Selection",
+      title: "Include selected reader text",
+      disabled: !hasItem,
+    },
+  );
+  const selectTextSlot = createElement(doc, "div", "llm-action-slot");
+  selectTextSlot.appendChild(selectTextBtn);
 
   // Screenshot button
   const screenshotBtn = createElement(
@@ -1117,7 +1133,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     "llm-action-btn llm-action-btn-secondary llm-screenshot-btn",
     {
       id: "llm-screenshot",
-      textContent: "📷 Select Screenshot",
+      textContent: "Screenshot",
       disabled: !hasItem,
     },
   );
@@ -1161,7 +1177,8 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     "llm-action-btn llm-action-btn-primary llm-send-btn",
     {
       id: "llm-send",
-      textContent: "Send",
+      textContent: "\u2191",
+      title: "Send",
       disabled: !hasItem,
     },
   );
@@ -1183,14 +1200,16 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     textContent: hasItem ? "Ready" : "Select an item or open a PDF",
   });
 
-  actionsRow.append(
+  actionsLeft.append(
+    selectTextSlot,
+    screenshotSlot,
     modelDropdown,
     reasoningDropdown,
-    screenshotSlot,
-    sendSlot,
-    statusLine,
   );
+  actionsRight.append(sendSlot);
+  actionsRow.append(actionsLeft, actionsRight);
   inputSection.appendChild(actionsRow);
+  inputSection.appendChild(statusLine);
   container.appendChild(inputSection);
   body.appendChild(container);
 }
@@ -1693,9 +1712,7 @@ function isTabsState(value: unknown): value is ZoteroTabsState {
   if (!value || typeof value !== "object") return false;
   const obj = value as any;
   return (
-    "selectedID" in obj ||
-    "selectedType" in obj ||
-    Array.isArray(obj._tabs)
+    "selectedID" in obj || "selectedType" in obj || Array.isArray(obj._tabs)
   );
 }
 
@@ -1725,7 +1742,8 @@ function getZoteroTabsStateWithSource(): {
 
   let activePaneWindow: any = null;
   try {
-    activePaneWindow = Zotero.getActiveZoteroPane?.()?.document?.defaultView || null;
+    activePaneWindow =
+      Zotero.getActiveZoteroPane?.()?.document?.defaultView || null;
   } catch {}
   if (activePaneWindow) {
     push("activePaneWindow.Zotero.Tabs", activePaneWindow.Zotero?.Tabs);
@@ -1857,8 +1875,8 @@ function isSupportedContextAttachment(
 ): item is Zotero.Item {
   return Boolean(
     item &&
-      item.isAttachment() &&
-      item.attachmentContentType === "application/pdf",
+    item.isAttachment() &&
+    item.attachmentContentType === "application/pdf",
   );
 }
 
@@ -1868,7 +1886,9 @@ function getContextItemLabel(item: Zotero.Item): string {
   return `Attachment ${item.id}`;
 }
 
-function resolveContextSourceItem(panelItem: Zotero.Item): ResolvedContextSource {
+function resolveContextSourceItem(
+  panelItem: Zotero.Item,
+): ResolvedContextSource {
   void panelItem;
   const activeItem = getActiveContextAttachmentFromTabs();
   if (activeItem) {
@@ -1887,7 +1907,9 @@ function resolveContextSourceItem(panelItem: Zotero.Item): ResolvedContextSource
   const activeTab = Array.isArray(selectedTab?._tabs)
     ? selectedTab!._tabs!.find((tab) => `${tab?.id || ""}` === selectedId)
     : null;
-  const dataKeys = activeTab?.data ? Object.keys(activeTab.data).slice(0, 6) : [];
+  const dataKeys = activeTab?.data
+    ? Object.keys(activeTab.data).slice(0, 6)
+    : [];
   return {
     contextItem: null,
     statusText: `No active tab PDF context (tab=${selectedTab?.selectedID ?? "?"}, type=${selectedTab?.selectedType ?? "?"}, tabType=${activeTab?.type ?? "?"}, dataKeys=${dataKeys.join("|") || "-"})`,
@@ -1990,15 +2012,47 @@ function applySelectedTextPreview(body: Element, itemId: number) {
   const previewText = body.querySelector(
     "#llm-selected-context-text",
   ) as HTMLDivElement | null;
+  const selectTextBtn = body.querySelector(
+    "#llm-select-text",
+  ) as HTMLButtonElement | null;
   if (!previewBox || !previewText) return;
   const selectedText = selectedTextCache.get(itemId) || "";
   if (!selectedText) {
     previewBox.style.display = "none";
     previewText.textContent = "";
+    if (selectTextBtn) {
+      selectTextBtn.classList.remove("llm-action-btn-active");
+    }
     return;
   }
   previewBox.style.display = "flex";
   previewText.textContent = truncateSelectedText(selectedText);
+  if (selectTextBtn) {
+    selectTextBtn.classList.add("llm-action-btn-active");
+  }
+}
+
+function includeSelectedTextFromReader(
+  body: Element,
+  item: Zotero.Item,
+  prefetchedText?: string,
+): boolean {
+  const selectedText =
+    normalizeSelectedText(prefetchedText || "") ||
+    getActiveReaderSelectionText(body.ownerDocument as Document, item);
+  const status = body.querySelector("#llm-status") as HTMLElement | null;
+  if (!selectedText) {
+    if (status) setStatus(status, "No text selected in reader", "error");
+    return false;
+  }
+  selectedTextCache.set(item.id, selectedText);
+  applySelectedTextPreview(body, item.id);
+  if (status) setStatus(status, "Selected text included", "ready");
+  const inputEl = body.querySelector(
+    "#llm-input",
+  ) as HTMLTextAreaElement | null;
+  inputEl?.focus();
+  return true;
 }
 
 function escapeNoteHtml(text: string): string {
@@ -2095,7 +2149,8 @@ function sanitizeHtmlFragmentForNote(
         }
         if (
           (name === "href" || name === "src" || name === "xlink:href") &&
-          (value.startsWith("javascript:") || value.startsWith("data:text/html"))
+          (value.startsWith("javascript:") ||
+            value.startsWith("data:text/html"))
         ) {
           el.removeAttribute(attr.name);
         }
@@ -2246,13 +2301,13 @@ async function copyNotePayloadToClipboard(
     return;
   }
   const html = sanitizeHtmlFragmentForNote(doc, noteHtml || "");
-  const plain = html ? htmlToPlainText(doc, html) : sanitizeText(noteText || "").trim();
+  const plain = html
+    ? htmlToPlainText(doc, html)
+    : sanitizeText(noteText || "").trim();
   const win = doc.defaultView as
     | (Window & {
         navigator?: Navigator;
-        ClipboardItem?: new (
-          items: Record<string, Blob>,
-        ) => ClipboardItem;
+        ClipboardItem?: new (items: Record<string, Blob>) => ClipboardItem;
       })
     | undefined;
 
@@ -2881,22 +2936,9 @@ async function renderShortcuts(body: Element, item?: Zotero.Item | null) {
     const shortcutKind = btn.dataset.shortcutKind || "";
     if (shortcutKind === "special") {
       if (moveMode || !item) return;
-      const selectedText =
-        pendingSelectedText ||
-        getActiveReaderSelectionText(body.ownerDocument as Document, item);
+      const selectedText = pendingSelectedText;
       pendingSelectedText = "";
-      const status = body.querySelector("#llm-status") as HTMLElement | null;
-      if (!selectedText) {
-        if (status) setStatus(status, "No text selected in reader", "error");
-        return;
-      }
-      selectedTextCache.set(item.id, selectedText);
-      applySelectedTextPreview(body, item.id);
-      if (status) setStatus(status, "Selected text included", "ready");
-      const inputEl = body.querySelector(
-        "#llm-input",
-      ) as HTMLTextAreaElement | null;
-      inputEl?.focus();
+      includeSelectedTextFromReader(body, item, selectedText);
       return;
     }
     if (!shortcutId || moveMode || !item) return;
@@ -3356,6 +3398,9 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
     "#llm-reasoning-menu",
   ) as HTMLDivElement | null;
   const clearBtn = body.querySelector("#llm-clear") as HTMLButtonElement | null;
+  const selectTextBtn = body.querySelector(
+    "#llm-select-text",
+  ) as HTMLButtonElement | null;
   const screenshotBtn = body.querySelector(
     "#llm-screenshot",
   ) as HTMLButtonElement | null;
@@ -3482,7 +3527,13 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
 
   // Helper to update image preview UI
   const updateImagePreview = () => {
-    if (!item || !imagePreview || !previewStrip || !previewMeta || !screenshotBtn)
+    if (
+      !item ||
+      !imagePreview ||
+      !previewStrip ||
+      !previewMeta ||
+      !screenshotBtn
+    )
       return;
     const ownerDoc = body.ownerDocument;
     if (!ownerDoc) return;
@@ -3534,14 +3585,14 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
       screenshotBtn.disabled = selectedImages.length >= MAX_SELECTED_IMAGES;
       screenshotBtn.textContent =
         selectedImages.length >= MAX_SELECTED_IMAGES
-          ? `📷 Max ${MAX_SELECTED_IMAGES} screenshots`
-          : `📷 Add Screenshot (${selectedImages.length}/${MAX_SELECTED_IMAGES})`;
+          ? `Max ${MAX_SELECTED_IMAGES} screenshots`
+          : `Screenshot (${selectedImages.length}/${MAX_SELECTED_IMAGES})`;
     } else {
       imagePreview.style.display = "none";
       previewStrip.innerHTML = "";
       previewMeta.textContent = "0 images selected";
       screenshotBtn.disabled = false;
-      screenshotBtn.textContent = "📷 Select Screenshot";
+      screenshotBtn.textContent = "Screenshot";
     }
   };
 
@@ -3940,6 +3991,30 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
     (
       panelDoc as unknown as { __llmFontScaleShortcut?: boolean }
     ).__llmFontScaleShortcut = true;
+  }
+
+  if (selectTextBtn) {
+    let pendingSelectedText = "";
+    const cacheSelectionBeforeFocusShift = () => {
+      if (!item) return;
+      pendingSelectedText = getActiveReaderSelectionText(
+        body.ownerDocument as Document,
+        item,
+      );
+    };
+    selectTextBtn.addEventListener(
+      "pointerdown",
+      cacheSelectionBeforeFocusShift,
+    );
+    selectTextBtn.addEventListener("mousedown", cacheSelectionBeforeFocusShift);
+    selectTextBtn.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!item) return;
+      const selectedText = pendingSelectedText;
+      pendingSelectedText = "";
+      includeSelectedTextFromReader(body, item, selectedText);
+    });
   }
 
   // Screenshot button
