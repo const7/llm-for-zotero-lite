@@ -739,12 +739,15 @@
   --llm-action-pill-padding: 0 14px;
   --llm-action-icon-font-size: var(--llm-fs-16);
   --llm-action-font-size: var(--llm-fs-11);
+  --llm-action-dropdown-icon-width: 56px;
+  --llm-action-dropdown-icon-left-padding: 9px;
+  --llm-action-dropdown-icon-right-padding: 23px;
   --llm-action-dropdown-slot-width: calc(1.2em + 12px);
   --llm-action-dropdown-icon-right: 6px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 2px;
   min-height: var(--llm-action-height);
   min-width: 0;
   width: 100%;
@@ -763,7 +766,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 4px;
   flex: 0 0 auto;
   min-width: 0;
 }
@@ -788,14 +791,14 @@
 
 .llm-action-slot.llm-model-dropdown.llm-model-dropdown-collapsed {
   flex: 0 0 auto;
-  min-width: 52px;
-  max-width: 52px;
+  min-width: var(--llm-action-dropdown-icon-width);
+  max-width: var(--llm-action-dropdown-icon-width);
 }
 
 .llm-action-slot.llm-reasoning-dropdown.llm-reasoning-dropdown-collapsed {
   flex: 0 0 auto;
-  min-width: 52px;
-  max-width: 52px;
+  min-width: var(--llm-action-dropdown-icon-width);
+  max-width: var(--llm-action-dropdown-icon-width);
 }
 
 .llm-actions button {
@@ -1017,16 +1020,19 @@
 }
 
 .llm-action-slot.llm-model-dropdown > .llm-model-btn.llm-model-btn-collapsed {
-  width: 52px;
-  min-width: 52px;
-  max-width: 52px;
-  padding: 0 22px 0 8px;
+  width: var(--llm-action-dropdown-icon-width);
+  min-width: var(--llm-action-dropdown-icon-width);
+  max-width: var(--llm-action-dropdown-icon-width);
+  padding: 0 var(--llm-action-dropdown-icon-right-padding) 0
+    var(--llm-action-dropdown-icon-left-padding);
   justify-content: flex-start;
   align-items: center;
   text-align: center;
   white-space: nowrap;
   line-height: 1;
   max-height: none;
+  overflow: hidden;
+  text-overflow: clip;
   font-family:
     "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
   font-size: var(--llm-action-icon-font-size);
@@ -1034,16 +1040,19 @@
 
 .llm-action-slot.llm-reasoning-dropdown
   > .llm-reasoning-btn.llm-reasoning-btn-collapsed {
-  width: 52px;
-  min-width: 52px;
-  max-width: 52px;
-  padding: 0 22px 0 8px;
+  width: var(--llm-action-dropdown-icon-width);
+  min-width: var(--llm-action-dropdown-icon-width);
+  max-width: var(--llm-action-dropdown-icon-width);
+  padding: 0 var(--llm-action-dropdown-icon-right-padding) 0
+    var(--llm-action-dropdown-icon-left-padding);
   justify-content: flex-start;
   align-items: center;
   text-align: center;
   white-space: nowrap;
   line-height: 1;
   max-height: none;
+  overflow: hidden;
+  text-overflow: clip;
   font-family:
     "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
   font-size: var(--llm-action-icon-font-size);

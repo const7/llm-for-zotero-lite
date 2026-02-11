@@ -56,10 +56,10 @@ const SELECT_TEXT_COMPACT_LABEL = "✍🏻";
 const SCREENSHOT_EXPANDED_LABEL = "Screenshots";
 const SCREENSHOT_COMPACT_LABEL = "📷";
 const REASONING_COMPACT_LABEL = "💭";
-const ACTION_LAYOUT_FULL_MODE_BUFFER_PX = 8;
+const ACTION_LAYOUT_FULL_MODE_BUFFER_PX = 0;
 const ACTION_LAYOUT_PARTIAL_MODE_BUFFER_PX = 0;
 const ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX = 36;
-const ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX = 52;
+const ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX = 56;
 const ACTION_LAYOUT_MODEL_WRAP_MIN_CHARS = 12;
 const ACTION_LAYOUT_MODEL_FULL_MAX_LINES = 2;
 const CUSTOM_SHORTCUT_ID_PREFIX = "custom-shortcut";
@@ -3819,6 +3819,13 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
       contextButtonMode: ContextButtonMode,
       modelWrapMode: ModelWrapMode,
     ) => {
+      const getRenderedWidthPx = (
+        element: HTMLElement | null,
+        fallback: number,
+      ) => {
+        const width = element?.getBoundingClientRect?.().width || 0;
+        return width > 0 ? Math.ceil(width) : fallback;
+      };
       const selectTextSlot = selectTextBtn?.parentElement as HTMLElement | null;
       const screenshotSlot = screenshotBtn?.parentElement as HTMLElement | null;
       const leftSlotWidths = [
@@ -3829,7 +3836,10 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
               SELECT_TEXT_EXPANDED_LABEL,
             )
           : selectTextBtn
-            ? ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX
+            ? getRenderedWidthPx(
+                selectTextBtn,
+                ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX,
+              )
             : 0,
         contextButtonMode === "full"
           ? getFullSlotRequiredWidth(
@@ -3838,7 +3848,10 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
               SCREENSHOT_EXPANDED_LABEL,
             )
           : screenshotBtn
-            ? ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX
+            ? getRenderedWidthPx(
+                screenshotBtn,
+                ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX,
+              )
             : 0,
         dropdownMode === "full"
           ? getFullSlotRequiredWidth(
@@ -3850,7 +3863,7 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
                 : 1,
             )
           : modelBtn
-            ? ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX
+            ? getRenderedWidthPx(modelBtn, ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX)
             : 0,
         dropdownMode === "full"
           ? getFullSlotRequiredWidth(
@@ -3859,7 +3872,10 @@ function setupHandlers(body: Element, item?: Zotero.Item | null) {
               reasoningLabel,
             )
           : reasoningBtn
-            ? ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX
+            ? getRenderedWidthPx(
+                reasoningBtn,
+                ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX,
+              )
             : 0,
       ].filter((width) => width > 0);
       const leftGap = getElementGapPx(actionsLeft);
