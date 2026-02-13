@@ -36,13 +36,19 @@ It is always the first question that comes to mind when you open a new paper. Wi
 
 ![image](./assets/text.gif)
 
-If you come across a complex paragraph or a technical term that you don't understand, simply select the text and ask the model to explain it. At the moment you open this paper and start your chat with the model, the full context of this paper is already loaded into the model, so the selected text is an additional layer of context that helps the model to provide a more accurate and detailed explanation. This feature is especially useful when you are reading a paper outside of your expertise, or when you want to quickly grasp the key points without getting lost in the details.
+If you come across a complex paragraph or a technical term that you don't understand, simply select the text and ask the model to explain it. 
+
+In the plugin, you can enable the pop-up option to conveniently add text to the chat. 
+
+**If you don't like it, that's totally fine. You can always disable it in the settings! I really think it is important to give you the choice.**
+
+When you start your chat with the model, the full context of this paper is already loaded into the model, so the selected text is an additional layer of context that helps the model to provide a more accurate and detailed explanation. This feature is especially useful when you are reading a paper outside of your expertise, or when you want to quickly grasp the key points without getting lost in the details.
 
 ### 3. "What does this figure mean?"
 
 ![image](./assets/screenshot.gif)
 
-In our research, understanding the figures equivalent to understanding the paper. With this plugin, you can take a screenshot of any figure in the paper and ask the model to interpret it for you. The model will analyze the visual information in the figure and provide you with a detailed explanation of what it represents, how it relates to the text, and what insights you can draw from it.
+In our research, understanding the figures equivalent to understanding the paper. With this plugin, you can take a screenshot of any figure in the paper and ask the model to interpret it for you. It will support up to 5 screenshots at a time.
 
 ### 4. "This answer is nice, I want to save it into my note"
 
@@ -55,6 +61,8 @@ This plugin supports seamless integration with your note-taking workflow. You ca
 ![image](./assets/save_chat.gif)
 
 The local conversation history is automatically saved and associated with the paper you are reading. You can also export the whole conversation into your note with markdown format. I spent a plenty amount effort to make sure the mathematical equations rendering is correct in the exported markdown, so complex knowledge will be presented in the most clear way in your note.
+
+**The export to note function also supports saving the selected text and screenshots into your note with markdown format. So, you never lose context.**
 
 ### 6. "Do you remember my preference?"
 
