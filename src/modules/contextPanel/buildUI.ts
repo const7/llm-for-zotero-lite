@@ -268,10 +268,15 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       id: "llm-image-preview-selected",
     },
   );
-  const previewLargeImg = createElement(doc, "img", "llm-image-preview-selected-img", {
-    id: "llm-image-preview-selected-img",
-    alt: "Selected screenshot preview",
-  }) as HTMLImageElement;
+  const previewLargeImg = createElement(
+    doc,
+    "img",
+    "llm-image-preview-selected-img",
+    {
+      id: "llm-image-preview-selected-img",
+      alt: "Selected screenshot preview",
+    },
+  ) as HTMLImageElement;
   previewLargeWrap.appendChild(previewLargeImg);
 
   const removeImgBtn = createElement(doc, "button", "llm-remove-img-btn", {

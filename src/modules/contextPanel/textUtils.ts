@@ -58,8 +58,9 @@ export function isLikelyCorruptedSelectedText(text: string): boolean {
 
   // Heuristic: math-heavy English text unexpectedly mixed with a small amount
   // of CJK/Hangul often indicates corrupted glyph extraction in PDFs.
-  const hasMathLikeContext =
-    /[=+\-*/^_(){}\\]|[∑∏√∞≤≥≈≠±→↔]|[α-ωΑ-Ωµμ]/u.test(sample);
+  const hasMathLikeContext = /[=+\-*/^_(){}\\]|[∑∏√∞≤≥≈≠±→↔]|[α-ωΑ-Ωµμ]/u.test(
+    sample,
+  );
   const latinCount = (sample.match(/[A-Za-z]/g) || []).length;
   const cjkLikeMatches =
     sample.match(

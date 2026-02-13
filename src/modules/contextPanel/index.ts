@@ -155,14 +155,14 @@ export function registerReaderSelectionTracking() {
           const panelBody = panelRoot.parentElement || panelRoot;
           applySelectedTextPreview(panelBody, panelItemId);
 
-          const status = panelBody.querySelector("#llm-status") as
-            | HTMLElement
-            | null;
+          const status = panelBody.querySelector(
+            "#llm-status",
+          ) as HTMLElement | null;
           if (status) setStatus(status, "Selected text included", "ready");
 
-          const inputEl = panelBody.querySelector("#llm-input") as
-            | HTMLTextAreaElement
-            | null;
+          const inputEl = panelBody.querySelector(
+            "#llm-input",
+          ) as HTMLTextAreaElement | null;
           inputEl?.focus();
         } catch (err) {
           ztoolkit.log("LLM: Add Text popup action failed", err);

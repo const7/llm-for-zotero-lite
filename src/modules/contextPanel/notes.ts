@@ -67,9 +67,21 @@ function normalizeScreenshotImagesForNote(images: unknown): string[] {
   return out;
 }
 
+function formatScreenshotEmbeddedLabel(count: number): string {
+  return `Screenshots (${count}/${MAX_SELECTED_IMAGES}) are embedded below`;
+}
+
+function formatSelectedTextQuoteMarkdown(selectedText: string): string {
+  const quoted = selectedText
+    .split(/\r?\n/)
+    .map((line) => `> ${line}`)
+    .join("\n");
+  return `Selected text:\n${quoted}`;
+}
+
 function buildScreenshotImagesHtmlForNote(images: string[]): string {
   if (!images.length) return "";
-  const label = `Screenshots (${images.length}/${MAX_SELECTED_IMAGES}) are embedded below`;
+  const label = formatScreenshotEmbeddedLabel(images.length);
   const blocks = images
     .map((src, index) => {
       const alt = `Screenshot ${index + 1}`;
@@ -100,13 +112,11 @@ export function buildChatHistoryNotePayload(messages: Message[]): {
       const userBlocks: string[] = [];
       const userHtmlBlocks: string[] = [];
       if (selectedText) {
-        userBlocks.push(`Selected text:\n${selectedText}`);
-        userHtmlBlocks.push(`Selected text:\n${selectedText}`);
+        userBlocks.push(formatSelectedTextQuoteMarkdown(selectedText));
+        userHtmlBlocks.push(formatSelectedTextQuoteMarkdown(selectedText));
       }
       if (screenshotCount) {
-        userBlocks.push(
-          `Screenshots (${screenshotCount}/${MAX_SELECTED_IMAGES}) are embedded below`,
-        );
+        userBlocks.push(formatScreenshotEmbeddedLabel(screenshotCount));
       }
       if (text) {
         userBlocks.push(text);
