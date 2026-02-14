@@ -1,4 +1,4 @@
-pref-title = zotero-llm
+pref-title = llm-for-zotero
 pref-api-base = API 基础 URL
 pref-api-key = 密钥 / API Key
 pref-model = 模型名称

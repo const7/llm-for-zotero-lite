@@ -1,24 +1,24 @@
 {
-  "name": "zotero-llm",
+  "name": "llm-for-zotero",
   "type": "module",
   "version": "3.5.9",
-  "description": "Zotero LLM assistant in the reader side panel",
+  "description": "LLM assistant for Zotero in the reader side panel",
   "config": {
-    "addonName": "zotero-llm",
+    "addonName": "llm-for-zotero",
     "addonID": "zotero-llm@github.com.yilewang",
-    "addonRef": "zoterollm",
-    "addonInstance": "ZoteroLLM",
-    "prefsPrefix": "extensions.zotero.zoterollm"
+    "addonRef": "llmforzotero",
+    "addonInstance": "LLMForZotero",
+    "prefsPrefix": "extensions.zotero.llmforzotero"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yilewang/zotero-llm.git"
+    "url": "git+https://github.com/yilewang/llm-for-zotero.git"
   },
   "author": "Yile Wang",
   "bugs": {
-    "url": "https://github.com/yilewang/zotero-llm/issues"
+    "url": "https://github.com/yilewang/llm-for-zotero/issues"
   },
-  "homepage": "https://github.com/yilewang/zotero-llm#readme",
+  "homepage": "https://github.com/yilewang/llm-for-zotero#readme",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",

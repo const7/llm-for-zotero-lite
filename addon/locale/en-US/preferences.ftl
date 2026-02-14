@@ -1,4 +1,4 @@
-pref-title = zotero-llm
+pref-title = llm-for-zotero
 pref-api-base = API Base URL
 pref-api-key = Secret / API Key
 pref-model = Model Name

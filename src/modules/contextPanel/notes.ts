@@ -37,7 +37,7 @@ export function buildAssistantNoteHtml(
     ztoolkit.log("Note markdown render error:", err);
     responseHtml = escapeNoteHtml(response).replace(/\n/g, "<br/>");
   }
-  return `<p><strong>${escapeNoteHtml(timestamp)}</strong></p><p><strong>${escapeNoteHtml(source)}:</strong></p><div>${responseHtml}</div><hr/><p>Written by Zotero-LLM</p>`;
+  return `<p><strong>${escapeNoteHtml(timestamp)}</strong></p><p><strong>${escapeNoteHtml(source)}:</strong></p><div>${responseHtml}</div><hr/><p>Written by llm-for-zotero</p>`;
 }
 
 export function renderChatMessageHtmlForNote(text: string): string {
@@ -147,7 +147,7 @@ export function buildChatHistoryNotePayload(messages: Message[]): {
   const bodyHtml = htmlBlocks.join("<hr/>");
   return {
     noteText,
-    noteHtml: `<p><strong>Chat history saved at ${escapeNoteHtml(timestamp)}</strong></p><div>${bodyHtml}</div><hr/><p>Written by Zotero-LLM</p>`,
+    noteHtml: `<p><strong>Chat history saved at ${escapeNoteHtml(timestamp)}</strong></p><div>${bodyHtml}</div><hr/><p>Written by llm-for-zotero</p>`,
   };
 }
 

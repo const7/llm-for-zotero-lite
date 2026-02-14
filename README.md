@@ -1,4 +1,4 @@
-# Zotero-LLM: Your Right-Hand Side AI Research Assistant
+# llm-for-zotero: Your Right-Hand Side AI Research Assistant
 
 [![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![zotero target version](https://img.shields.io/badge/Zotero-8-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
@@ -6,11 +6,11 @@
 
 ![image](./assets/_neuron.png)
 
-## 🚀 Zotero-LLM v3.5.7 Release
+## 🚀 llm-for-zotero v3.5.7 Release
 
-Please see the latest [release notes](https://github.com/yilewang/zotero-llm/releases) for details. The UI has been redesigned (again😂) to be more intuitive and elegant. Optimized the codebase.
+Please see the latest [release notes](https://github.com/yilewang/llm-for-zotero/releases) for details. The UI has been redesigned (again😂) to be more intuitive and elegant. Optimized the codebase.
 
-## 🗓️ Zotero-LLM v3.0 Release
+## 🗓️ llm-for-zotero v3.0 Release
 
 This plugin now supports mainstream reasoning models, including `gpt-5.x` series from OpenAI, `gemini-3-pro-preview`, `gemini-2.5-flash` from Google, `deepseek-chat` and `deepseek-reasoner` from Deepseek, and `kimi-k2.5` series from Moonshot. You can easily connect to these models with your own API key and freely choose the reasoning level that fits your needs.
 
@@ -18,7 +18,7 @@ UI has been redesigned to be more intuitive and elegant. You can also customize 
 
 ## Introduction
 
-**Zotero-LLM** is a powerful plugin for [Zotero](https://www.zotero.org/) that integrates Large Language Models (LLMs) directly into the Zotero PDF reader. Unlike other tools that require you to upload your pdfs to a portal, this plugin is designed to conveniently access LLMs without the need to leave Zotero. It quietly sits in the panel of the Zotero reader, like your standby research assistant, ready to help you with any questions you have when reading a paper.
+**llm-for-zotero** is a powerful plugin for [Zotero](https://www.zotero.org/) that integrates Large Language Models (LLMs) directly into the Zotero PDF reader. Unlike other tools that require you to upload your pdfs to a portal, this plugin is designed to conveniently access LLMs without the need to leave Zotero. It quietly sits in the panel of the Zotero reader, like your standby research assistant, ready to help you with any questions you have when reading a paper.
 
 <!-- ![image](./assets/demo_video1.gif) -->
 
@@ -90,11 +90,17 @@ If you are a pro player, you can also change some hyperparameters of the model, 
 ![image](./assets/auto_update.gif)
 The plugin will automatically check for updates when you open Zotero. If I release an update, you will be able to update the plugin with just one click, without having to go through the installation process again. This way, you can always enjoy the latest features and improvements without any hassle.
 
+### Migration note for existing users
+
+The public plugin name is now `llm-for-zotero`.
+To keep auto-update seamless for existing installs, the internal add-on ID remains unchanged from earlier releases.
+User settings and local chat history are migrated automatically on startup.
+
 ### Installation
 
 #### Step 1: Download the latest `.xpi` release
 
-Download the latest `.xpi` release from the [Releases Page](https://github.com/yilewang/zotero-llm/releases).
+Download the latest `.xpi` release from the [Releases Page](https://github.com/yilewang/llm-for-zotero/releases).
 
 Open `Zotero` and go to `Tools -> Add-ons`.
 
@@ -108,7 +114,7 @@ Select the `.xpi` file and restart `Zotero` to complete the installation.
 
 ### Configuration
 
-Open `Preferences` and navigate to the `Zotero-LLM` tab.
+Open `Preferences` and navigate to the `llm-for-zotero` tab.
 
 Select your Provider (e.g., OpenAI, Gemini, Deepseek).
 

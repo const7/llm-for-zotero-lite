@@ -9,7 +9,60 @@ export type StoredChatMessage = {
   reasoningDetails?: string;
 };
 
-const CHAT_MESSAGES_TABLE = "zoterollm_chat_messages";
+const CHAT_MESSAGES_TABLE = "llm_for_zotero_chat_messages";
+const CHAT_MESSAGES_INDEX = "llm_for_zotero_chat_messages_conversation_idx";
+const LEGACY_CHAT_MESSAGES_TABLE = "zoterollm_chat_messages";
+const LEGACY_CHAT_MESSAGES_INDEX = "zoterollm_chat_messages_conversation_idx";
+
+async function tableExists(tableName: string): Promise<boolean> {
+  const rows = (await Zotero.DB.queryAsync(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+    [tableName],
+  )) as Array<{ name?: unknown }> | undefined;
+  return Boolean(rows?.length);
+}
+
+async function countRows(tableName: string): Promise<number> {
+  const rows = (await Zotero.DB.queryAsync(
+    `SELECT COUNT(*) AS count FROM ${tableName}`,
+  )) as Array<{ count?: unknown }> | undefined;
+  const count = Number(rows?.[0]?.count);
+  return Number.isFinite(count) ? count : 0;
+}
+
+async function migrateLegacyChatStore(): Promise<void> {
+  const hasLegacyTable = await tableExists(LEGACY_CHAT_MESSAGES_TABLE);
+  if (!hasLegacyTable) return;
+
+  const hasCurrentTable = await tableExists(CHAT_MESSAGES_TABLE);
+  if (!hasCurrentTable) {
+    await Zotero.DB.queryAsync(
+      `ALTER TABLE ${LEGACY_CHAT_MESSAGES_TABLE}
+       RENAME TO ${CHAT_MESSAGES_TABLE}`,
+    );
+  } else {
+    const currentRows = await countRows(CHAT_MESSAGES_TABLE);
+    if (currentRows === 0) {
+      await Zotero.DB.queryAsync(
+        `INSERT INTO ${CHAT_MESSAGES_TABLE}
+          (conversation_key, role, text, timestamp, selected_text, screenshot_images, model_name, reasoning_summary, reasoning_details)
+         SELECT
+           conversation_key,
+           role,
+           text,
+           timestamp,
+           selected_text,
+           screenshot_images,
+           model_name,
+           reasoning_summary,
+           reasoning_details
+         FROM ${LEGACY_CHAT_MESSAGES_TABLE}`,
+      );
+    }
+  }
+
+  await Zotero.DB.queryAsync(`DROP INDEX IF EXISTS ${LEGACY_CHAT_MESSAGES_INDEX}`);
+}
 
 function normalizeConversationKey(conversationKey: number): number | null {
   if (!Number.isFinite(conversationKey)) return null;
@@ -24,6 +77,8 @@ function normalizeLimit(limit: number, fallback: number): number {
 
 export async function initChatStore(): Promise<void> {
   await Zotero.DB.executeTransaction(async () => {
+    await migrateLegacyChatStore();
+
     await Zotero.DB.queryAsync(
       `CREATE TABLE IF NOT EXISTS ${CHAT_MESSAGES_TABLE} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,7 +126,7 @@ export async function initChatStore(): Promise<void> {
     }
 
     await Zotero.DB.queryAsync(
-      `CREATE INDEX IF NOT EXISTS zoterollm_chat_messages_conversation_idx
+      `CREATE INDEX IF NOT EXISTS ${CHAT_MESSAGES_INDEX}
        ON ${CHAT_MESSAGES_TABLE} (conversation_key, timestamp, id)`,
     );
   });

@@ -6,6 +6,7 @@ import {
   registerReaderSelectionTracking,
 } from "./modules/contextPanel";
 import { initChatStore } from "./utils/chatStore";
+import { runLegacyMigrations } from "./utils/migrations";
 import { createZToolkit } from "./utils/ztoolkit";
 
 async function onStartup() {
@@ -14,6 +15,12 @@ async function onStartup() {
     Zotero.unlockPromise,
     Zotero.uiReadyPromise,
   ]);
+
+  try {
+    await runLegacyMigrations();
+  } catch (err) {
+    ztoolkit.log("LLM: Failed to run legacy migration", err);
+  }
 
   initLocale();
 
@@ -51,7 +58,7 @@ function registerPrefsPane() {
   Zotero.PreferencePanes.register({
     pluginID: addon.data.config.addonID,
     src: `chrome://${addon.data.config.addonRef}/content/preferences.xhtml`,
-    label: "zotero-llm",
+    label: "llm-for-zotero",
     image: `chrome://${addon.data.config.addonRef}/content/icons/icon-20.png`,
   });
 }
