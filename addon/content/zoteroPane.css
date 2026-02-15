@@ -16,6 +16,7 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  overflow-anchor: none;
   position: relative;
   padding: 5px;
   box-sizing: border-box;
@@ -133,6 +134,7 @@
   flex: 1 1 auto;
   overflow-y: auto;
   overflow-x: hidden;
+  overflow-anchor: none;
   border: none;
   border-radius: 0;
   padding: 12px;

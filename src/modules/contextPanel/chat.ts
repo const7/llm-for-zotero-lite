@@ -107,6 +107,61 @@ const followBottomStabilizers = new Map<
   { rafId: number | null; timeoutId: number | null }
 >();
 
+/**
+ * Guard flag: when `true` the scroll-event handler in setupHandlers must
+ * skip snapshot persistence.  This prevents both our own programmatic
+ * scrollTop writes AND layout-induced scroll changes (caused by DOM
+ * mutations that resize the chat flex container) from corrupting the
+ * saved scroll position.
+ */
+let _scrollUpdatesSuspended = false;
+export function isScrollUpdateSuspended(): boolean {
+  return _scrollUpdatesSuspended;
+}
+
+/**
+ * Run `fn` (which may mutate the DOM / change layout) while protecting
+ * the chatBox scroll position.  The current scroll state is saved before
+ * `fn` runs, the scroll-event handler is suppressed during `fn`, and
+ * the saved state is restored afterwards.
+ *
+ * This is the primary tool for preventing layout mutations (button label
+ * changes, responsive relayout, etc.) from corrupting scroll position.
+ */
+export function withScrollGuard(
+  chatBox: HTMLDivElement | null,
+  conversationKey: number | null,
+  fn: () => void,
+): void {
+  if (!chatBox || conversationKey === null) {
+    fn();
+    return;
+  }
+  // Capture current state before mutations.
+  const wasNearBottom = isNearBottom(chatBox);
+  const savedScrollTop = chatBox.scrollTop;
+
+  _scrollUpdatesSuspended = true;
+  try {
+    fn();
+  } finally {
+    // Restore: if the user was at the bottom, stick there;
+    // otherwise restore the exact pixel offset.
+    if (wasNearBottom) {
+      chatBox.scrollTop = chatBox.scrollHeight;
+    } else {
+      chatBox.scrollTop = savedScrollTop;
+    }
+    // Persist the (restored) position.
+    persistChatScrollSnapshotByKey(conversationKey, chatBox);
+    // Keep the guard up through the microtask so that any synchronous
+    // scroll events dispatched by the above writes are also suppressed.
+    Promise.resolve().then(() => {
+      _scrollUpdatesSuspended = false;
+    });
+  }
+}
+
 function getMaxScrollTop(chatBox: HTMLDivElement): number {
   return Math.max(0, chatBox.scrollHeight - chatBox.clientHeight);
 }
@@ -150,11 +205,18 @@ function applyChatScrollSnapshot(
   chatBox: HTMLDivElement,
   snapshot: ChatScrollSnapshot,
 ): void {
+  _scrollUpdatesSuspended = true;
   if (snapshot.mode === "followBottom") {
     chatBox.scrollTop = chatBox.scrollHeight;
-    return;
+  } else {
+    chatBox.scrollTop = clampScrollTop(chatBox, snapshot.scrollTop);
   }
-  chatBox.scrollTop = clampScrollTop(chatBox, snapshot.scrollTop);
+  // Clear the guard asynchronously so any synchronously-dispatched scroll
+  // events from the above write are suppressed, while future user-initiated
+  // scroll events are still tracked.
+  Promise.resolve().then(() => {
+    _scrollUpdatesSuspended = false;
+  });
 }
 
 function scheduleFollowBottomStabilization(
@@ -183,8 +245,12 @@ function scheduleFollowBottomStabilization(
     const snapshot = chatScrollSnapshots.get(conversationKey);
     if (!snapshot || snapshot.mode !== "followBottom") return;
     if (!chatBox.isConnected) return;
+    _scrollUpdatesSuspended = true;
     chatBox.scrollTop = chatBox.scrollHeight;
     persistChatScrollSnapshotByKey(conversationKey, chatBox);
+    Promise.resolve().then(() => {
+      _scrollUpdatesSuspended = false;
+    });
   };
 
   const handle = {
@@ -689,7 +755,7 @@ export async function sendQuestion(
     if (cancelledRequestId < thisRequestId) {
       if (inputBox) {
         inputBox.disabled = false;
-        inputBox.focus();
+        inputBox.focus({ preventScroll: true });
       }
       if (sendBtn) {
         sendBtn.style.display = "";

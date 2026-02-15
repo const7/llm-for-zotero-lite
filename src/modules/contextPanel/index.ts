@@ -168,7 +168,7 @@ export function registerReaderSelectionTracking() {
           const inputEl = panelBody.querySelector(
             "#llm-input",
           ) as HTMLTextAreaElement | null;
-          inputEl?.focus();
+          inputEl?.focus({ preventScroll: true });
         } catch (err) {
           ztoolkit.log("LLM: Add Text popup action failed", err);
         }

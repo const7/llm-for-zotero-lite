@@ -448,6 +448,6 @@ export function includeSelectedTextFromReader(
   const inputEl = body.querySelector(
     "#llm-input",
   ) as HTMLTextAreaElement | null;
-  inputEl?.focus();
+  inputEl?.focus({ preventScroll: true });
   return true;
 }

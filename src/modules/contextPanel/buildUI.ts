@@ -30,6 +30,12 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   const doc = body.ownerDocument!;
   const hasItem = Boolean(item);
 
+  // Disable CSS scroll anchoring on the Zotero-provided panel body so that
+  // Gecko doesn't fight with our programmatic scroll management.
+  if (body instanceof (doc.defaultView?.HTMLElement || HTMLElement)) {
+    (body as HTMLElement).style.overflowAnchor = "none";
+  }
+
   // Main container
   const container = createElement(doc, "div", "llm-panel", { id: "llm-main" });
   container.dataset.itemId = hasItem && item ? `${item.id}` : "";

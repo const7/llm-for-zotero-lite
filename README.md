@@ -6,15 +6,9 @@
 
 ![image](./assets/_neuron.png)
 
-## 🚀 llm-for-zotero v3.5.7 Release
+## 🚀 Zotero-LLM now renamed to LLM-for-Zotero
 
-Please see the latest [release notes](https://github.com/yilewang/llm-for-zotero/releases) for details. The UI has been redesigned (again😂) to be more intuitive and elegant. Optimized the codebase.
-
-## 🗓️ llm-for-zotero v3.0 Release
-
-This plugin now supports mainstream reasoning models, including `gpt-5.x` series from OpenAI, `gemini-3-pro-preview`, `gemini-2.5-flash` from Google, `deepseek-chat` and `deepseek-reasoner` from Deepseek, and `kimi-k2.5` series from Moonshot. You can easily connect to these models with your own API key and freely choose the reasoning level that fits your needs.
-
-UI has been redesigned to be more intuitive and elegant. You can also customize the quick-action presets to fit your specific research needs.
+Please see the latest [release notes](https://github.com/yilewang/llm-for-zotero/releases). The plugin name is now changed to `llm-for-zotero`. 
 
 ## Introduction
 

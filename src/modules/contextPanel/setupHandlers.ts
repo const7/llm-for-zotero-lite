@@ -57,10 +57,11 @@ import {
 import {
   sendQuestion,
   refreshChat,
-  applyChatScrollPolicy,
   getConversationKey,
   ensureConversationLoaded,
   persistChatScrollSnapshot,
+  isScrollUpdateSuspended,
+  withScrollGuard,
   copyTextToClipboard,
   copyRenderedMarkdownToClipboard,
   detectReasoningProvider,
@@ -195,6 +196,9 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
   panelRoot.tabIndex = 0;
   applyPanelFontScale(panelRoot);
 
+  // Compute conversation key early so all closures can reference it.
+  const conversationKey = item ? getConversationKey(item) : null;
+
   const persistCurrentChatScrollSnapshot = () => {
     if (!item || !chatBox || !chatBox.childElementCount) return;
     persistChatScrollSnapshot(item, chatBox);
@@ -203,6 +207,10 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
   if (item && chatBox) {
     const persistScroll = () => {
       if (!chatBox.childElementCount) return;
+      // Skip persistence when scroll was caused by our own programmatic
+      // scrollTop writes or by layout mutations (e.g. button relayout
+      // changing the flex-sized chat area).
+      if (isScrollUpdateSuspended()) return;
       persistChatScrollSnapshot(item, chatBox);
     };
     chatBox.addEventListener("scroll", persistScroll, { passive: true });
@@ -211,7 +219,12 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
   // Capture scroll before click/focus interactions that may trigger a panel
   // re-render, so restore uses the most recent user position.
   body.addEventListener("pointerdown", persistCurrentChatScrollSnapshot, true);
-  body.addEventListener("focusin", persistCurrentChatScrollSnapshot, true);
+  // NOTE: We intentionally do NOT persist on "focusin" because focusin fires
+  // AFTER focus() has already caused a potential scroll adjustment in Gecko.
+  // Persisting at that point overwrites the correct pre-interaction snapshot
+  // (captured by pointerdown) with a corrupted position. The scroll event
+  // handler on chatBox already keeps the snapshot up to date for programmatic
+  // scroll changes.
 
   const MODEL_MENU_OPEN_CLASS = "llm-model-menu-open";
   const REASONING_MENU_OPEN_CLASS = "llm-reasoning-menu-open";
@@ -389,7 +402,7 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       ),
     );
     if (!isInteractive) {
-      panelRoot.focus();
+      panelRoot.focus({ preventScroll: true });
     }
   });
 
@@ -980,15 +993,17 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
 
   const updateModelButton = () => {
     if (!item || !modelBtn) return;
-    const { choices, currentModel } = getSelectedModelInfo();
-    const hasSecondary = choices.length > 1;
-    modelBtn.dataset.modelLabel = `${currentModel || "default"}`;
-    modelBtn.dataset.modelHint = hasSecondary
-      ? "Click to choose a model"
-      : "Only one model is configured";
-    modelBtn.disabled = !item;
-    applyResponsiveActionButtonsLayout();
-    updateImagePreview();
+    withScrollGuard(chatBox, conversationKey, () => {
+      const { choices, currentModel } = getSelectedModelInfo();
+      const hasSecondary = choices.length > 1;
+      modelBtn.dataset.modelLabel = `${currentModel || "default"}`;
+      modelBtn.dataset.modelHint = hasSecondary
+        ? "Click to choose a model"
+        : "Only one model is configured";
+      modelBtn.disabled = !item;
+      applyResponsiveActionButtonsLayout();
+      updateImagePreview();
+    });
   };
 
   const isPrimaryPointerEvent = (e: Event): boolean => {
@@ -1097,30 +1112,32 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
 
   const updateReasoningButton = () => {
     if (!item || !reasoningBtn) return;
-    const { provider, currentModel, options, enabledLevels, selectedLevel } =
-      getReasoningState();
-    const available = enabledLevels.length > 0;
-    const active = available && selectedLevel !== "none";
-    const reasoningLabel = active
-      ? getReasoningLevelDisplayLabel(
-          selectedLevel as LLMReasoningLevel,
-          provider,
-          currentModel,
-          options,
-        )
-      : "Reasoning";
-    reasoningBtn.disabled = !item || !available;
-    reasoningBtn.classList.toggle("llm-reasoning-btn-unavailable", !available);
-    reasoningBtn.classList.toggle("llm-reasoning-btn-active", active);
-    reasoningBtn.style.background = "";
-    reasoningBtn.style.borderColor = "";
-    reasoningBtn.style.color = "";
-    const reasoningHint = available
-      ? "Click to choose reasoning level"
-      : "Reasoning unavailable for current model";
-    reasoningBtn.dataset.reasoningLabel = reasoningLabel;
-    reasoningBtn.dataset.reasoningHint = reasoningHint;
-    applyResponsiveActionButtonsLayout();
+    withScrollGuard(chatBox, conversationKey, () => {
+      const { provider, currentModel, options, enabledLevels, selectedLevel } =
+        getReasoningState();
+      const available = enabledLevels.length > 0;
+      const active = available && selectedLevel !== "none";
+      const reasoningLabel = active
+        ? getReasoningLevelDisplayLabel(
+            selectedLevel as LLMReasoningLevel,
+            provider,
+            currentModel,
+            options,
+          )
+        : "Reasoning";
+      reasoningBtn.disabled = !item || !available;
+      reasoningBtn.classList.toggle("llm-reasoning-btn-unavailable", !available);
+      reasoningBtn.classList.toggle("llm-reasoning-btn-active", active);
+      reasoningBtn.style.background = "";
+      reasoningBtn.style.borderColor = "";
+      reasoningBtn.style.color = "";
+      const reasoningHint = available
+        ? "Click to choose reasoning level"
+        : "Reasoning unavailable for current model";
+      reasoningBtn.dataset.reasoningLabel = reasoningLabel;
+      reasoningBtn.dataset.reasoningHint = reasoningHint;
+      applyResponsiveActionButtonsLayout();
+    });
   };
 
   const rebuildReasoningMenu = () => {
@@ -1184,16 +1201,23 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
   syncModelFromPrefs();
 
   // Preferences can change outside this panel (e.g., settings window).
-  // Re-sync model label when the user comes back and interacts.
-  body.addEventListener("pointerenter", syncModelFromPrefs);
-  body.addEventListener("focusin", syncModelFromPrefs);
+  // Re-sync model label when the user comes back (pointerenter).
+  // NOTE: We intentionally do NOT sync on "focusin" because focusin fires
+  // on every internal focus change (e.g. clicking the input box).
+  // syncModelFromPrefs → updateModelButton → applyResponsiveActionButtonsLayout
+  // mutates DOM → changes flex layout → resizes .llm-messages → shifts scroll
+  // position.  pointerenter is sufficient and fires before interaction.
+  body.addEventListener("pointerenter", () => {
+    withScrollGuard(chatBox, conversationKey, syncModelFromPrefs);
+  });
   const ResizeObserverCtor = body.ownerDocument?.defaultView?.ResizeObserver;
   if (ResizeObserverCtor && panelRoot && modelBtn) {
     const ro = new ResizeObserverCtor(() => {
-      applyResponsiveActionButtonsLayout();
-      if (item && chatBox) {
-        applyChatScrollPolicy(item, chatBox);
-      }
+      // Wrap layout mutations in scroll guard so that flex-driven
+      // resize of .llm-messages doesn't corrupt the scroll snapshot.
+      withScrollGuard(chatBox, conversationKey, () => {
+        applyResponsiveActionButtonsLayout();
+      });
     });
     ro.observe(panelRoot);
     if (actionsRow) ro.observe(actionsRow);
