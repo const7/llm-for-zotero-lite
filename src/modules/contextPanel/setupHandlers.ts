@@ -1184,9 +1184,16 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
         const width = element?.getBoundingClientRect?.().width || 0;
         return width > 0 ? Math.ceil(width) : fallback;
       };
+      const uploadSlot = uploadBtn?.parentElement as HTMLElement | null;
       const selectTextSlot = selectTextBtn?.parentElement as HTMLElement | null;
       const screenshotSlot = screenshotBtn?.parentElement as HTMLElement | null;
       const leftSlotWidths = [
+        uploadBtn
+          ? getRenderedWidthPx(
+              uploadSlot || uploadBtn,
+              Math.max(uploadBtn.scrollWidth || 0, 20),
+            )
+          : 0,
         contextButtonMode === "full"
           ? getFullSlotRequiredWidth(
               selectTextSlot,
@@ -1240,8 +1247,21 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       const leftRequiredWidth =
         leftSlotWidths.reduce((sum, width) => sum + width, 0) +
         Math.max(0, leftSlotWidths.length - 1) * leftGap;
-      const rightRequiredWidth =
-        actionsRight?.scrollWidth || sendBtn?.scrollWidth || 0;
+      const rightRequiredWidth = (() => {
+        const actionsRightRendered = Math.ceil(
+          actionsRight?.getBoundingClientRect?.().width || 0,
+        );
+        const actionsRightScroll = actionsRight?.scrollWidth || 0;
+        const sendRendered = Math.ceil(sendBtn?.getBoundingClientRect?.().width || 0);
+        const sendScroll = sendBtn?.scrollWidth || 0;
+        return Math.max(
+          actionsRightRendered,
+          actionsRightScroll,
+          sendRendered,
+          sendScroll,
+          72,
+        );
+      })();
       const rowGap = getElementGapPx(actionsRow);
       return leftRequiredWidth + rightRequiredWidth + rowGap;
     };
