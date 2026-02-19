@@ -1930,15 +1930,12 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       const reasoningButtonEl = doc.querySelector(
         "#llm-reasoning-toggle",
       ) as HTMLButtonElement | null;
-      const responseMenuEl = doc.querySelector(
-        "#llm-response-menu",
-      ) as HTMLDivElement | null;
-      const exportMenuEl = doc.querySelector(
-        "#llm-export-menu",
-      ) as HTMLDivElement | null;
-      const exportButtonEl = doc.querySelector(
-        "#llm-export",
-      ) as HTMLButtonElement | null;
+      const responseMenus = Array.from(
+        doc.querySelectorAll("#llm-response-menu"),
+      ) as HTMLDivElement[];
+      const exportMenus = Array.from(
+        doc.querySelectorAll("#llm-export-menu"),
+      ) as HTMLDivElement[];
       const target = e.target as Node | null;
       if (
         modelMenuEl &&
@@ -1957,23 +1954,28 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       ) {
         setFloatingMenuOpen(reasoningMenuEl, REASONING_MENU_OPEN_CLASS, false);
       }
-      if (
-        responseMenuEl &&
-        responseMenuEl.style.display !== "none" &&
-        me.button === 0 &&
-        (!target || !responseMenuEl.contains(target))
-      ) {
-        responseMenuEl.style.display = "none";
-        setResponseMenuTarget(null);
-      }
-      if (
-        exportMenuEl &&
-        exportMenuEl.style.display !== "none" &&
-        me.button === 0 &&
-        (!target ||
-          (!exportMenuEl.contains(target) && !exportButtonEl?.contains(target)))
-      ) {
-        exportMenuEl.style.display = "none";
+      if (me.button === 0) {
+        let responseMenuClosed = false;
+        for (const responseMenuEl of responseMenus) {
+          if (responseMenuEl.style.display === "none") continue;
+          if (target && responseMenuEl.contains(target)) continue;
+          responseMenuEl.style.display = "none";
+          responseMenuClosed = true;
+        }
+        if (responseMenuClosed) {
+          setResponseMenuTarget(null);
+        }
+
+        for (const exportMenuEl of exportMenus) {
+          if (exportMenuEl.style.display === "none") continue;
+          if (target && exportMenuEl.contains(target)) continue;
+          const panelRoot = exportMenuEl.closest("#llm-main");
+          const exportButtonEl = panelRoot?.querySelector(
+            "#llm-export",
+          ) as HTMLButtonElement | null;
+          if (target && exportButtonEl?.contains(target)) continue;
+          exportMenuEl.style.display = "none";
+        }
       }
     });
     (

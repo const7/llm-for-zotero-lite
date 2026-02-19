@@ -1004,10 +1004,10 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           if (typeof me.stopImmediatePropagation === "function") {
             me.stopImmediatePropagation();
           }
-          const responseMenu = doc.querySelector(
+          const responseMenu = body.querySelector(
             "#llm-response-menu",
           ) as HTMLDivElement | null;
-          const exportMenu = doc.querySelector(
+          const exportMenu = body.querySelector(
             "#llm-export-menu",
           ) as HTMLDivElement | null;
           if (!responseMenu || !item) return;
