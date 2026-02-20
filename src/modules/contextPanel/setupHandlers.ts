@@ -2671,6 +2671,31 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
     });
   }
 
+  const bodyWithRetryMenuDismiss = body as Element & {
+    __llmRetryMenuDismissHandler?: (event: PointerEvent) => void;
+  };
+  if (bodyWithRetryMenuDismiss.__llmRetryMenuDismissHandler) {
+    panelDoc.removeEventListener(
+      "pointerdown",
+      bodyWithRetryMenuDismiss.__llmRetryMenuDismissHandler,
+      true,
+    );
+  }
+  const dismissRetryMenuOnOutsidePointerDown = (e: PointerEvent) => {
+    if (typeof e.button === "number" && e.button !== 0) return;
+    if (!retryModelMenu || !isFloatingMenuOpen(retryModelMenu)) return;
+    const target = e.target as Node | null;
+    if (target && retryModelMenu.contains(target)) return;
+    closeRetryModelMenu();
+  };
+  panelDoc.addEventListener(
+    "pointerdown",
+    dismissRetryMenuOnOutsidePointerDown,
+    true,
+  );
+  bodyWithRetryMenuDismiss.__llmRetryMenuDismissHandler =
+    dismissRetryMenuOnOutsidePointerDown;
+
   if (chatBox) {
     chatBox.addEventListener("click", (e: Event) => {
       const target = (e.target as Element | null)?.closest(
@@ -2734,16 +2759,20 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       const reasoningButtonEl = doc.querySelector(
         "#llm-reasoning-toggle",
       ) as HTMLButtonElement | null;
-      const retryModelMenuEl = doc.querySelector(
-        "#llm-retry-model-menu",
-      ) as HTMLDivElement | null;
+      const target = e.target as Node | null;
+      const retryButtonTarget =
+        target && target instanceof Element
+          ? (target.closest(".llm-retry-latest") as HTMLButtonElement | null)
+          : null;
+      const retryModelMenus = Array.from(
+        doc.querySelectorAll("#llm-retry-model-menu"),
+      ) as HTMLDivElement[];
       const responseMenus = Array.from(
         doc.querySelectorAll("#llm-response-menu"),
       ) as HTMLDivElement[];
       const exportMenus = Array.from(
         doc.querySelectorAll("#llm-export-menu"),
       ) as HTMLDivElement[];
-      const target = e.target as Node | null;
       if (
         modelMenuEl &&
         isFloatingMenuOpen(modelMenuEl) &&
@@ -2761,19 +2790,23 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       ) {
         setFloatingMenuOpen(reasoningMenuEl, REASONING_MENU_OPEN_CLASS, false);
       }
-      if (
-        retryModelMenuEl &&
-        isFloatingMenuOpen(retryModelMenuEl) &&
-        (!target ||
-          (!retryModelMenuEl.contains(target) &&
-            !retryMenuAnchor?.contains(target)))
-      ) {
-        setFloatingMenuOpen(
-          retryModelMenuEl,
-          RETRY_MODEL_MENU_OPEN_CLASS,
-          false,
+      for (const retryModelMenuEl of retryModelMenus) {
+        if (!isFloatingMenuOpen(retryModelMenuEl)) continue;
+        const panelRoot = retryModelMenuEl.closest("#llm-main");
+        const clickedRetryButtonInSamePanel = Boolean(
+          retryButtonTarget && panelRoot && panelRoot.contains(retryButtonTarget),
         );
-        retryMenuAnchor = null;
+        if (
+          !target ||
+          (!retryModelMenuEl.contains(target) && !clickedRetryButtonInSamePanel)
+        ) {
+          setFloatingMenuOpen(
+            retryModelMenuEl,
+            RETRY_MODEL_MENU_OPEN_CLASS,
+            false,
+          );
+          retryMenuAnchor = null;
+        }
       }
       if (me.button === 0) {
         let responseMenuClosed = false;
