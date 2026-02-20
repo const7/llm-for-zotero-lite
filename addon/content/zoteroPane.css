@@ -138,13 +138,24 @@
 }
 
 /* Messages Area */
-.llm-messages,
+.llm-chat-shell,
 .llm-input {
   resize: vertical;
 }
 
-.llm-messages {
+.llm-chat-shell {
+  position: relative;
   flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 50vh;
+  min-height: 320px;
+  max-height: 100vh;
+  overflow: hidden;
+}
+
+.llm-messages {
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -159,9 +170,9 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: 50vh;
-  min-height: 320px;
-  max-height: 100vh;
+  height: 100%;
+  min-height: 100%;
+  max-height: 100%;
   user-select: text;
 }
 
@@ -1213,7 +1224,9 @@
   margin: 0;
 }
 
-.llm-context-previews > #llm-selected-context-list > .llm-selected-context.expanded,
+.llm-context-previews
+  > #llm-selected-context-list
+  > .llm-selected-context.expanded,
 .llm-context-previews > .llm-image-preview.expanded,
 .llm-context-previews > #llm-file-context-preview.expanded {
   flex: 0 0 auto;
@@ -1964,7 +1977,9 @@
 }
 
 /* User-message file cards should remain readable inside bubble-aligned width. */
-#llm-main .llm-message-wrapper.user.llm-user-context-aligned .llm-user-files-list {
+#llm-main
+  .llm-message-wrapper.user.llm-user-context-aligned
+  .llm-user-files-list {
   grid-template-columns: minmax(0, 1fr);
 }
 

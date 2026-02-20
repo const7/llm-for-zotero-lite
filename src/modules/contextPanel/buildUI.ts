@@ -88,10 +88,14 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   container.appendChild(header);
 
   // Chat display area
+  const chatShell = createElement(doc, "div", "llm-chat-shell", {
+    id: "llm-chat-shell",
+  });
   const chatBox = createElement(doc, "div", "llm-messages", {
     id: "llm-chat-box",
   });
-  container.appendChild(chatBox);
+  chatShell.append(chatBox);
+  container.appendChild(chatShell);
 
   // Shortcuts row
   const shortcutsRow = createElement(doc, "div", "llm-shortcuts", {
