@@ -42,7 +42,7 @@ When you start your chat with the model, the full context of this paper is alrea
 
 ![image](./assets/screenshot.gif)
 
-In our research, understanding the figures equivalent to understanding the paper. With this plugin, you can take a screenshot of any figure in the paper and ask the model to interpret it for you. It will support up to 5 screenshots at a time.
+In our research, understanding the figures equivalent to understanding the paper. With this plugin, you can take a screenshot of any figure in the paper and ask the model to interpret it for you. It supports up to 10 screenshots at a time.
 
 ### 4. "This answer is nice, I want to save it into my note"
 

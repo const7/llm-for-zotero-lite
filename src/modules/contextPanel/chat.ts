@@ -91,6 +91,29 @@ function appendReasoningPart(base: string | undefined, next?: string): string {
   return `${base || ""}${chunk}`;
 }
 
+function resolveMultimodalRetryHint(
+  errorMessage: string,
+  imageCount: number,
+): string {
+  if (imageCount <= 0) return "";
+  const normalized = errorMessage.trim().toLowerCase();
+  if (!normalized) return "";
+  const looksLikeSizeOrTokenIssue =
+    normalized.includes("413") ||
+    normalized.includes("payload too large") ||
+    normalized.includes("request too large") ||
+    normalized.includes("context length") ||
+    normalized.includes("maximum context") ||
+    normalized.includes("too many tokens") ||
+    normalized.includes("max_input_tokens") ||
+    normalized.includes("input too long");
+  if (!looksLikeSizeOrTokenIssue) return "";
+  if (imageCount >= 8) {
+    return " Try fewer screenshots (for example 4-6) or tighter crops.";
+  }
+  return " Try fewer screenshots or tighter crops.";
+}
+
 function openStoredAttachmentFromMessage(attachment: ChatAttachment): boolean {
   const fileUrl = toFileUrl(attachment.storedPath);
   if (!fileUrl) return false;
@@ -1168,7 +1191,14 @@ export async function retryLatestAssistantResponse(
 
     restoreOriginalAssistant();
     const errMsg = (err as Error).message || "Error";
-    setStatusSafely(`Retry failed: ${errMsg.slice(0, 48)}`, "error");
+    const retryHint = resolveMultimodalRetryHint(
+      errMsg,
+      screenshotImages.length,
+    );
+    setStatusSafely(
+      `Retry failed: ${`${errMsg}${retryHint}`.slice(0, 48)}`,
+      "error",
+    );
   } finally {
     if (cancelledRequestId < thisRequestId) {
       withScrollGuard(chatBox, conversationKey, () => {
@@ -1443,12 +1473,13 @@ export async function sendQuestion(
     }
 
     const errMsg = (err as Error).message || "Error";
-    assistantMessage.text = `Error: ${errMsg}`;
+    const retryHint = resolveMultimodalRetryHint(errMsg, imageCount);
+    assistantMessage.text = `Error: ${errMsg}${retryHint}`;
     assistantMessage.streaming = false;
     refreshChatSafely();
     await persistAssistantOnce();
 
-    setStatusSafely(`Error: ${errMsg.slice(0, 40)}`, "error");
+    setStatusSafely(`Error: ${`${errMsg}${retryHint}`.slice(0, 40)}`, "error");
   } finally {
     // Only restore UI if this is still the current request
     if (cancelledRequestId < thisRequestId) {

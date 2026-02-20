@@ -27,7 +27,7 @@ export const SELECTED_TEXT_MAX_LENGTH = 4000;
 export const SELECTED_TEXT_PREVIEW_LENGTH = 240;
 export const MAX_SELECTED_TEXT_CONTEXTS = 5;
 export const MAX_EDITABLE_SHORTCUTS = 10;
-export const MAX_SELECTED_IMAGES = 5;
+export const MAX_SELECTED_IMAGES = 10;
 export const MAX_UPLOAD_PDF_SIZE_BYTES = 50 * 1024 * 1024;
 export const CHAT_ATTACHMENTS_DIR_NAME = "chat-attachments";
 

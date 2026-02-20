@@ -2199,7 +2199,11 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
         }
         try {
           const dataUrl = await readFileAsDataURL(normalizedFile);
-          nextImages.push(dataUrl);
+          const panelWindow = body.ownerDocument?.defaultView;
+          const optimizedDataUrl = panelWindow
+            ? await optimizeImageDataUrl(panelWindow, dataUrl)
+            : dataUrl;
+          nextImages.push(optimizedDataUrl);
           addedCount += 1;
         } catch (err) {
           ztoolkit.log("LLM: Failed to read image upload", err);
