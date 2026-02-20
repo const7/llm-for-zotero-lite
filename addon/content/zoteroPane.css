@@ -10,6 +10,7 @@
   --llm-fs-16: calc(16px * var(--llm-font-scale));
   --llm-fs-32: calc(32px * var(--llm-font-scale));
   --llm-screenshot-thumb-size: 56px;
+  --llm-file-card-min-width: 184px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -553,8 +554,8 @@
 }
 
 .llm-user-files-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
 }
 
@@ -1851,8 +1852,21 @@
 
 .llm-file-context-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
+}
+
+#llm-main[data-llm-action-layout-mode="half"] .llm-user-files-list,
+#llm-main[data-llm-action-layout-mode="half"] .llm-file-context-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#llm-main[data-llm-action-layout-mode="full"] .llm-user-files-list,
+#llm-main[data-llm-action-layout-mode="full"] .llm-file-context-list {
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(var(--llm-file-card-min-width), 1fr)
+  );
 }
 
 .llm-file-context-item {
@@ -1939,12 +1953,6 @@
 .llm-file-context-remove:hover {
   background: var(--fill-quaternary);
   color: var(--fill-primary);
-}
-
-@media (max-width: 520px) {
-  .llm-file-context-list {
-    grid-template-columns: 1fr;
-  }
 }
 
 .llm-image-preview:hover .llm-image-preview-expanded,

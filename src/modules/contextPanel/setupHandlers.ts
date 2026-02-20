@@ -1358,6 +1358,30 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
     type DropdownMode = "icon" | "full";
     type ContextButtonMode = "icon" | "full";
     type ModelWrapMode = "single" | "wrap2";
+    type ActionLayoutMode = "icon" | "half" | "full";
+
+    const setPanelActionLayoutMode = (mode: ActionLayoutMode) => {
+      if (panelRoot.dataset.llmActionLayoutMode !== mode) {
+        panelRoot.dataset.llmActionLayoutMode = mode;
+      }
+    };
+
+    const getActionLayoutMode = (
+      dropdownMode: DropdownMode,
+      contextButtonMode: ContextButtonMode,
+      modelWrapMode: ModelWrapMode,
+    ): ActionLayoutMode => {
+      if (dropdownMode === "icon" && contextButtonMode === "icon") {
+        return "icon";
+      }
+      if (dropdownMode === "full" && contextButtonMode === "full") {
+        return "full";
+      }
+      if (modelWrapMode === "wrap2") {
+        return "half";
+      }
+      return "half";
+    };
 
     const applyLayoutModes = (
       dropdownMode: DropdownMode,
@@ -1443,15 +1467,28 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
           ["full", "icon", "single"],
           ["icon", "icon", "single"],
         ];
+    let lastAttemptedMode:
+      | [DropdownMode, ContextButtonMode, ModelWrapMode]
+      | null = null;
     for (const [
       dropdownMode,
       contextButtonMode,
       modelWrapMode,
     ] of candidateModes) {
+      lastAttemptedMode = [dropdownMode, contextButtonMode, modelWrapMode];
       applyLayoutModes(dropdownMode, contextButtonMode, modelWrapMode);
       if (!layoutHasIssues(dropdownMode, contextButtonMode, modelWrapMode)) {
+        setPanelActionLayoutMode(
+          getActionLayoutMode(dropdownMode, contextButtonMode, modelWrapMode),
+        );
         return;
       }
+    }
+    if (lastAttemptedMode) {
+      const [dropdownMode, contextButtonMode, modelWrapMode] = lastAttemptedMode;
+      setPanelActionLayoutMode(
+        getActionLayoutMode(dropdownMode, contextButtonMode, modelWrapMode),
+      );
     }
   };
 
