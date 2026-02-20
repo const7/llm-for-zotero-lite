@@ -68,7 +68,8 @@ import {
   resolveContextSourceItem,
 } from "./contextResolution";
 import { buildChatHistoryNotePayload } from "./notes";
-import { toFileUrl } from "./attachmentStorage";
+import { extractManagedBlobHash, toFileUrl } from "./attachmentStorage";
+import { replaceOwnerAttachmentRefs } from "../../utils/attachmentRefStore";
 
 /** Get AbortController constructor from global scope */
 function getAbortController(): new () => AbortController {
@@ -144,6 +145,32 @@ function normalizeSelectedTextSources(
   return out;
 }
 
+function normalizeAttachmentContentHash(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const normalized = value.trim().toLowerCase();
+  return /^[a-f0-9]{64}$/.test(normalized) ? normalized : "";
+}
+
+function collectAttachmentHashesFromStoredMessages(
+  messages: StoredChatMessage[],
+): string[] {
+  const hashes = new Set<string>();
+  for (const message of messages) {
+    const attachments = Array.isArray(message.attachments)
+      ? message.attachments
+      : [];
+    for (const attachment of attachments) {
+      if (!attachment || attachment.category === "image") continue;
+      const contentHash =
+        normalizeAttachmentContentHash(attachment.contentHash) ||
+        extractManagedBlobHash(attachment.storedPath);
+      if (!contentHash) continue;
+      hashes.add(contentHash);
+    }
+  }
+  return Array.from(hashes);
+}
+
 function getMessageSelectedTexts(message: Message): string[] {
   return normalizeSelectedTexts(message.selectedTexts, message.selectedText);
 }
@@ -162,9 +189,7 @@ function getMessageSelectedTextExpandedIndex(
   return -1;
 }
 
-function getUserBubbleElement(
-  wrapper: HTMLElement,
-): HTMLDivElement | null {
+function getUserBubbleElement(wrapper: HTMLElement): HTMLDivElement | null {
   const children = Array.from(wrapper.children) as HTMLElement[];
   for (const child of children) {
     if (
@@ -181,7 +206,9 @@ export function syncUserContextAlignmentWidths(body: Element): void {
   const chatBox = body.querySelector("#llm-chat-box") as HTMLDivElement | null;
   if (!chatBox) return;
   const wrappers = Array.from(
-    chatBox.querySelectorAll(".llm-message-wrapper.user.llm-user-context-aligned"),
+    chatBox.querySelectorAll(
+      ".llm-message-wrapper.user.llm-user-context-aligned",
+    ),
   ) as HTMLDivElement[];
   for (const wrapper of wrappers) {
     const bubble = getUserBubbleElement(wrapper);
@@ -418,6 +445,17 @@ async function persistConversationMessage(
   try {
     await appendStoredMessage(conversationKey, message);
     await pruneConversation(conversationKey, PERSISTED_HISTORY_LIMIT);
+    const storedMessages = await loadConversation(
+      conversationKey,
+      PERSISTED_HISTORY_LIMIT,
+    );
+    const attachmentHashes =
+      collectAttachmentHashesFromStoredMessages(storedMessages);
+    await replaceOwnerAttachmentRefs(
+      "conversation",
+      conversationKey,
+      attachmentHashes,
+    );
   } catch (err) {
     ztoolkit.log("LLM: Failed to persist chat message", err);
   }
@@ -1505,9 +1543,9 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
 
         for (const attachment of fileAttachments) {
           const canOpen = Boolean(toFileUrl(attachment.storedPath));
-          const fileItem = doc.createElement(
-            canOpen ? "button" : "div",
-          ) as HTMLButtonElement | HTMLDivElement;
+          const fileItem = doc.createElement(canOpen ? "button" : "div") as
+            | HTMLButtonElement
+            | HTMLDivElement;
           fileItem.className = "llm-user-files-item";
           if (canOpen) {
             fileItem.classList.add("llm-user-files-item-openable");

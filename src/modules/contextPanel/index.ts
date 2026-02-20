@@ -32,6 +32,11 @@ import {
   recentReaderSelectionCache,
 } from "./state";
 import { clearConversation as clearStoredConversation } from "../../utils/chatStore";
+import {
+  ATTACHMENT_GC_MIN_AGE_MS,
+  clearOwnerAttachmentRefs,
+  collectAndDeleteUnreferencedBlobs,
+} from "../../utils/attachmentRefStore";
 import { normalizeSelectedText, setStatus } from "./textUtils";
 import { buildUI } from "./buildUI";
 import { setupHandlers } from "./setupHandlers";
@@ -142,7 +147,10 @@ export function registerReaderSelectionTracking() {
       const fromReaderDoc = selectionFrom(readerDoc);
       if (fromReaderDoc) return fromReaderDoc;
       const internalReader = reader?._internalReader;
-      const views = [internalReader?._primaryView, internalReader?._secondaryView];
+      const views = [
+        internalReader?._primaryView,
+        internalReader?._secondaryView,
+      ];
       for (const view of views) {
         if (!view) continue;
         const viewDoc =
@@ -283,7 +291,11 @@ export function registerReaderSelectionTracking() {
           if (!appendByKey.has(panelItemId)) {
             appendByKey.set(
               panelItemId,
-              appendSelectedTextContextForItem(panelItemId, selectedText, "pdf"),
+              appendSelectedTextContextForItem(
+                panelItemId,
+                selectedText,
+                "pdf",
+              ),
             );
           }
 
@@ -468,6 +480,17 @@ export function clearConversation(itemId: number) {
   void clearStoredConversation(itemId).catch((err) => {
     ztoolkit.log("LLM: Failed to clear persisted chat history", err);
   });
+  void clearOwnerAttachmentRefs("conversation", itemId).catch((err) => {
+    ztoolkit.log(
+      "LLM: Failed to clear persisted conversation attachment refs",
+      err,
+    );
+  });
+  void collectAndDeleteUnreferencedBlobs(ATTACHMENT_GC_MIN_AGE_MS).catch(
+    (err) => {
+      ztoolkit.log("LLM: Failed to collect unreferenced attachment blobs", err);
+    },
+  );
 }
 
 export function getConversationHistory(itemId: number): Message[] {

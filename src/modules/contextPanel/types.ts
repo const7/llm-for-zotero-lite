@@ -89,6 +89,7 @@ export type ChatAttachment = {
   imageDataUrl?: string;
   textContent?: string;
   storedPath?: string;
+  contentHash?: string;
 };
 
 export type PdfContext = {

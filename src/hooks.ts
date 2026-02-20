@@ -6,6 +6,12 @@ import {
   registerReaderSelectionTracking,
 } from "./modules/contextPanel";
 import { initChatStore } from "./utils/chatStore";
+import {
+  initAttachmentRefStore,
+  reconcileNoteAttachmentRefsFromNoteContent,
+  collectAndDeleteUnreferencedBlobs,
+  ATTACHMENT_GC_MIN_AGE_MS,
+} from "./utils/attachmentRefStore";
 import { runLegacyMigrations } from "./utils/migrations";
 import { createZToolkit } from "./utils/ztoolkit";
 
@@ -29,6 +35,20 @@ async function onStartup() {
   } catch (err) {
     ztoolkit.log("LLM: Failed to initialize chat store", err);
   }
+  try {
+    await initAttachmentRefStore();
+  } catch (err) {
+    ztoolkit.log("LLM: Failed to initialize attachment reference store", err);
+  }
+
+  void (async () => {
+    try {
+      await reconcileNoteAttachmentRefsFromNoteContent();
+      await collectAndDeleteUnreferencedBlobs(ATTACHMENT_GC_MIN_AGE_MS);
+    } catch (err) {
+      ztoolkit.log("LLM: Attachment ref reconciliation/GC failed", err);
+    }
+  })();
 
   registerPrefsPane();
 

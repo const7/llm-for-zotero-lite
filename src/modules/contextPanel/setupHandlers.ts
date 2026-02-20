@@ -97,11 +97,17 @@ import {
   buildChatHistoryNotePayload,
 } from "./notes";
 import {
-  persistConversationAttachmentFile,
+  persistAttachmentBlob,
+  isManagedBlobPath,
   removeAttachmentFile,
   removeConversationAttachmentFiles,
 } from "./attachmentStorage";
 import { clearConversation as clearStoredConversation } from "../../utils/chatStore";
+import {
+  ATTACHMENT_GC_MIN_AGE_MS,
+  clearOwnerAttachmentRefs,
+  collectAndDeleteUnreferencedBlobs,
+} from "../../utils/attachmentRefStore";
 import type {
   ReasoningLevelSelection,
   ReasoningOption,
@@ -251,6 +257,34 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
 
   // Compute conversation key early so all closures can reference it.
   const conversationKey = item ? getConversationKey(item) : null;
+  let attachmentGcTimer: number | null = null;
+  const scheduleAttachmentGc = (delayMs = 5_000) => {
+    const win = body.ownerDocument?.defaultView;
+    const clearTimer = () => {
+      if (attachmentGcTimer === null) return;
+      if (win) {
+        win.clearTimeout(attachmentGcTimer);
+      } else {
+        clearTimeout(attachmentGcTimer);
+      }
+      attachmentGcTimer = null;
+    };
+    clearTimer();
+    const runGc = () => {
+      attachmentGcTimer = null;
+      void collectAndDeleteUnreferencedBlobs(ATTACHMENT_GC_MIN_AGE_MS).catch(
+        (err) => {
+          ztoolkit.log("LLM: Attachment GC failed", err);
+        },
+      );
+    };
+    if (win) {
+      attachmentGcTimer = win.setTimeout(runGc, delayMs);
+    } else {
+      attachmentGcTimer =
+        (setTimeout(runGc, delayMs) as unknown as number) || 0;
+    }
+  };
 
   const persistCurrentChatScrollSnapshot = () => {
     if (!item || !chatBox || !chatBox.childElementCount) return;
@@ -806,13 +840,19 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
         } else {
           clearSelectedFileState(item.id);
         }
-        if (removedEntry?.storedPath) {
+        if (
+          removedEntry?.storedPath &&
+          !removedEntry.contentHash &&
+          !isManagedBlobPath(removedEntry.storedPath)
+        ) {
           void removeAttachmentFile(removedEntry.storedPath).catch((err) => {
             ztoolkit.log(
               "LLM: Failed to remove discarded attachment file",
               err,
             );
           });
+        } else if (removedEntry?.storedPath) {
+          scheduleAttachmentGc();
         }
         updateFilePreview();
         if (status) {
@@ -1923,7 +1963,6 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
 
   const processIncomingFiles = async (incomingFiles: File[]) => {
     if (!item || !incomingFiles.length) return;
-    const conversationKey = getConversationKey(item);
     const { currentModel } = getSelectedModelInfo();
     const imageUnsupported = isScreenshotUnsupportedModel(currentModel);
     const nextImages = [...(selectedImageCache.get(item.id) || [])];
@@ -1975,13 +2014,15 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
         }
       }
       let storedPath: string | undefined;
+      let contentHash: string | undefined;
       try {
         const buffer = await readFileAsArrayBuffer(normalizedFile);
-        storedPath = await persistConversationAttachmentFile(
-          conversationKey,
+        const persisted = await persistAttachmentBlob(
           fileName,
           new Uint8Array(buffer),
         );
+        storedPath = persisted.storedPath;
+        contentHash = persisted.contentHash;
       } catch (err) {
         failedPersistCount += 1;
         ztoolkit.log("LLM: Failed to persist uploaded attachment", err);
@@ -2001,6 +2042,7 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
         category,
         textContent,
         storedPath,
+        contentHash,
       };
       if (existingIndex >= 0) {
         const existing = nextFiles[existingIndex];
@@ -2019,6 +2061,9 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
     }
     if (nextFiles.length) {
       selectedFileAttachmentCache.set(item.id, nextFiles);
+    }
+    if (addedCount > 0 || replacedCount > 0) {
+      scheduleAttachmentGc();
     }
     updateImagePreview();
     updateFilePreview();
@@ -2192,7 +2237,9 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       composedQuestionBase,
       selectedFiles,
     );
-    const displayQuestion = primarySelectedText ? promptText : text || promptText;
+    const displayQuestion = primarySelectedText
+      ? promptText
+      : text || promptText;
     inputBox.value = "";
     const selectedProfile = getSelectedProfile();
     const activeModelName = (
@@ -2818,12 +2865,14 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       const selectedFiles = selectedFileAttachmentCache.get(item.id) || [];
       for (const entry of selectedFiles) {
         if (!entry?.storedPath) continue;
+        if (entry.contentHash || isManagedBlobPath(entry.storedPath)) continue;
         void removeAttachmentFile(entry.storedPath).catch((err) => {
           ztoolkit.log("LLM: Failed to remove cleared attachment file", err);
         });
       }
       clearSelectedFileState(item.id);
       updateFilePreview();
+      scheduleAttachmentGc();
       if (status) setStatus(status, "Files cleared", "ready");
     });
   }
@@ -2918,8 +2967,10 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       return;
 
     const textPinned =
-      getSelectedTextExpandedIndex(item.id, getSelectedTextContexts(item.id).length) >=
-      0;
+      getSelectedTextExpandedIndex(
+        item.id,
+        getSelectedTextContexts(item.id).length,
+      ) >= 0;
     const figurePinned =
       selectedImagePreviewExpandedCache.get(item.id) === true;
     const filePinned = selectedFilePreviewExpandedCache.get(item.id) === true;
@@ -2969,9 +3020,18 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
         void clearStoredConversation(conversationKey).catch((err) => {
           ztoolkit.log("LLM: Failed to clear persisted chat history", err);
         });
+        void clearOwnerAttachmentRefs("conversation", conversationKey).catch(
+          (err) => {
+            ztoolkit.log(
+              "LLM: Failed to clear conversation attachment refs",
+              err,
+            );
+          },
+        );
         void removeConversationAttachmentFiles(conversationKey).catch((err) => {
           ztoolkit.log("LLM: Failed to clear chat attachment files", err);
         });
+        scheduleAttachmentGc();
         clearSelectedImageState(item.id);
         clearSelectedFileState(item.id);
         clearSelectedTextState(item.id);

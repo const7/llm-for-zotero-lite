@@ -17,6 +17,7 @@ export type StoredChatMessage = {
     imageDataUrl?: string;
     textContent?: string;
     storedPath?: string;
+    contentHash?: string;
   }>;
   modelName?: string;
   reasoningSummary?: string;
@@ -339,6 +340,11 @@ export async function loadConversation(
                 typeof typed.storedPath === "string" && typed.storedPath.trim()
                   ? typed.storedPath.trim()
                   : undefined,
+              contentHash:
+                typeof typed.contentHash === "string" &&
+                /^[a-f0-9]{64}$/i.test(typed.contentHash.trim())
+                  ? typed.contentHash.trim().toLowerCase()
+                  : undefined,
             });
             return out;
           }, []);
@@ -367,21 +373,19 @@ export async function loadConversation(
       selectedText:
         typeof row.selectedText === "string" ? row.selectedText : undefined,
       selectedTexts: (() => {
-        const normalizedTexts =
-          selectedTexts?.length
-            ? selectedTexts
-            : typeof row.selectedText === "string" && row.selectedText.trim()
-              ? [row.selectedText]
-              : [];
+        const normalizedTexts = selectedTexts?.length
+          ? selectedTexts
+          : typeof row.selectedText === "string" && row.selectedText.trim()
+            ? [row.selectedText]
+            : [];
         return normalizedTexts.length ? normalizedTexts : undefined;
       })(),
       selectedTextSources: (() => {
-        const normalizedTexts =
-          selectedTexts?.length
-            ? selectedTexts
-            : typeof row.selectedText === "string" && row.selectedText.trim()
-              ? [row.selectedText]
-              : [];
+        const normalizedTexts = selectedTexts?.length
+          ? selectedTexts
+          : typeof row.selectedText === "string" && row.selectedText.trim()
+            ? [row.selectedText]
+            : [];
         if (!normalizedTexts.length) return undefined;
         return normalizedTexts.map((_, index) =>
           normalizeSelectedTextSource(selectedTextSources?.[index]),
@@ -427,9 +431,22 @@ export async function appendMessage(
     ? message.screenshotImages.filter((entry) => Boolean(entry))
     : [];
   const attachments = Array.isArray(message.attachments)
-    ? message.attachments.filter(
-        (entry) => entry && typeof entry.id === "string" && entry.id.trim(),
-      )
+    ? message.attachments
+        .filter(
+          (entry) => entry && typeof entry.id === "string" && entry.id.trim(),
+        )
+        .map((entry) => ({
+          ...entry,
+          storedPath:
+            typeof entry.storedPath === "string" && entry.storedPath.trim()
+              ? entry.storedPath.trim()
+              : undefined,
+          contentHash:
+            typeof entry.contentHash === "string" &&
+            /^[a-f0-9]{64}$/i.test(entry.contentHash.trim())
+              ? entry.contentHash.trim().toLowerCase()
+              : undefined,
+        }))
     : [];
   await Zotero.DB.queryAsync(
     `INSERT INTO ${CHAT_MESSAGES_TABLE}

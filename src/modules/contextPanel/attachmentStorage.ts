@@ -1,5 +1,7 @@
 import { CHAT_ATTACHMENTS_DIR_NAME } from "./constants";
 
+export const ATTACHMENT_BLOBS_TABLE = "llm_for_zotero_attachment_blobs";
+
 type PathUtilsLike = {
   join?: (...parts: string[]) => string;
   parent?: (path: string) => string;
@@ -7,6 +9,7 @@ type PathUtilsLike = {
 
 type IOUtilsLike = {
   exists?: (path: string) => Promise<boolean>;
+  read?: (path: string) => Promise<Uint8Array | ArrayBuffer>;
   makeDirectory?: (
     path: string,
     options?: { createAncestors?: boolean; ignoreExisting?: boolean },
@@ -21,6 +24,7 @@ type IOUtilsLike = {
 
 type OSFileLike = {
   exists?: (path: string) => Promise<boolean>;
+  read?: (path: string) => Promise<Uint8Array | ArrayBuffer>;
   makeDir?: (
     path: string,
     options?: { from?: string; ignoreExisting?: boolean },
@@ -122,6 +126,10 @@ function getBaseWritableDir(): string {
   );
 }
 
+export function getChatAttachmentsRootDir(): string {
+  return joinPath(getBaseWritableDir(), CHAT_ATTACHMENTS_DIR_NAME);
+}
+
 async function ensureDir(path: string): Promise<void> {
   const io = getIOUtils();
   if (io?.makeDirectory) {
@@ -162,6 +170,22 @@ async function pathExists(path: string): Promise<boolean> {
   return false;
 }
 
+async function readBytes(path: string): Promise<Uint8Array> {
+  const io = getIOUtils();
+  if (io?.read) {
+    const data = await io.read(path);
+    if (data instanceof Uint8Array) return data;
+    if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  }
+  const osFile = getOSFile();
+  if (osFile?.read) {
+    const data = await osFile.read(path);
+    if (data instanceof Uint8Array) return data;
+    if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  }
+  throw new Error("No binary read API available");
+}
+
 async function writeBytes(path: string, bytes: Uint8Array): Promise<void> {
   const io = getIOUtils();
   if (io?.write) {
@@ -174,6 +198,21 @@ async function writeBytes(path: string, bytes: Uint8Array): Promise<void> {
     return;
   }
   throw new Error("No binary write API available");
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function computeSHA256Hex(bytes: Uint8Array): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle?.digest) {
+    throw new Error("WebCrypto subtle.digest unavailable");
+  }
+  const hashBuffer = await subtle.digest("SHA-256", bytes);
+  return bytesToHex(new Uint8Array(hashBuffer));
 }
 
 async function copyFile(sourcePath: string, destPath: string): Promise<void> {
@@ -237,8 +276,31 @@ async function reserveUniquePath(
   return joinPath(dirPath, fallback);
 }
 
+let blobTableInitTask: Promise<void> | null = null;
+async function ensureBlobTable(): Promise<void> {
+  if (!blobTableInitTask) {
+    blobTableInitTask = (async () => {
+      await Zotero.DB.queryAsync(
+        `CREATE TABLE IF NOT EXISTS ${ATTACHMENT_BLOBS_TABLE} (
+          hash TEXT PRIMARY KEY,
+          path TEXT NOT NULL UNIQUE,
+          size_bytes INTEGER NOT NULL,
+          created_at INTEGER NOT NULL
+        )`,
+      );
+    })();
+  }
+  await blobTableInitTask;
+}
+
+function normalizeHash(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return /^[a-f0-9]{64}$/.test(trimmed) ? trimmed : null;
+}
+
 function getConversationDir(conversationKey: number): string {
-  const root = joinPath(getBaseWritableDir(), CHAT_ATTACHMENTS_DIR_NAME);
+  const root = getChatAttachmentsRootDir();
   return joinPath(root, "chats", String(conversationKey));
 }
 
@@ -252,8 +314,132 @@ function getConversationAttachmentPath(
 }
 
 function getNoteDir(noteId: number): string {
-  const root = joinPath(getBaseWritableDir(), CHAT_ATTACHMENTS_DIR_NAME);
+  const root = getChatAttachmentsRootDir();
   return joinPath(root, "notes", String(noteId));
+}
+
+function getBlobDir(contentHash: string): string {
+  const root = getChatAttachmentsRootDir();
+  return joinPath(root, "blobs", contentHash);
+}
+
+function getBlobPath(contentHash: string, fileName: string): string {
+  const dirPath = getBlobDir(contentHash);
+  return joinPath(dirPath, sanitizeFileName(fileName));
+}
+
+export function extractManagedBlobHash(storedPath: string | undefined): string {
+  const raw = (storedPath || "").trim();
+  if (!raw) return "";
+  const normalized = raw.replace(/\\/g, "/");
+  const root = getChatAttachmentsRootDir()
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
+  const prefix = `${root}/blobs/`;
+  if (!normalized.startsWith(prefix)) return "";
+  const rest = normalized.slice(prefix.length);
+  const hash = rest.split("/")[0] || "";
+  return normalizeHash(hash) || "";
+}
+
+export function isManagedBlobPath(storedPath: string | undefined): boolean {
+  return Boolean(extractManagedBlobHash(storedPath));
+}
+
+export function fileUrlToPath(url: string | undefined): string | undefined {
+  const raw = (url || "").trim();
+  if (!raw) return undefined;
+  if (!/^file:\/\//i.test(raw)) return undefined;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "file:") return undefined;
+    let pathname = decodeURIComponent(parsed.pathname || "");
+    if (!pathname) return undefined;
+    if (/^\/[A-Za-z]:\//.test(pathname)) {
+      pathname = pathname.slice(1);
+    }
+    return pathname;
+  } catch (_err) {
+    return undefined;
+  }
+}
+
+export async function persistAttachmentBlob(
+  fileName: string,
+  bytes: Uint8Array,
+): Promise<{ storedPath: string; contentHash: string; sizeBytes: number }> {
+  await ensureBlobTable();
+  const contentHash = await computeSHA256Hex(bytes);
+  const rows = (await Zotero.DB.queryAsync(
+    `SELECT path
+     FROM ${ATTACHMENT_BLOBS_TABLE}
+     WHERE hash = ?
+     LIMIT 1`,
+    [contentHash],
+  )) as Array<{ path?: unknown }> | undefined;
+  const existingPath =
+    typeof rows?.[0]?.path === "string" && rows[0].path.trim()
+      ? rows[0].path.trim()
+      : "";
+  if (existingPath && (await pathExists(existingPath))) {
+    return {
+      storedPath: existingPath,
+      contentHash,
+      sizeBytes: bytes.byteLength,
+    };
+  }
+  const fallbackName = sanitizeFileName(fileName || "") || `${contentHash}.bin`;
+  const storedPath = existingPath || getBlobPath(contentHash, fallbackName);
+  await ensureDir(getParentPath(storedPath));
+  await writeBytes(storedPath, bytes);
+  await Zotero.DB.queryAsync(
+    `INSERT OR REPLACE INTO ${ATTACHMENT_BLOBS_TABLE} (hash, path, size_bytes, created_at)
+     VALUES (?, ?, ?, ?)`,
+    [
+      contentHash,
+      storedPath,
+      Math.max(0, Math.floor(bytes.byteLength)),
+      Date.now(),
+    ],
+  );
+  return {
+    storedPath,
+    contentHash,
+    sizeBytes: bytes.byteLength,
+  };
+}
+
+export async function ensureAttachmentBlobFromPath(
+  sourcePath: string,
+  fileName: string,
+): Promise<{ storedPath: string; contentHash: string }> {
+  const normalizedSource = (sourcePath || "").trim();
+  if (!normalizedSource) {
+    throw new Error("Cannot import attachment from empty source path");
+  }
+  if (isManagedBlobPath(normalizedSource)) {
+    const contentHash = extractManagedBlobHash(normalizedSource);
+    if (contentHash) {
+      await ensureBlobTable();
+      await Zotero.DB.queryAsync(
+        `INSERT OR REPLACE INTO ${ATTACHMENT_BLOBS_TABLE} (hash, path, size_bytes, created_at)
+         VALUES (
+           ?,
+           ?,
+           COALESCE((SELECT size_bytes FROM ${ATTACHMENT_BLOBS_TABLE} WHERE hash = ?), 0),
+           COALESCE((SELECT created_at FROM ${ATTACHMENT_BLOBS_TABLE} WHERE hash = ?), ?)
+         )`,
+        [contentHash, normalizedSource, contentHash, contentHash, Date.now()],
+      );
+      return { storedPath: normalizedSource, contentHash };
+    }
+  }
+  const bytes = await readBytes(normalizedSource);
+  const persisted = await persistAttachmentBlob(fileName, bytes);
+  return {
+    storedPath: persisted.storedPath,
+    contentHash: persisted.contentHash,
+  };
 }
 
 export async function persistConversationAttachmentFile(

@@ -12,7 +12,17 @@ import {
   removeAssistantNoteMapEntry,
   rememberAssistantNoteForParent,
 } from "./prefHelpers";
-import { copyAttachmentFileToNoteDir, toFileUrl } from "./attachmentStorage";
+import {
+  ensureAttachmentBlobFromPath,
+  extractManagedBlobHash,
+  isManagedBlobPath,
+  toFileUrl,
+} from "./attachmentStorage";
+import {
+  ATTACHMENT_GC_MIN_AGE_MS,
+  collectAndDeleteUnreferencedBlobs,
+  replaceOwnerAttachmentRefs,
+} from "../../utils/attachmentRefStore";
 import type { ChatAttachment, Message, SelectedTextSource } from "./types";
 
 function resolveParentItemForNote(item: Zotero.Item): Zotero.Item | null {
@@ -120,7 +130,9 @@ function normalizeSelectedTextsForNote(
     return legacy ? [legacy] : [];
   })();
   if (!normalizedTexts.length) return [];
-  const rawSources = Array.isArray(selectedTextSources) ? selectedTextSources : [];
+  const rawSources = Array.isArray(selectedTextSources)
+    ? selectedTextSources
+    : [];
   return normalizedTexts.map((text, index) => ({
     text,
     source: normalizeSelectedTextSource(rawSources[index]),
@@ -168,8 +180,29 @@ function buildFileListHtmlForNote(files: ChatAttachment[]): string {
   return `<div><p>${escapeNoteHtml(formatFileEmbeddedLabel(files))}</p><ul>${items}</ul></div>`;
 }
 
-async function cloneHistoryWithNoteAttachmentCopies(
-  noteId: number,
+function normalizeAttachmentHash(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  return /^[a-f0-9]{64}$/.test(normalized) ? normalized : undefined;
+}
+
+function collectAttachmentHashes(messages: Message[]): string[] {
+  const hashes = new Set<string>();
+  for (const msg of messages) {
+    const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+    for (const attachment of attachments) {
+      if (!attachment || attachment.category === "image") continue;
+      const hash =
+        normalizeAttachmentHash(attachment.contentHash) ||
+        extractManagedBlobHash(attachment.storedPath);
+      if (!hash) continue;
+      hashes.add(hash);
+    }
+  }
+  return Array.from(hashes);
+}
+
+async function normalizeHistoryAttachmentsToSharedBlobs(
   history: Message[],
 ): Promise<Message[]> {
   const cloned: Message[] = [];
@@ -192,18 +225,41 @@ async function cloneHistoryWithNoteAttachmentCopies(
         continue;
       }
       try {
-        const copiedPath = await copyAttachmentFileToNoteDir(
-          noteId,
-          attachment.storedPath,
+        const normalizedPath = attachment.storedPath.trim();
+        const existingHash = normalizeAttachmentHash(attachment.contentHash);
+        if (existingHash && isManagedBlobPath(normalizedPath)) {
+          nextAttachments.push({
+            ...attachment,
+            contentHash: existingHash,
+            storedPath: normalizedPath,
+          });
+          continue;
+        }
+        const managedHash = extractManagedBlobHash(normalizedPath);
+        if (managedHash) {
+          nextAttachments.push({
+            ...attachment,
+            contentHash: managedHash,
+            storedPath: normalizedPath,
+          });
+          continue;
+        }
+        const imported = await ensureAttachmentBlobFromPath(
+          normalizedPath,
           attachment.name,
         );
         nextAttachments.push({
           ...attachment,
-          storedPath: copiedPath,
+          storedPath: imported.storedPath,
+          contentHash: imported.contentHash,
         });
       } catch (err) {
-        ztoolkit.log("LLM: Failed to copy attachment into note folder", err);
-        nextAttachments.push({ ...attachment, storedPath: undefined });
+        ztoolkit.log("LLM: Failed to normalize note attachment blob", err);
+        nextAttachments.push({
+          ...attachment,
+          storedPath: undefined,
+          contentHash: undefined,
+        });
       }
     }
     cloned.push({
@@ -401,7 +457,7 @@ export async function createNoteFromChatHistory(
   const note = new Zotero.Item("note");
   note.libraryID = parentItem.libraryID;
   note.parentID = parentId;
-  // Create first to get stable note ID for chat-attachments/notes/<noteId>.
+  // Create first to get stable note ID for attachment reference ownership.
   note.setNote("<p>Preparing chat history export...</p>");
   const saveResult = await note.saveTx();
   const noteId =
@@ -409,12 +465,21 @@ export async function createNoteFromChatHistory(
   if (!noteId || noteId <= 0) {
     throw new Error("Unable to resolve new note ID for chat history export");
   }
-  const copiedHistory = await cloneHistoryWithNoteAttachmentCopies(
-    noteId,
-    history,
-  );
-  note.setNote(buildChatHistoryNotePayload(copiedHistory).noteHtml);
+  const normalizedHistory =
+    await normalizeHistoryAttachmentsToSharedBlobs(history);
+  note.setNote(buildChatHistoryNotePayload(normalizedHistory).noteHtml);
   await note.saveTx();
+  const attachmentHashes = collectAttachmentHashes(normalizedHistory);
+  try {
+    await replaceOwnerAttachmentRefs("note", noteId, attachmentHashes);
+  } catch (err) {
+    ztoolkit.log("LLM: Failed to persist note attachment refs", err);
+  }
+  void collectAndDeleteUnreferencedBlobs(ATTACHMENT_GC_MIN_AGE_MS).catch(
+    (err) => {
+      ztoolkit.log("LLM: Attachment GC after note export failed", err);
+    },
+  );
   ztoolkit.log(
     `LLM: Created chat history note ${noteId} for parent ${parentId}`,
   );
