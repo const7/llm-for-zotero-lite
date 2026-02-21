@@ -1,7 +1,4 @@
-import {
-  SELECTED_TEXT_MAX_LENGTH,
-  SELECTED_TEXT_PREVIEW_LENGTH,
-} from "./constants";
+import { SELECTED_TEXT_MAX_LENGTH } from "./constants";
 import type { SelectedTextSource } from "./types";
 
 export const DEFAULT_SELECTED_TEXT_PROMPT =
@@ -52,11 +49,6 @@ export function normalizeSelectedText(text: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, SELECTED_TEXT_MAX_LENGTH);
-}
-
-export function truncateSelectedText(text: string): string {
-  if (text.length <= SELECTED_TEXT_PREVIEW_LENGTH) return text;
-  return `${text.slice(0, SELECTED_TEXT_PREVIEW_LENGTH - 1)}\u2026`;
 }
 
 export function isLikelyCorruptedSelectedText(text: string): boolean {
@@ -130,28 +122,6 @@ export function buildQuestionWithSelectedText(
 ): string {
   const normalizedPrompt = userPrompt.trim() || DEFAULT_SELECTED_TEXT_PROMPT;
   return `Selected text from the PDF reader:\n"""\n${selectedText}\n"""\n\nUser question:\n${normalizedPrompt}`;
-}
-
-export function buildQuestionWithSelectedTexts(
-  selectedTexts: string[],
-  userPrompt: string,
-): string {
-  const normalizedPrompt = userPrompt.trim() || DEFAULT_SELECTED_TEXT_PROMPT;
-  const normalizedTexts = selectedTexts
-    .map((text) => sanitizeText(text).trim())
-    .filter(Boolean);
-  if (!normalizedTexts.length) {
-    return `User question:\n${normalizedPrompt}`;
-  }
-  if (normalizedTexts.length === 1) {
-    return buildQuestionWithSelectedText(normalizedTexts[0], normalizedPrompt);
-  }
-  const contextBlocks = normalizedTexts.map((text, index) => {
-    return `Text Context ${index + 1}:\n"""\n${text}\n"""`;
-  });
-  return `Selected text contexts from the PDF reader:\n${contextBlocks.join(
-    "\n\n",
-  )}\n\nUser question:\n${normalizedPrompt}`;
 }
 
 export function buildQuestionWithSelectedTextContexts(

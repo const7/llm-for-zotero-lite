@@ -464,26 +464,6 @@ function applyChatScrollPolicy(
   persistChatScrollSnapshotByKey(conversationKey, chatBox);
 }
 
-/**
- * Persist scroll for the chat currently rendered in `body`, if available.
- * Used before panel re-render to avoid scroll jumps when the chat box node
- * gets recreated.
- */
-export function persistChatScrollSnapshotFromBody(body: Element): void {
-  const panel = body.querySelector("#llm-main") as HTMLDivElement | null;
-  const chatBox = body.querySelector("#llm-chat-box") as HTMLDivElement | null;
-  if (!panel || !chatBox) return;
-  if (!chatBox.childElementCount) return;
-  if (!isChatViewportVisible(chatBox)) return;
-
-  const panelItemId = Number(panel.dataset.itemId || 0);
-  if (!Number.isFinite(panelItemId) || panelItemId <= 0) return;
-  const panelItem = Zotero.Items.get(panelItemId) || null;
-  if (!panelItem) return;
-
-  persistChatScrollSnapshot(panelItem, chatBox);
-}
-
 async function persistConversationMessage(
   conversationKey: number,
   message: StoredChatMessage,

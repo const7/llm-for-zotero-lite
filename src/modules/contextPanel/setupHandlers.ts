@@ -1,5 +1,6 @@
 import { createElement } from "../../utils/domHelpers";
 import {
+  AUTO_SCROLL_BOTTOM_THRESHOLD,
   MAX_SELECTED_IMAGES,
   MAX_UPLOAD_PDF_SIZE_BYTES,
   formatFigureCountLabel,
@@ -272,7 +273,6 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
 
   // Compute conversation key early so all closures can reference it.
   const conversationKey = item ? getConversationKey(item) : null;
-  const SCROLL_STABILITY_BOTTOM_THRESHOLD = 64;
   let activeEditSession: EditLatestTurnMarker | null = null;
   let attachmentGcTimer: number | null = null;
   const scheduleAttachmentGc = (delayMs = 5_000) => {
@@ -305,9 +305,12 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
 
   const persistCurrentChatScrollSnapshot = () => {
     if (!item || !chatBox || !chatBox.childElementCount) return;
-    if (chatBox.clientHeight <= 0 || chatBox.getClientRects().length === 0)
-      return;
+    if (!isChatViewportVisible(chatBox)) return;
     persistChatScrollSnapshot(item, chatBox);
+  };
+
+  const isChatViewportVisible = (box: HTMLDivElement): boolean => {
+    return box.clientHeight > 0 && box.getClientRects().length > 0;
   };
 
   type ChatBoxViewportState = {
@@ -319,15 +322,13 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
   };
   const buildChatBoxViewportState = (): ChatBoxViewportState | null => {
     if (!chatBox) return null;
-    if (chatBox.clientHeight <= 0 || chatBox.getClientRects().length === 0) {
-      return null;
-    }
+    if (!isChatViewportVisible(chatBox)) return null;
     const width = Math.max(0, Math.round(chatBox.clientWidth));
     const height = Math.max(0, Math.round(chatBox.clientHeight));
     const maxScrollTop = Math.max(0, chatBox.scrollHeight - chatBox.clientHeight);
     const scrollTop = Math.max(0, Math.min(maxScrollTop, chatBox.scrollTop));
     const nearBottom =
-      maxScrollTop - scrollTop <= SCROLL_STABILITY_BOTTOM_THRESHOLD;
+      maxScrollTop - scrollTop <= AUTO_SCROLL_BOTTOM_THRESHOLD;
     return {
       width,
       height,
@@ -344,9 +345,7 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
   if (item && chatBox) {
     const persistScroll = () => {
       if (!chatBox.childElementCount) return;
-      if (chatBox.clientHeight <= 0 || chatBox.getClientRects().length === 0) {
-        return;
-      }
+      if (!isChatViewportVisible(chatBox)) return;
       const currentWidth = Math.max(0, Math.round(chatBox.clientWidth));
       const currentHeight = Math.max(0, Math.round(chatBox.clientHeight));
       const previousViewport = chatBoxViewportState;
@@ -2098,9 +2097,7 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
     if (chatBox) {
       const chatBoxResizeObserver = new ResizeObserverCtor(() => {
         if (!chatBox) return;
-        if (chatBox.clientHeight <= 0 || chatBox.getClientRects().length === 0) {
-          return;
-        }
+        if (!isChatViewportVisible(chatBox)) return;
         const previous = chatBoxViewportState;
         const current = buildChatBoxViewportState();
         if (!current) return;

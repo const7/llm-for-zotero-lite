@@ -17,6 +17,19 @@ import {
   shouldUseDeepseekThinkingPayload,
   supportsReasoningForModel,
 } from "./reasoningProfiles";
+import type {
+  ReasoningProvider,
+  ReasoningLevel,
+  OpenAIReasoningEffort,
+  OpenAIReasoningProfile,
+  GeminiThinkingParam,
+  GeminiThinkingValue,
+  GeminiReasoningOption,
+  GeminiReasoningProfile,
+  AnthropicReasoningProfile,
+  QwenReasoningProfile,
+  RuntimeReasoningOption,
+} from "./reasoningProfiles";
 import {
   API_ENDPOINT,
   RESPONSES_ENDPOINT,
@@ -56,66 +69,9 @@ export type ChatMessage = {
   content: MessageContent;
 };
 
-export type ReasoningProvider =
-  | "openai"
-  | "gemini"
-  | "deepseek"
-  | "kimi"
-  | "qwen"
-  | "grok"
-  | "anthropic";
-export type ReasoningLevel =
-  | "default"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
 export type ReasoningConfig = {
   provider: ReasoningProvider;
   level: ReasoningLevel;
-};
-export type OpenAIReasoningEffort =
-  | "default"
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export type OpenAIReasoningProfile = {
-  defaultEffort: OpenAIReasoningEffort;
-  supportedEfforts: OpenAIReasoningEffort[];
-  levelToEffort: Partial<Record<ReasoningLevel, OpenAIReasoningEffort | null>>;
-  defaultLevel: ReasoningLevel;
-};
-export type GeminiThinkingParam = "thinking_level" | "thinking_budget";
-export type GeminiThinkingValue = "low" | "medium" | "high" | number;
-export type GeminiReasoningOption = {
-  level: ReasoningLevel;
-  value: GeminiThinkingValue;
-};
-export type GeminiReasoningProfile = {
-  param: GeminiThinkingParam;
-  defaultValue: GeminiThinkingValue;
-  options: GeminiReasoningOption[];
-  levelToValue: Partial<Record<ReasoningLevel, GeminiThinkingValue>>;
-  defaultLevel: ReasoningLevel;
-};
-export type AnthropicReasoningProfile = {
-  defaultBudgetTokens: number;
-  levelToBudgetTokens: Partial<Record<ReasoningLevel, number>>;
-  defaultLevel: ReasoningLevel;
-};
-export type QwenReasoningProfile = {
-  defaultEnableThinking: boolean | null;
-  levelToEnableThinking: Partial<Record<ReasoningLevel, boolean | null>>;
-  defaultLevel: ReasoningLevel;
-};
-export type RuntimeReasoningOption = {
-  level: ReasoningLevel;
-  label: string;
-  enabled: boolean;
 };
 export type ChatFileAttachment = {
   name: string;
@@ -860,6 +816,20 @@ function getReasoningLevelAlias(level: ReasoningLevel): ReasoningLevel | null {
 
 // Re-export reasoning profile helpers so consumers can import from llmClient
 // without coupling directly to reasoningProfiles.
+export type {
+  ReasoningProvider,
+  ReasoningLevel,
+  OpenAIReasoningEffort,
+  OpenAIReasoningProfile,
+  GeminiThinkingParam,
+  GeminiThinkingValue,
+  GeminiReasoningOption,
+  GeminiReasoningProfile,
+  AnthropicReasoningProfile,
+  QwenReasoningProfile,
+  RuntimeReasoningOption,
+} from "./reasoningProfiles";
+
 export {
   getRuntimeReasoningOptionsForModel as getRuntimeReasoningOptions,
   getOpenAIReasoningProfileForModel as getOpenAIReasoningProfile,
