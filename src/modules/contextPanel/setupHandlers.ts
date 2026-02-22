@@ -16,8 +16,6 @@ import {
   UPLOAD_FILE_EXPANDED_LABEL,
   UPLOAD_FILE_COMPACT_LABEL,
   REASONING_COMPACT_LABEL,
-  ACTION_LAYOUT_FULL_MODE_BUFFER_PX,
-  ACTION_LAYOUT_PARTIAL_MODE_BUFFER_PX,
   ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX,
   ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX,
   ACTION_LAYOUT_MODEL_WRAP_MIN_CHARS,
@@ -325,10 +323,12 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
     if (!isChatViewportVisible(chatBox)) return null;
     const width = Math.max(0, Math.round(chatBox.clientWidth));
     const height = Math.max(0, Math.round(chatBox.clientHeight));
-    const maxScrollTop = Math.max(0, chatBox.scrollHeight - chatBox.clientHeight);
+    const maxScrollTop = Math.max(
+      0,
+      chatBox.scrollHeight - chatBox.clientHeight,
+    );
     const scrollTop = Math.max(0, Math.min(maxScrollTop, chatBox.scrollTop));
-    const nearBottom =
-      maxScrollTop - scrollTop <= AUTO_SCROLL_BOTTOM_THRESHOLD;
+    const nearBottom = maxScrollTop - scrollTop <= AUTO_SCROLL_BOTTOM_THRESHOLD;
     return {
       width,
       height,
@@ -1369,11 +1369,22 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
     return `Screenshots are disabled for ${label}`;
   };
 
+  type ActionLabelMode = "icon" | "full";
+  type ModelLabelMode = "icon" | "full-single" | "full-wrap2";
+  type ActionLayoutMode = "icon" | "half" | "full";
+  type ActionRevealState = {
+    send: ActionLabelMode;
+    reasoning: ActionLabelMode;
+    model: ModelLabelMode;
+    screenshot: ActionLabelMode;
+    selectText: ActionLabelMode;
+  };
+
   const setActionButtonLabel = (
     button: HTMLButtonElement | null,
     expandedLabel: string,
     compactLabel: string,
-    mode: "icon" | "full",
+    mode: ActionLabelMode,
   ) => {
     if (!button) return;
     const nextLabel = mode === "icon" ? compactLabel : expandedLabel;
@@ -1382,7 +1393,8 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
     }
     button.classList.toggle("llm-action-icon-only", mode === "icon");
   };
-  const setSendButtonLabel = (mode: "icon" | "full") => {
+
+  const setSendButtonLabel = (mode: ActionLabelMode) => {
     setActionButtonLabel(sendBtn, "Send", "↑", mode);
     sendBtn.title = "Send";
     setActionButtonLabel(cancelBtn, "Cancel", "X", mode);
@@ -1391,30 +1403,26 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
     }
   };
 
+  const setPanelActionLayoutMode = (mode: ActionLayoutMode) => {
+    if (panelRoot.dataset.llmActionLayoutMode !== mode) {
+      panelRoot.dataset.llmActionLayoutMode = mode;
+    }
+  };
+
   let layoutRetryScheduled = false;
   const applyResponsiveActionButtonsLayout = () => {
-    if (!modelBtn) return;
+    if (!modelBtn || !actionsLeft) return;
     const modelLabel = modelBtn.dataset.modelLabel || "default";
+    const modelHint = modelBtn.dataset.modelHint || "";
     const modelCanUseTwoLineWrap =
       [...(modelLabel || "").trim()].length >
       ACTION_LAYOUT_MODEL_WRAP_MIN_CHARS;
-    const modelHint = modelBtn.dataset.modelHint || "";
     const reasoningLabel =
       reasoningBtn?.dataset.reasoningLabel ||
       reasoningBtn?.textContent ||
       "Reasoning";
     const reasoningHint = reasoningBtn?.dataset.reasoningHint || "";
-    modelBtn.classList.remove("llm-model-btn-collapsed");
-    modelSlot?.classList.remove("llm-model-dropdown-collapsed");
-    reasoningBtn?.classList.remove("llm-reasoning-btn-collapsed");
-    reasoningSlot?.classList.remove("llm-reasoning-dropdown-collapsed");
-    modelBtn.textContent = modelLabel;
-    modelBtn.title = modelHint;
-    if (reasoningBtn) {
-      reasoningBtn.textContent = reasoningLabel;
-      reasoningBtn.title = reasoningHint;
-    }
-    if (!actionsLeft) return;
+
     const immediateAvailableWidth = (() => {
       const rowWidth = actionsRow?.clientWidth || 0;
       if (rowWidth > 0) return rowWidth;
@@ -1433,6 +1441,7 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       }
       return;
     }
+
     const getComputedSizePx = (
       style: CSSStyleDeclaration | null | undefined,
       property: string,
@@ -1442,6 +1451,7 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       const value = Number.parseFloat(style.getPropertyValue(property));
       return Number.isFinite(value) ? value : fallback;
     };
+
     const textMeasureContext = (() => {
       const canvas = body.ownerDocument?.createElement(
         "canvas",
@@ -1450,6 +1460,7 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
         (canvas?.getContext("2d") as CanvasRenderingContext2D | null) || null
       );
     })();
+
     const measureLabelTextWidth = (
       button: HTMLButtonElement | null,
       label: string,
@@ -1467,6 +1478,7 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       }
       return label.length * 8;
     };
+
     const getElementGapPx = (element: HTMLElement | null) => {
       if (!element) return 0;
       const view = body.ownerDocument?.defaultView;
@@ -1475,6 +1487,7 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       if (Number.isFinite(columnGap)) return columnGap;
       return getComputedSizePx(style, "gap", 0);
     };
+
     const getButtonNaturalWidth = (
       button: HTMLButtonElement | null,
       label: string,
@@ -1488,8 +1501,6 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       const wrappedTextWidth =
         normalizedMaxLines > 1
           ? (() => {
-              // Keep enough width for the longest segment while allowing
-              // balanced two-line wrapping for long model names.
               const segments = label
                 .split(/[\s._-]+/g)
                 .map((segment) => segment.trim())
@@ -1511,12 +1522,11 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
         getComputedSizePx(style, "border-right-width");
       const chevronAllowance =
         button === modelBtn || button === reasoningBtn ? 4 : 0;
-      const measuredWidth =
-        wrappedTextWidth + paddingWidth + borderWidth + chevronAllowance;
-      // Use text-metric width instead of current rendered width so thresholding
-      // does not become stricter just because buttons are currently expanded.
-      return Math.ceil(measuredWidth);
+      return Math.ceil(
+        wrappedTextWidth + paddingWidth + borderWidth + chevronAllowance,
+      );
     };
+
     const getSlotWidthBounds = (slot: HTMLElement | null) => {
       const view = body.ownerDocument?.defaultView;
       const style = slot ? view?.getComputedStyle(slot) : null;
@@ -1531,6 +1541,7 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
         : Number.POSITIVE_INFINITY;
       return { minWidth, maxWidth };
     };
+
     const getFullSlotRequiredWidth = (
       slot: HTMLElement | null,
       button: HTMLButtonElement | null,
@@ -1543,101 +1554,15 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
       const { minWidth, maxWidth } = getSlotWidthBounds(slot);
       return Math.min(maxWidth, Math.max(minWidth, naturalWidth));
     };
-    const getModeRequiredWidth = (
-      dropdownMode: DropdownMode,
-      contextButtonMode: ContextButtonMode,
-      modelWrapMode: ModelWrapMode,
+
+    const getRenderedWidthPx = (
+      element: HTMLElement | null,
+      fallback: number,
     ) => {
-      const getRenderedWidthPx = (
-        element: HTMLElement | null,
-        fallback: number,
-      ) => {
-        const width = element?.getBoundingClientRect?.().width || 0;
-        return width > 0 ? Math.ceil(width) : fallback;
-      };
-      const uploadSlot = uploadBtn?.parentElement as HTMLElement | null;
-      const selectTextSlot = selectTextBtn?.parentElement as HTMLElement | null;
-      const screenshotSlot = screenshotBtn?.parentElement as HTMLElement | null;
-      const leftSlotWidths = [
-        uploadBtn
-          ? getRenderedWidthPx(
-              uploadSlot || uploadBtn,
-              Math.max(uploadBtn.scrollWidth || 0, 20),
-            )
-          : 0,
-        contextButtonMode === "full"
-          ? getFullSlotRequiredWidth(
-              selectTextSlot,
-              selectTextBtn,
-              SELECT_TEXT_EXPANDED_LABEL,
-            )
-          : selectTextBtn
-            ? getRenderedWidthPx(
-                selectTextBtn,
-                ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX,
-              )
-            : 0,
-        contextButtonMode === "full"
-          ? getFullSlotRequiredWidth(
-              screenshotSlot,
-              screenshotBtn,
-              SCREENSHOT_EXPANDED_LABEL,
-            )
-          : screenshotBtn
-            ? getRenderedWidthPx(
-                screenshotBtn,
-                ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX,
-              )
-            : 0,
-        dropdownMode === "full"
-          ? getFullSlotRequiredWidth(
-              modelSlot,
-              modelBtn,
-              modelLabel,
-              modelWrapMode === "wrap2"
-                ? ACTION_LAYOUT_MODEL_FULL_MAX_LINES
-                : 1,
-            )
-          : modelBtn
-            ? getRenderedWidthPx(modelBtn, ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX)
-            : 0,
-        dropdownMode === "full"
-          ? getFullSlotRequiredWidth(
-              reasoningSlot,
-              reasoningBtn,
-              reasoningLabel,
-            )
-          : reasoningBtn
-            ? getRenderedWidthPx(
-                reasoningBtn,
-                ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX,
-              )
-            : 0,
-      ].filter((width) => width > 0);
-      const leftGap = getElementGapPx(actionsLeft);
-      const leftRequiredWidth =
-        leftSlotWidths.reduce((sum, width) => sum + width, 0) +
-        Math.max(0, leftSlotWidths.length - 1) * leftGap;
-      const rightRequiredWidth = (() => {
-        const actionsRightRendered = Math.ceil(
-          actionsRight?.getBoundingClientRect?.().width || 0,
-        );
-        const actionsRightScroll = actionsRight?.scrollWidth || 0;
-        const sendRendered = Math.ceil(
-          sendBtn?.getBoundingClientRect?.().width || 0,
-        );
-        const sendScroll = sendBtn?.scrollWidth || 0;
-        return Math.max(
-          actionsRightRendered,
-          actionsRightScroll,
-          sendRendered,
-          sendScroll,
-          72,
-        );
-      })();
-      const rowGap = getElementGapPx(actionsRow);
-      return leftRequiredWidth + rightRequiredWidth + rowGap;
+      const width = element?.getBoundingClientRect?.().width || 0;
+      return width > 0 ? Math.ceil(width) : fallback;
     };
+
     const getAvailableRowWidth = () => {
       const hostWidth = Math.ceil(
         (body as HTMLElement | null)?.getBoundingClientRect?.().width || 0,
@@ -1653,161 +1578,286 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
         return hostWidth > 0 ? Math.min(leftWidth, hostWidth) : leftWidth;
       return hostWidth;
     };
-    const doesModeFit = (
-      dropdownMode: DropdownMode,
-      contextButtonMode: ContextButtonMode,
-      modelWrapMode: ModelWrapMode,
-    ) => {
-      const modeRequiredWidth = getModeRequiredWidth(
-        dropdownMode,
-        contextButtonMode,
-        modelWrapMode,
+
+    const uploadSlot = uploadBtn?.parentElement as HTMLElement | null;
+    const selectTextSlot = selectTextBtn?.parentElement as HTMLElement | null;
+    const screenshotSlot = screenshotBtn?.parentElement as HTMLElement | null;
+    const sendSlot = sendBtn?.parentElement as HTMLElement | null;
+
+    const getModelWidth = (mode: ModelLabelMode) => {
+      if (!modelBtn) return 0;
+      if (mode === "icon") return ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX;
+      const maxLines =
+        mode === "full-wrap2" ? ACTION_LAYOUT_MODEL_FULL_MAX_LINES : 1;
+      return getFullSlotRequiredWidth(
+        modelSlot,
+        modelBtn,
+        modelLabel,
+        maxLines,
       );
-      const modeBuffer =
-        dropdownMode === "full" && contextButtonMode === "full"
-          ? ACTION_LAYOUT_FULL_MODE_BUFFER_PX
-          : dropdownMode === "full" && contextButtonMode === "icon"
-            ? ACTION_LAYOUT_PARTIAL_MODE_BUFFER_PX
-            : 0;
-      return getAvailableRowWidth() + 1 >= modeRequiredWidth + modeBuffer;
     };
 
-    type DropdownMode = "icon" | "full";
-    type ContextButtonMode = "icon" | "full";
-    type ModelWrapMode = "single" | "wrap2";
-    type ActionLayoutMode = "icon" | "half" | "full";
-
-    const setPanelActionLayoutMode = (mode: ActionLayoutMode) => {
-      if (panelRoot.dataset.llmActionLayoutMode !== mode) {
-        panelRoot.dataset.llmActionLayoutMode = mode;
-      }
+    const getReasoningWidth = (mode: ActionLabelMode) => {
+      if (!reasoningBtn) return 0;
+      return mode === "full"
+        ? getFullSlotRequiredWidth(reasoningSlot, reasoningBtn, reasoningLabel)
+        : ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX;
     };
 
-    const getActionLayoutMode = (
-      dropdownMode: DropdownMode,
-      contextButtonMode: ContextButtonMode,
-      modelWrapMode: ModelWrapMode,
-    ): ActionLayoutMode => {
-      if (dropdownMode === "icon" && contextButtonMode === "icon") {
-        return "icon";
+    const getContextButtonWidth = (
+      slot: HTMLElement | null,
+      button: HTMLButtonElement | null,
+      expandedLabel: string,
+      mode: ActionLabelMode,
+    ) => {
+      if (!button) return 0;
+      return mode === "full"
+        ? getFullSlotRequiredWidth(slot, button, expandedLabel)
+        : ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX;
+    };
+
+    const getSendWidth = (mode: ActionLabelMode) => {
+      if (!sendBtn) return 0;
+      if (mode === "icon") {
+        return ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX;
       }
-      if (dropdownMode === "full" && contextButtonMode === "full") {
+      const sendWidth = getFullSlotRequiredWidth(sendSlot, sendBtn, "Send");
+      const cancelWidth = getFullSlotRequiredWidth(
+        sendSlot,
+        cancelBtn,
+        "Cancel",
+      );
+      return Math.max(sendWidth, cancelWidth, 72);
+    };
+
+    const getRequiredWidth = (state: ActionRevealState) => {
+      const leftSlotWidths = [
+        uploadBtn
+          ? getRenderedWidthPx(
+              uploadSlot || uploadBtn,
+              Math.max(
+                uploadBtn.scrollWidth || 0,
+                ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX,
+              ),
+            )
+          : 0,
+        getContextButtonWidth(
+          selectTextSlot,
+          selectTextBtn,
+          SELECT_TEXT_EXPANDED_LABEL,
+          state.selectText,
+        ),
+        getContextButtonWidth(
+          screenshotSlot,
+          screenshotBtn,
+          SCREENSHOT_EXPANDED_LABEL,
+          state.screenshot,
+        ),
+        getModelWidth(state.model),
+        getReasoningWidth(state.reasoning),
+      ].filter((width) => width > 0);
+      const leftGap = getElementGapPx(actionsLeft);
+      const leftRequiredWidth =
+        leftSlotWidths.reduce((sum, width) => sum + width, 0) +
+        Math.max(0, leftSlotWidths.length - 1) * leftGap;
+      const rightRequiredWidth = getSendWidth(state.send);
+      const rowGap = getElementGapPx(actionsRow);
+      return leftRequiredWidth + rightRequiredWidth + rowGap;
+    };
+
+    const doesStateFit = (state: ActionRevealState) =>
+      getAvailableRowWidth() + 1 >= getRequiredWidth(state);
+
+    const getPanelLayoutMode = (state: ActionRevealState): ActionLayoutMode => {
+      if (state.selectText === "full") {
         return "full";
       }
-      if (modelWrapMode === "wrap2") {
+      if (
+        state.screenshot === "full" ||
+        state.model !== "icon" ||
+        state.reasoning === "full"
+      ) {
         return "half";
       }
-      return "half";
+      return "icon";
     };
 
-    const applyLayoutModes = (
-      dropdownMode: DropdownMode,
-      contextButtonMode: ContextButtonMode,
-      modelWrapMode: ModelWrapMode,
-    ) => {
+    const applyMeasurementBaseline = () => {
+      // Normalize controls into a stable full-text style before measuring.
+      // This keeps width estimation independent from the currently rendered
+      // icon/full state and prevents flip-flopping around thresholds.
+      setActionButtonLabel(
+        uploadBtn,
+        UPLOAD_FILE_EXPANDED_LABEL,
+        UPLOAD_FILE_COMPACT_LABEL,
+        "icon",
+      );
       setActionButtonLabel(
         selectTextBtn,
         SELECT_TEXT_EXPANDED_LABEL,
         SELECT_TEXT_COMPACT_LABEL,
-        contextButtonMode,
+        "full",
       );
       setActionButtonLabel(
         screenshotBtn,
         SCREENSHOT_EXPANDED_LABEL,
         SCREENSHOT_COMPACT_LABEL,
-        contextButtonMode,
+        "full",
       );
+      setSendButtonLabel("full");
+
+      modelBtn.classList.toggle("llm-model-btn-collapsed", false);
+      modelSlot?.classList.toggle("llm-model-dropdown-collapsed", false);
+      modelBtn.classList.toggle("llm-model-btn-wrap-2line", false);
+      modelBtn.textContent = modelLabel;
+      modelBtn.title = modelHint;
+
+      if (reasoningBtn) {
+        reasoningBtn.classList.toggle("llm-reasoning-btn-collapsed", false);
+        reasoningSlot?.classList.toggle(
+          "llm-reasoning-dropdown-collapsed",
+          false,
+        );
+        reasoningBtn.textContent = reasoningLabel;
+        reasoningBtn.title = reasoningHint;
+      }
+    };
+
+    const applyState = (state: ActionRevealState) => {
       setActionButtonLabel(
         uploadBtn,
         UPLOAD_FILE_EXPANDED_LABEL,
         UPLOAD_FILE_COMPACT_LABEL,
-        contextButtonMode,
+        "icon",
       );
-      setSendButtonLabel(
-        dropdownMode === "icon" && contextButtonMode === "icon"
-          ? "icon"
-          : "full",
+      setActionButtonLabel(
+        selectTextBtn,
+        SELECT_TEXT_EXPANDED_LABEL,
+        SELECT_TEXT_COMPACT_LABEL,
+        state.selectText,
       );
+      setActionButtonLabel(
+        screenshotBtn,
+        SCREENSHOT_EXPANDED_LABEL,
+        SCREENSHOT_COMPACT_LABEL,
+        state.screenshot,
+      );
+      setSendButtonLabel(state.send);
 
-      modelBtn.classList.remove("llm-model-btn-collapsed");
-      modelSlot?.classList.remove("llm-model-dropdown-collapsed");
-      reasoningBtn?.classList.remove("llm-reasoning-btn-collapsed");
-      reasoningSlot?.classList.remove("llm-reasoning-dropdown-collapsed");
+      const modelCollapsed = state.model === "icon";
+      modelBtn.classList.toggle("llm-model-btn-collapsed", modelCollapsed);
+      modelSlot?.classList.toggle(
+        "llm-model-dropdown-collapsed",
+        modelCollapsed,
+      );
       modelBtn.classList.toggle(
         "llm-model-btn-wrap-2line",
-        dropdownMode !== "icon" && modelWrapMode === "wrap2",
+        state.model === "full-wrap2",
       );
-      modelBtn.textContent = modelLabel;
-      modelBtn.title = modelHint;
-      if (reasoningBtn) {
-        reasoningBtn.textContent = reasoningLabel;
-        reasoningBtn.title = reasoningHint;
+      if (modelCollapsed) {
+        modelBtn.textContent = "🧠";
+        modelBtn.title = modelHint ? `${modelLabel}\n${modelHint}` : modelLabel;
+      } else {
+        modelBtn.textContent = modelLabel;
+        modelBtn.title = modelHint;
       }
 
-      if (dropdownMode !== "icon") return;
-      modelBtn.classList.add("llm-model-btn-collapsed");
-      modelSlot?.classList.add("llm-model-dropdown-collapsed");
-      modelBtn.textContent = "\ud83e\udde0";
-      modelBtn.title = modelHint ? `${modelLabel}\n${modelHint}` : modelLabel;
       if (reasoningBtn) {
-        reasoningBtn.classList.add("llm-reasoning-btn-collapsed");
-        reasoningSlot?.classList.add("llm-reasoning-dropdown-collapsed");
-        reasoningBtn.textContent = REASONING_COMPACT_LABEL;
-        reasoningBtn.title = reasoningHint
-          ? `${reasoningLabel}\n${reasoningHint}`
-          : reasoningLabel;
+        const reasoningCollapsed = state.reasoning === "icon";
+        reasoningBtn.classList.toggle(
+          "llm-reasoning-btn-collapsed",
+          reasoningCollapsed,
+        );
+        reasoningSlot?.classList.toggle(
+          "llm-reasoning-dropdown-collapsed",
+          reasoningCollapsed,
+        );
+        if (!reasoningCollapsed) {
+          reasoningBtn.textContent = reasoningLabel;
+          reasoningBtn.title = reasoningHint;
+        } else {
+          reasoningBtn.textContent = REASONING_COMPACT_LABEL;
+          reasoningBtn.title = reasoningHint
+            ? `${reasoningLabel}\n${reasoningHint}`
+            : reasoningLabel;
+        }
       }
+
+      setPanelActionLayoutMode(getPanelLayoutMode(state));
     };
 
-    const layoutHasIssues = (
-      currentDropdownMode: DropdownMode,
-      currentContextButtonMode: ContextButtonMode,
-      currentModelWrapMode: ModelWrapMode,
-    ) =>
-      !doesModeFit(
-        currentDropdownMode,
-        currentContextButtonMode,
-        currentModelWrapMode,
-      );
+    const widestState: ActionRevealState = {
+      send: "full",
+      reasoning: "full",
+      model: "full-single",
+      screenshot: "full",
+      selectText: "full",
+    };
+    const screenshotState: ActionRevealState = {
+      send: "full",
+      reasoning: "full",
+      model: "full-single",
+      screenshot: "full",
+      selectText: "icon",
+    };
+    const modelState: ActionRevealState = {
+      send: "full",
+      reasoning: "full",
+      model: "full-single",
+      screenshot: "icon",
+      selectText: "icon",
+    };
+    const reasoningState: ActionRevealState = {
+      send: "full",
+      reasoning: "full",
+      model: "icon",
+      screenshot: "icon",
+      selectText: "icon",
+    };
+    const sendState: ActionRevealState = {
+      send: "full",
+      reasoning: "icon",
+      model: "icon",
+      screenshot: "icon",
+      selectText: "icon",
+    };
+    const iconOnlyState: ActionRevealState = {
+      send: "icon",
+      reasoning: "icon",
+      model: "icon",
+      screenshot: "icon",
+      selectText: "icon",
+    };
 
-    const candidateModes: ReadonlyArray<
-      [DropdownMode, ContextButtonMode, ModelWrapMode]
-    > = modelCanUseTwoLineWrap
-      ? [
-          ["full", "full", "single"],
-          ["full", "icon", "single"],
-          ["full", "icon", "wrap2"],
-          ["icon", "icon", "single"],
-        ]
-      : [
-          ["full", "full", "single"],
-          ["full", "icon", "single"],
-          ["icon", "icon", "single"],
-        ];
-    let lastAttemptedMode:
-      | [DropdownMode, ContextButtonMode, ModelWrapMode]
-      | null = null;
-    for (const [
-      dropdownMode,
-      contextButtonMode,
-      modelWrapMode,
-    ] of candidateModes) {
-      lastAttemptedMode = [dropdownMode, contextButtonMode, modelWrapMode];
-      applyLayoutModes(dropdownMode, contextButtonMode, modelWrapMode);
-      if (!layoutHasIssues(dropdownMode, contextButtonMode, modelWrapMode)) {
-        setPanelActionLayoutMode(
-          getActionLayoutMode(dropdownMode, contextButtonMode, modelWrapMode),
-        );
-        return;
-      }
-    }
-    if (lastAttemptedMode) {
-      const [dropdownMode, contextButtonMode, modelWrapMode] =
-        lastAttemptedMode;
-      setPanelActionLayoutMode(
-        getActionLayoutMode(dropdownMode, contextButtonMode, modelWrapMode),
+    // Reveal order as width grows:
+    // send/cancel -> reasoning -> model -> screenshots -> add text.
+    const candidateStates: ActionRevealState[] = [
+      widestState,
+      screenshotState,
+      modelState,
+      reasoningState,
+      sendState,
+      iconOnlyState,
+    ];
+
+    if (modelCanUseTwoLineWrap) {
+      candidateStates.splice(
+        1,
+        0,
+        { ...widestState, model: "full-wrap2" },
+        { ...screenshotState, model: "full-wrap2" },
+        { ...modelState, model: "full-wrap2" },
       );
     }
+
+    applyMeasurementBaseline();
+    for (const state of candidateStates) {
+      if (!doesStateFit(state)) continue;
+      applyState(state);
+      return;
+    }
+
+    applyState(iconOnlyState);
   };
 
   const updateModelButton = () => {
@@ -2086,10 +2136,15 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
     const ro = new ResizeObserverCtor(() => {
       // Wrap layout mutations in scroll guard so that flex-driven
       // resize of .llm-messages doesn't corrupt the scroll snapshot.
-      withScrollGuard(chatBox, conversationKey, () => {
-        applyResponsiveActionButtonsLayout();
-        syncUserContextAlignmentWidths(body);
-      }, "relative");
+      withScrollGuard(
+        chatBox,
+        conversationKey,
+        () => {
+          applyResponsiveActionButtonsLayout();
+          syncUserContextAlignmentWidths(body);
+        },
+        "relative",
+      );
     });
     ro.observe(panelRoot);
     if (actionsRow) ro.observe(actionsRow);
@@ -2103,8 +2158,8 @@ export function setupHandlers(body: Element, item?: Zotero.Item | null) {
         if (!current) return;
         const viewportChanged = Boolean(
           previous &&
-            (current.width !== previous.width ||
-              current.height !== previous.height),
+          (current.width !== previous.width ||
+            current.height !== previous.height),
         );
         if (viewportChanged && previous && previous.nearBottom) {
           const targetBottom = Math.max(
