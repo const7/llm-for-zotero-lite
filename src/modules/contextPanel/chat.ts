@@ -1346,14 +1346,11 @@ export async function retryLatestAssistantResponse(
 
   const assistantMessage = retryPair.assistantMessage;
   const assistantSnapshot = takeAssistantSnapshot(assistantMessage);
-  assistantMessage.text = "";
-  assistantMessage.timestamp = Date.now();
-  assistantMessage.modelName = effectiveRequestConfig.model;
-  assistantMessage.reasoningSummary = undefined;
-  assistantMessage.reasoningDetails = undefined;
-  assistantMessage.reasoningOpen = isReasoningExpandedByDefault();
   assistantMessage.streaming = true;
   refreshChatSafely();
+  let streamedAnswer = "";
+  let streamedReasoningSummary: string | undefined;
+  let streamedReasoningDetails: string | undefined;
 
   const restoreOriginalAssistant = () => {
     restoreAssistantSnapshot(assistantMessage, assistantSnapshot);
@@ -1370,13 +1367,23 @@ export async function retryLatestAssistantResponse(
       apiKey: effectiveRequestConfig.apiKey,
       setStatusSafely,
     });
+    if (cancelledRequestId >= thisRequestId) {
+      restoreOriginalAssistant();
+      setStatusSafely("Cancelled", "ready");
+      return;
+    }
     const llmHistory = buildLLMHistoryMessages(historyForLLM);
 
     const AbortControllerCtor = getAbortController();
     setCurrentAbortController(
       AbortControllerCtor ? new AbortControllerCtor() : null,
     );
-    const queueRefresh = createQueuedRefresh(refreshChatSafely);
+    if (cancelledRequestId >= thisRequestId) {
+      currentAbortController?.abort();
+      restoreOriginalAssistant();
+      setStatusSafely("Cancelled", "ready");
+      return;
+    }
 
     const answer = await callLLMStream(
       {
@@ -1394,23 +1401,21 @@ export async function retryLatestAssistantResponse(
         maxTokens: effectiveRequestConfig.advanced?.maxTokens,
       },
       (delta) => {
-        assistantMessage.text += sanitizeText(delta);
-        queueRefresh();
+        streamedAnswer += sanitizeText(delta);
       },
       (reasoningEvent: ReasoningEvent) => {
         if (reasoningEvent.summary) {
-          assistantMessage.reasoningSummary = appendReasoningPart(
-            assistantMessage.reasoningSummary,
+          streamedReasoningSummary = appendReasoningPart(
+            streamedReasoningSummary,
             reasoningEvent.summary,
           );
         }
         if (reasoningEvent.details) {
-          assistantMessage.reasoningDetails = appendReasoningPart(
-            assistantMessage.reasoningDetails,
+          streamedReasoningDetails = appendReasoningPart(
+            streamedReasoningDetails,
             reasoningEvent.details,
           );
         }
-        queueRefresh();
       },
     );
 
@@ -1424,9 +1429,12 @@ export async function retryLatestAssistantResponse(
     }
 
     assistantMessage.text =
-      sanitizeText(answer) || assistantMessage.text || "No response.";
+      sanitizeText(answer) || streamedAnswer || "No response.";
     assistantMessage.timestamp = Date.now();
     assistantMessage.modelName = effectiveRequestConfig.model;
+    assistantMessage.reasoningSummary = streamedReasoningSummary;
+    assistantMessage.reasoningDetails = streamedReasoningDetails;
+    assistantMessage.reasoningOpen = isReasoningExpandedByDefault();
     assistantMessage.streaming = false;
     refreshChatSafely();
 
