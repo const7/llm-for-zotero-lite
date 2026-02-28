@@ -28,6 +28,7 @@ export interface Message {
   screenshotActiveIndex?: number;
   modelName?: string;
   streaming?: boolean;
+  agentStatusText?: string;
   reasoningSummary?: string;
   reasoningDetails?: string;
   reasoningOpen?: boolean;

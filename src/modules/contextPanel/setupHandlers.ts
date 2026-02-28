@@ -110,6 +110,7 @@ import {
   retryLatestAssistantResponse,
   editLatestUserMessageAndRetry,
   findLatestRetryPair,
+  clearTransientAgentStatusForConversation,
   type EditLatestTurnMarker,
 } from "./chat";
 import {
@@ -253,6 +254,7 @@ import {
   isFileDragEvent,
 } from "./setupHandlers/controllers/fileIntakeController";
 import { createSendFlowController } from "./setupHandlers/controllers/sendFlowController";
+import { createClearConversationController } from "./setupHandlers/controllers/clearConversationController";
 
 export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   const resolvedInitialState = resolveInitialPanelItemState(initialItem);
@@ -305,6 +307,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashMenu,
     slashUploadOption,
     slashReferenceOption,
+    contextAgentToggleBtn,
     imagePreview,
     selectedContextList,
     previewStrip,
@@ -3173,6 +3176,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     restoreDraftInputForCurrentConversation();
     refreshChatPreservingScroll();
     resetComposePreviewUI();
+    updateAgentToggleButton();
     updateModelButton();
     updateReasoningButton();
     void refreshGlobalHistoryHeader();
@@ -3247,6 +3251,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     restoreDraftInputForCurrentConversation();
     refreshChatPreservingScroll();
     resetComposePreviewUI();
+    updateAgentToggleButton();
     updateModelButton();
     updateReasoningButton();
     void refreshGlobalHistoryHeader();
@@ -4131,6 +4136,27 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     });
   }
 
+  if (contextAgentToggleBtn) {
+    contextAgentToggleBtn.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!item || contextAgentToggleBtn.disabled) return;
+      closeModelMenu();
+      closeReasoningMenu();
+      closeRetryModelMenu();
+      closeSlashMenu();
+      closeResponseMenu();
+      closePromptMenu();
+      closeExportMenu();
+      closeHistoryNewMenu();
+      closeHistoryMenu();
+      const nextEnabled = !getSelectedAgentEnabled();
+      selectedAgentCache.set(item.id, nextEnabled);
+      setLastUsedAgentEnabled(nextEnabled);
+      updateAgentToggleButton();
+    });
+  }
+
   if (historyNewOpenBtn) {
     historyNewOpenBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
@@ -4482,6 +4508,27 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     const enabled = persisted === true;
     selectedAgentCache.set(item.id, enabled);
     return enabled;
+  };
+
+  const updateAgentToggleButton = () => {
+    if (!contextAgentToggleBtn) return;
+    const agentEnabled = getSelectedAgentEnabled();
+    contextAgentToggleBtn.style.display = item ? "inline-flex" : "none";
+    contextAgentToggleBtn.disabled = !item;
+    contextAgentToggleBtn.setAttribute(
+      "aria-disabled",
+      !item ? "true" : "false",
+    );
+    contextAgentToggleBtn.setAttribute(
+      "aria-pressed",
+      agentEnabled ? "true" : "false",
+    );
+    contextAgentToggleBtn.classList.toggle(
+      "llm-agent-toggle-enabled",
+      agentEnabled,
+    );
+    contextAgentToggleBtn.title =
+      agentEnabled ? "Agent mode on" : "Agent mode off";
   };
 
   type ActionLabelMode = "icon" | "full";
@@ -5148,7 +5195,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     withScrollGuard(chatBox, conversationKey, () => {
       const { provider, currentModel, options, enabledLevels, selectedLevel } =
         getReasoningState();
-      const agentEnabled = getSelectedAgentEnabled();
       const available = enabledLevels.length > 0;
       const resolvedReasoningLabel = available
         ? getReasoningLevelDisplayLabel(
@@ -5167,20 +5213,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         !available,
       );
       reasoningBtn.classList.toggle("llm-reasoning-btn-active", active);
-      reasoningBtn.classList.toggle(
-        "llm-reasoning-btn-agent-enabled",
-        agentEnabled,
-      );
       reasoningBtn.style.background = "";
       reasoningBtn.style.borderColor = "";
       reasoningBtn.style.color = "";
-      const reasoningHint = available
-        ? agentEnabled
-          ? "Agent mode on. Click to adjust agent mode and reasoning level"
-          : "Click to adjust agent mode and reasoning level"
-        : agentEnabled
-          ? "Agent mode on. Reasoning is unavailable for the current model"
-          : "Click to toggle agent mode. Reasoning is unavailable for the current model";
+      const reasoningHint = "Click to adjust reasoning level";
       reasoningBtn.dataset.reasoningLabel = reasoningLabel;
       reasoningBtn.dataset.reasoningHint = reasoningHint;
       applyResponsiveActionButtonsLayout();
@@ -5191,81 +5227,36 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     if (!item || !reasoningMenu) return;
     const { provider, currentModel, options, selectedLevel, enabledLevels } =
       getReasoningState();
-    const agentEnabled = getSelectedAgentEnabled();
     reasoningMenu.innerHTML = "";
-    appendDropdownInstruction(
-      reasoningMenu,
-      "Agent mode",
-      "llm-reasoning-menu-section",
-    );
-    const agentOption = createElement(
-      body.ownerDocument as Document,
-      "button",
-      "llm-response-menu-item llm-reasoning-option llm-agent-toggle-option",
-      {
-        type: "button",
-      },
-    );
-    agentOption.setAttribute("role", "menuitemcheckbox");
-    agentOption.setAttribute("aria-checked", agentEnabled ? "true" : "false");
-    agentOption.classList.toggle("llm-agent-toggle-option-active", agentEnabled);
-
-    const agentIndicator = createElement(
-      body.ownerDocument as Document,
-      "span",
-      "llm-agent-toggle-indicator",
-    );
-    agentIndicator.setAttribute("aria-hidden", "true");
-    const agentLabel = createElement(
-      body.ownerDocument as Document,
-      "span",
-      "llm-agent-toggle-label",
-      {
-        textContent: "Agent",
-      },
-    );
-    agentOption.append(agentIndicator, agentLabel);
-
-    const toggleAgentSelection = (e: Event) => {
-      if (!isPrimaryPointerEvent(e)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item) return;
-      const nextEnabled = !getSelectedAgentEnabled();
-      selectedAgentCache.set(item.id, nextEnabled);
-      setLastUsedAgentEnabled(nextEnabled);
-      updateReasoningButton();
-      rebuildReasoningMenu();
-      if (reasoningBtn) {
-        positionFloatingMenu(body, reasoningMenu, reasoningBtn);
-      }
-    };
-    agentOption.addEventListener("pointerdown", toggleAgentSelection);
-    agentOption.addEventListener("click", toggleAgentSelection);
-    reasoningMenu.appendChild(agentOption);
-    reasoningMenu.appendChild(
-      createElement(
-        body.ownerDocument as Document,
-        "div",
-        "llm-model-menu-divider",
-      ),
-    );
     appendDropdownInstruction(
       reasoningMenu,
       "Reasoning level",
       "llm-reasoning-menu-section",
     );
     if (!enabledLevels.length) {
-      reasoningMenu.appendChild(
-        createElement(
-          body.ownerDocument as Document,
-          "div",
-          "llm-reasoning-menu-empty",
-          {
-            textContent: "Reasoning unavailable for the current model",
-          },
-        ),
+      const offOption = createElement(
+        body.ownerDocument as Document,
+        "button",
+        "llm-response-menu-item llm-reasoning-option",
+        {
+          type: "button",
+          textContent: "\u2713 off",
+        },
       );
+      const applyOffSelection = (e: Event) => {
+        if (!isPrimaryPointerEvent(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!item) return;
+        selectedReasoningCache.clear();
+        selectedReasoningCache.set(item.id, "none");
+        setLastUsedReasoningLevel("none");
+        setFloatingMenuOpen(reasoningMenu, REASONING_MENU_OPEN_CLASS, false);
+        updateReasoningButton();
+      };
+      offOption.addEventListener("pointerdown", applyOffSelection);
+      offOption.addEventListener("click", applyOffSelection);
+      reasoningMenu.appendChild(offOption);
       return;
     }
     for (const optionState of options) {
@@ -5310,6 +5301,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   };
 
   const syncModelFromPrefs = () => {
+    updateAgentToggleButton();
     updateModelButton();
     updateReasoningButton();
     if (isFloatingMenuOpen(modelMenu)) {
@@ -6379,6 +6371,41 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         }
       : undefined,
     editStaleStatusText: EDIT_STALE_STATUS_TEXT,
+  });
+  const { clearCurrentConversation } = createClearConversationController({
+    getConversationKey: () => (item ? getConversationKey(item) : null),
+    getCurrentItemID: () =>
+      item && Number.isFinite(item.id) && item.id > 0 ? item.id : null,
+    clearPendingTurnDeletion: (conversationKey) => {
+      if (pendingTurnDeletion?.conversationKey === conversationKey) {
+        clearPendingTurnDeletion();
+      }
+    },
+    clearTransientComposeStateForItem,
+    resetComposePreviewUI,
+    resetConversationHistory: (conversationKey) => {
+      chatHistory.set(conversationKey, []);
+    },
+    markConversationLoaded: (conversationKey) => {
+      loadedConversationKeys.add(conversationKey);
+    },
+    clearTransientAgentStatus: clearTransientAgentStatusForConversation,
+    clearStoredConversation,
+    clearOwnerAttachmentRefs,
+    removeConversationAttachmentFiles,
+    refreshChatPreservingScroll,
+    refreshGlobalHistoryHeader: () => {
+      void refreshGlobalHistoryHeader();
+    },
+    scheduleAttachmentGc,
+    setStatusMessage: status
+      ? (message, level) => {
+          setStatus(status, message, level);
+        }
+      : undefined,
+    logError: (message, err) => {
+      ztoolkit.log(message, err);
+    },
   });
   const executeSend = async () => {
     await doSend();
@@ -7716,83 +7743,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       closeHistoryMenu();
       activeEditSession = null;
       if (!item) return;
-      const conversationToClear = getConversationKey(item);
-      if (pendingTurnDeletion?.conversationKey === conversationToClear) {
-        clearPendingTurnDeletion();
-      }
-      const currentItemId = item.id;
-      const libraryID = getCurrentLibraryID();
-      clearTransientComposeStateForItem(currentItemId);
-      resetComposePreviewUI();
-      void (async () => {
-        chatHistory.delete(conversationToClear);
-        loadedConversationKeys.add(conversationToClear);
-        try {
-          await clearStoredConversation(conversationToClear);
-        } catch (err) {
-          ztoolkit.log("LLM: Failed to clear persisted chat history", err);
-        }
-        try {
-          await clearOwnerAttachmentRefs("conversation", conversationToClear);
-        } catch (err) {
-          ztoolkit.log(
-            "LLM: Failed to clear conversation attachment refs",
-            err,
-          );
-        }
-        try {
-          await removeConversationAttachmentFiles(conversationToClear);
-        } catch (err) {
-          ztoolkit.log("LLM: Failed to clear chat attachment files", err);
-        }
-
-        if (isGlobalMode() && libraryID > 0) {
-          try {
-            await deleteGlobalConversation(conversationToClear);
-          } catch (err) {
-            ztoolkit.log("LLM: Failed to delete global conversation row", err);
-          }
-          let nextConversationKey = 0;
-          try {
-            const nextConversations = await listGlobalConversations(
-              libraryID,
-              1,
-              true,
-            );
-            nextConversationKey = nextConversations[0]?.conversationKey || 0;
-          } catch (err) {
-            ztoolkit.log(
-              "LLM: Failed to load next global conversation after clear",
-              err,
-            );
-          }
-          if (!nextConversationKey) {
-            if (basePaperItem) {
-              await switchPaperConversation();
-              void refreshGlobalHistoryHeader();
-              scheduleAttachmentGc();
-              if (status) setStatus(status, "Cleared", "ready");
-              return;
-            }
-            nextConversationKey = await createGlobalConversation(libraryID);
-          }
-          if (nextConversationKey > 0) {
-            activeGlobalConversationByLibrary.set(
-              libraryID,
-              nextConversationKey,
-            );
-            await switchGlobalConversation(nextConversationKey);
-          } else {
-            refreshChatPreservingScroll();
-          }
-          void refreshGlobalHistoryHeader();
-        } else {
-          refreshChatPreservingScroll();
-          void refreshGlobalHistoryHeader();
-        }
-        scheduleAttachmentGc();
-        if (status) setStatus(status, "Cleared", "ready");
-      })();
+      void clearCurrentConversation();
     });
   }
 }

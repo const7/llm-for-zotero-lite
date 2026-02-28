@@ -193,6 +193,7 @@ export async function resolveAgentContext(params: {
   question: string;
   libraryID: number;
   conversationMode: "paper" | "open";
+  onStatus?: (statusText: string) => void;
 }): Promise<AgentContextResolution | null> {
   const normalizedLibraryID = Number(params.libraryID);
   if (!Number.isFinite(normalizedLibraryID) || normalizedLibraryID <= 0) {
@@ -200,6 +201,7 @@ export async function resolveAgentContext(params: {
   }
 
   if (isLibraryOverviewQuery(params.question)) {
+    params.onStatus?.("Reading library metadata now...");
     const candidates = await listLibraryPaperCandidates(normalizedLibraryID);
     const paperContexts = dedupePaperContexts(
       candidates
@@ -221,6 +223,7 @@ export async function resolveAgentContext(params: {
   }
 
   if (isLibraryScopedSearchQuery(params.question, params.conversationMode)) {
+    params.onStatus?.("Searching library metadata now...");
     const candidates = await searchPaperCandidates(
       normalizedLibraryID,
       params.question,

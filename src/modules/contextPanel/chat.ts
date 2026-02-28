@@ -111,6 +111,38 @@ function isReasoningExpandedByDefault(): boolean {
   return getLastReasoningExpanded();
 }
 
+function normalizeTransientAgentStatusText(text: string): string {
+  return sanitizeText(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function clearTransientAgentStatusForConversation(
+  conversationKey: number,
+): void {
+  const history = chatHistory.get(conversationKey) || [];
+  for (const message of history) {
+    if (message.role !== "assistant") continue;
+    delete message.agentStatusText;
+  }
+}
+
+function buildAgentStatusLine(doc: Document, text: string): HTMLDivElement {
+  const line = doc.createElement("div") as HTMLDivElement;
+  line.className = "llm-agent-inline-status llm-agent-toggle-enabled";
+
+  const indicator = doc.createElement("span") as HTMLSpanElement;
+  indicator.className = "llm-agent-toggle-indicator";
+  indicator.setAttribute("aria-hidden", "true");
+
+  const label = doc.createElement("span") as HTMLSpanElement;
+  label.className = "llm-agent-inline-status-label";
+  label.textContent = `Agent is working on: ${text}`;
+
+  line.append(indicator, label);
+  return line;
+}
+
 function setHistoryControlsDisabled(body: Element, disabled: boolean): void {
   const historyNewBtn = body.querySelector(
     "#llm-history-new",
@@ -121,6 +153,16 @@ function setHistoryControlsDisabled(body: Element, disabled: boolean): void {
     if (disabled) {
       historyNewBtn.setAttribute("aria-expanded", "false");
     }
+  }
+  const contextAgentToggleBtn = body.querySelector(
+    "#llm-context-agent-toggle",
+  ) as HTMLButtonElement | null;
+  if (contextAgentToggleBtn) {
+    contextAgentToggleBtn.disabled = disabled;
+    contextAgentToggleBtn.setAttribute(
+      "aria-disabled",
+      disabled ? "true" : "false",
+    );
   }
   const historyToggleBtn = body.querySelector(
     "#llm-history-toggle",
@@ -865,12 +907,14 @@ function createPanelUpdateHelpers(
   item: Zotero.Item,
   conversationKey: number,
   ui: PanelRequestUI,
+  assistantMessage?: Message,
 ): {
   refreshChatSafely: () => void;
   setStatusSafely: (
     text: string,
     kind: Parameters<typeof setStatus>[2],
   ) => void;
+  setAgentStatusSafely: (text: string) => void;
 } {
   const refreshChatSafely = () => {
     refreshConversationPanels(body, item);
@@ -884,7 +928,25 @@ function createPanelUpdateHelpers(
       setStatus(ui.status as HTMLElement, text, kind);
     });
   };
-  return { refreshChatSafely, setStatusSafely };
+  const setAgentStatusSafely = (text: string) => {
+    if (!assistantMessage) return;
+    const normalized = normalizeTransientAgentStatusText(text);
+    const previous = assistantMessage.agentStatusText || "";
+    if (!normalized) {
+      if (!previous) return;
+      delete assistantMessage.agentStatusText;
+      refreshChatSafely();
+      return;
+    }
+    if (previous === normalized) return;
+    assistantMessage.agentStatusText = normalized;
+    refreshChatSafely();
+  };
+  return {
+    refreshChatSafely,
+    setStatusSafely,
+    setAgentStatusSafely,
+  };
 }
 
 type EffectiveRequestConfig = {
@@ -935,6 +997,7 @@ async function buildContextPlanForRequest(params: {
     text: string,
     kind: Parameters<typeof setStatus>[2],
   ) => void;
+  setAgentStatusSafely?: (text: string) => void;
 }): Promise<string> {
   const contextSource = resolveContextSourceItem(params.item);
   params.setStatusSafely(contextSource.statusText, "sending");
@@ -945,14 +1008,21 @@ async function buildContextPlanForRequest(params: {
   let paperContexts = params.paperContexts;
   let pinnedPaperContexts = params.pinnedPaperContexts;
   const contextBlocks: string[] = [];
+  let agentContextResolved = false;
 
   if (params.agentEnabled) {
+    params.setAgentStatusSafely?.("Checking Zotero access now...");
     const agentContext = await resolveAgentContext({
       question: params.question,
       libraryID: Number(params.item.libraryID),
       conversationMode,
+      onStatus: (statusText) => {
+        params.setStatusSafely(statusText, "sending");
+        params.setAgentStatusSafely?.(statusText);
+      },
     });
     if (agentContext) {
+      agentContextResolved = true;
       conversationMode = "open";
       activeContextItem = null;
       paperContexts = agentContext.paperContexts;
@@ -962,6 +1032,9 @@ async function buildContextPlanForRequest(params: {
         contextBlocks.push(prefix);
       }
       params.setStatusSafely(agentContext.statusText, "sending");
+      params.setAgentStatusSafely?.(agentContext.statusText);
+    } else {
+      params.setAgentStatusSafely?.("No Zotero retrieval was needed.");
     }
   }
 
@@ -989,6 +1062,11 @@ async function buildContextPlanForRequest(params: {
         ? `Using full context (${plan.selectedPaperCount} papers)`
         : `Using retrieved evidence (${plan.selectedPaperCount} papers, ${plan.selectedChunkCount} chunks)`;
     params.setStatusSafely(modeStatus, "sending");
+    if (params.agentEnabled) {
+      params.setAgentStatusSafely?.(
+        `Grounding the answer from ${plan.selectedPaperCount} paper${plan.selectedPaperCount === 1 ? "" : "s"}.`,
+      );
+    }
   }
   ztoolkit.log("LLM: Multi-context plan", {
     mode: plan.mode,
@@ -1027,6 +1105,7 @@ type AssistantMessageSnapshot = Pick<
   | "text"
   | "timestamp"
   | "modelName"
+  | "agentStatusText"
   | "reasoningSummary"
   | "reasoningDetails"
   | "reasoningOpen"
@@ -1052,6 +1131,7 @@ function takeAssistantSnapshot(message: Message): AssistantMessageSnapshot {
     text: message.text,
     timestamp: message.timestamp,
     modelName: message.modelName,
+    agentStatusText: message.agentStatusText,
     reasoningSummary: message.reasoningSummary,
     reasoningDetails: message.reasoningDetails,
     reasoningOpen: message.reasoningOpen,
@@ -1065,6 +1145,7 @@ function restoreAssistantSnapshot(
   message.text = snapshot.text;
   message.timestamp = snapshot.timestamp;
   message.modelName = snapshot.modelName;
+  message.agentStatusText = snapshot.agentStatusText;
   message.reasoningSummary = snapshot.reasoningSummary;
   message.reasoningDetails = snapshot.reasoningDetails;
   message.reasoningOpen = snapshot.reasoningOpen;
@@ -1436,11 +1517,24 @@ export async function retryLatestAssistantResponse(
 
   const thisRequestId = nextRequestId();
   setRequestUIBusy(body, ui, conversationKey, "Preparing retry...");
-  const { refreshChatSafely, setStatusSafely } = createPanelUpdateHelpers(
+  const assistantMessage = retryPair.assistantMessage;
+  const assistantSnapshot = takeAssistantSnapshot(assistantMessage);
+  assistantMessage.text = "";
+  assistantMessage.agentStatusText = undefined;
+  assistantMessage.reasoningSummary = undefined;
+  assistantMessage.reasoningDetails = undefined;
+  assistantMessage.reasoningOpen = isReasoningExpandedByDefault();
+  assistantMessage.streaming = true;
+  const {
+    refreshChatSafely,
+    setStatusSafely,
+    setAgentStatusSafely,
+  } = createPanelUpdateHelpers(
     body,
     item,
     conversationKey,
     ui,
+    assistantMessage,
   );
 
   const historyForLLM = history
@@ -1468,14 +1562,6 @@ export async function retryLatestAssistantResponse(
     reasoning,
     advanced,
   });
-
-  const assistantMessage = retryPair.assistantMessage;
-  const assistantSnapshot = takeAssistantSnapshot(assistantMessage);
-  assistantMessage.text = "";
-  assistantMessage.reasoningSummary = undefined;
-  assistantMessage.reasoningDetails = undefined;
-  assistantMessage.reasoningOpen = isReasoningExpandedByDefault();
-  assistantMessage.streaming = true;
   refreshChatSafely();
   let streamedAnswer = "";
   let streamedReasoningSummary: string | undefined;
@@ -1500,6 +1586,7 @@ export async function retryLatestAssistantResponse(
       effectiveRequestConfig,
       agentEnabled,
       setStatusSafely,
+      setAgentStatusSafely,
     });
     if (cancelledRequestId >= thisRequestId) {
       restoreOriginalAssistant();
@@ -1647,12 +1734,6 @@ export async function sendQuestion(
 
   await ensureConversationLoaded(item);
   const conversationKey = getConversationKey(item);
-  const { refreshChatSafely, setStatusSafely } = createPanelUpdateHelpers(
-    body,
-    item,
-    conversationKey,
-    ui,
-  );
 
   // Add user message with attached selected text / screenshots metadata
   if (!chatHistory.has(conversationKey)) {
@@ -1751,6 +1832,17 @@ export async function sendQuestion(
   if (history.length > PERSISTED_HISTORY_LIMIT) {
     history.splice(0, history.length - PERSISTED_HISTORY_LIMIT);
   }
+  const {
+    refreshChatSafely,
+    setStatusSafely,
+    setAgentStatusSafely,
+  } = createPanelUpdateHelpers(
+    body,
+    item,
+    conversationKey,
+    ui,
+    assistantMessage,
+  );
   refreshChatSafely();
 
   let assistantPersisted = false;
@@ -1791,6 +1883,7 @@ export async function sendQuestion(
       effectiveRequestConfig,
       agentEnabled,
       setStatusSafely,
+      setAgentStatusSafely,
     });
 
     const AbortControllerCtor = getAbortController();
@@ -1931,7 +2024,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
   const latestEditableIsIdle = Boolean(
     latestRetryPair && !latestRetryPair.assistantMessage.streaming,
   );
-
   for (const [index, msg] of history.entries()) {
     const isUser = msg.role === "user";
     const canEditLatestUserPrompt = Boolean(
@@ -2477,6 +2569,10 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       }
     } else {
       const hasModelName = Boolean(msg.modelName?.trim());
+      const agentStatusText = normalizeTransientAgentStatusText(
+        msg.agentStatusText || "",
+      );
+      const showAgentStatus = Boolean(agentStatusText);
       const hasAnswerText = Boolean(msg.text);
       if (hasAnswerText) {
         const safeText = sanitizeText(msg.text);
@@ -2544,6 +2640,19 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           });
           positionMenuAtPointer(body, responseMenu, me.clientX, me.clientY);
         });
+      }
+
+      const bubbleHeaderNodes: HTMLElement[] = [];
+
+      if (hasModelName) {
+        const modelName = doc.createElement("div") as HTMLDivElement;
+        modelName.className = "llm-model-name";
+        modelName.textContent = msg.modelName?.trim() || "";
+        bubbleHeaderNodes.push(modelName);
+      }
+
+      if (showAgentStatus) {
+        bubbleHeaderNodes.push(buildAgentStatusLine(doc, agentStatusText));
       }
 
       const hasReasoningSummary = Boolean(msg.reasoningSummary?.trim());
@@ -2618,7 +2727,11 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         }
 
         details.appendChild(bodyWrap);
-        bubble.insertBefore(details, bubble.firstChild);
+        bubbleHeaderNodes.push(details);
+      }
+
+      for (let i = bubbleHeaderNodes.length - 1; i >= 0; i -= 1) {
+        bubble.insertBefore(bubbleHeaderNodes[i], bubble.firstChild);
       }
 
       if (!hasAnswerText) {
@@ -2627,13 +2740,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         typing.innerHTML =
           '<span class="llm-typing-dot"></span><span class="llm-typing-dot"></span><span class="llm-typing-dot"></span>';
         bubble.appendChild(typing);
-      }
-
-      if (hasModelName) {
-        const modelName = doc.createElement("div") as HTMLDivElement;
-        modelName.className = "llm-model-name";
-        modelName.textContent = msg.modelName?.trim() || "";
-        bubble.insertBefore(modelName, bubble.firstChild);
       }
     }
 

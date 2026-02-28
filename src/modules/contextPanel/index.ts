@@ -45,7 +45,10 @@ import {
 import { normalizeSelectedText, setStatus } from "./textUtils";
 import { buildUI } from "./buildUI";
 import { setupHandlers } from "./setupHandlers";
-import { ensureConversationLoaded } from "./chat";
+import {
+  clearTransientAgentStatusForConversation,
+  ensureConversationLoaded,
+} from "./chat";
 import { renderShortcuts } from "./shortcuts";
 import { refreshChat } from "./chat";
 import {
@@ -59,7 +62,7 @@ import {
   getFirstSelectionFromReader,
   getSelectionFromDocument,
 } from "./readerSelection";
-import { resolvePaperContextRefFromAttachment } from "./paperAttribution";
+import { resolveReaderPopupPaperContext } from "./readerPopup";
 import { resolveInitialPanelItemState } from "./portalScope";
 
 // =============================================================================
@@ -297,7 +300,10 @@ export function registerReaderSelectionTracking() {
                   ),
                 )
               : 0;
-          const readerPaperContext = resolvePaperContextRefFromAttachment(item);
+          const readerPaperContext = resolveReaderPopupPaperContext(
+            item,
+            getActiveContextAttachmentFromTabs(),
+          );
           const readerPaperItemID =
             readerPaperContext && Number.isFinite(readerPaperContext.itemId)
               ? Math.floor(readerPaperContext.itemId)
@@ -666,8 +672,9 @@ export function registerReaderSelectionTracking() {
 }
 
 export function clearConversation(itemId: number) {
-  chatHistory.delete(itemId);
+  chatHistory.set(itemId, []);
   loadedConversationKeys.add(itemId);
+  clearTransientAgentStatusForConversation(itemId);
   void clearStoredConversation(itemId).catch((err) => {
     ztoolkit.log("LLM: Failed to clear persisted chat history", err);
   });

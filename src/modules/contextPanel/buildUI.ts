@@ -425,6 +425,31 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   const contextPreviews = createElement(doc, "div", "llm-context-previews", {
     id: "llm-context-previews",
   });
+  const contextAgentToggle = createElement(
+    doc,
+    "button",
+    "llm-context-agent-toggle",
+    {
+      id: "llm-context-agent-toggle",
+      type: "button",
+      title: "Toggle agent mode",
+      disabled: !hasItem,
+    },
+  );
+  contextAgentToggle.setAttribute("aria-label", "Toggle agent mode");
+  contextAgentToggle.setAttribute("aria-pressed", "false");
+  contextAgentToggle.style.display = hasItem ? "inline-flex" : "none";
+  const contextAgentIndicator = createElement(
+    doc,
+    "span",
+    "llm-agent-toggle-indicator",
+  );
+  contextAgentIndicator.setAttribute("aria-hidden", "true");
+  const contextAgentLabel = createElement(doc, "span", "llm-agent-toggle-label", {
+    textContent: "Agent",
+  });
+  contextAgentToggle.append(contextAgentIndicator, contextAgentLabel);
+  contextPreviews.appendChild(contextAgentToggle);
   const selectedContextList = createElement(
     doc,
     "div",
