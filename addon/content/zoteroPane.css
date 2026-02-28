@@ -2810,7 +2810,7 @@
 .llm-reasoning-btn-active {
   border-color: transparent;
   background: transparent;
-  color: var(--fill-primary);
+  color: var(--color-accent);
 }
 
 .llm-reasoning-btn-active:hover:not(:disabled) {
@@ -2818,15 +2818,26 @@
   border-color: transparent;
 }
 
+.llm-action-slot.llm-reasoning-dropdown
+  > .llm-reasoning-btn.llm-reasoning-btn-collapsed.llm-reasoning-btn-active::before {
+  background-color: var(--color-accent);
+}
+
 .llm-reasoning-btn-agent-enabled {
   background: transparent;
   border-color: transparent;
+  color: #16a34a;
 }
 
 .llm-reasoning-btn-agent-enabled:hover:not(:disabled),
 .llm-reasoning-btn-agent-enabled:focus-visible {
   background: transparent;
   border-color: transparent;
+}
+
+.llm-action-slot.llm-reasoning-dropdown
+  > .llm-reasoning-btn.llm-reasoning-btn-collapsed.llm-reasoning-btn-active::before {
+  background-color: var(--color-accent);
 }
 
 .llm-action-slot.llm-reasoning-dropdown
@@ -2854,9 +2865,11 @@
   z-index: 12;
   display: none;
   gap: 2px;
+  box-sizing: border-box;
   min-width: calc(64px * var(--llm-font-scale, 1));
   max-width: min(88vw, 360px);
   max-height: 60vh;
+  overflow-x: hidden;
   overflow-y: auto;
   background: var(--material-background);
   border: 1px solid var(--stroke-secondary);

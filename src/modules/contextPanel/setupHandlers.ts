@@ -206,6 +206,7 @@ import {
 } from "./setupHandlers/controllers/menuController";
 import {
   getReasoningLevelDisplayLabel,
+  isReasoningDisplayLabelActive,
   getScreenshotDisabledHint,
   isScreenshotUnsupportedModel,
 } from "./setupHandlers/controllers/modelReasoningController";
@@ -4534,7 +4535,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     const reasoningLabel =
       reasoningBtn?.dataset.reasoningLabel ||
       reasoningBtn?.textContent ||
-      "Reasoning";
+      "off";
     const reasoningHint = reasoningBtn?.dataset.reasoningHint || "";
 
     const immediateAvailableWidth = (() => {
@@ -5149,15 +5150,17 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         getReasoningState();
       const agentEnabled = getSelectedAgentEnabled();
       const available = enabledLevels.length > 0;
-      const active = available && selectedLevel !== "none";
-      const reasoningLabel = active
+      const resolvedReasoningLabel = available
         ? getReasoningLevelDisplayLabel(
             selectedLevel as LLMReasoningLevel,
             provider,
             currentModel,
             options,
           )
-        : "Reasoning";
+        : "off";
+      const active =
+        available && isReasoningDisplayLabelActive(resolvedReasoningLabel);
+      const reasoningLabel = resolvedReasoningLabel;
       reasoningBtn.disabled = !item;
       reasoningBtn.classList.toggle(
         "llm-reasoning-btn-unavailable",

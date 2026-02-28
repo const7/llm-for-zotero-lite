@@ -36,3 +36,8 @@ export function getReasoningLevelDisplayLabel(
   void modelName;
   return "default";
 }
+
+export function isReasoningDisplayLabelActive(label: string): boolean {
+  const normalized = label.trim().toLowerCase();
+  return normalized !== "off" && normalized !== "disabled";
+}

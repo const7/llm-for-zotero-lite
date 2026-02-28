@@ -32,39 +32,55 @@ export function positionFloatingMenu(
 
   const viewportMargin = 8;
   const gap = 6;
+  const ownerRect = owner.getBoundingClientRect();
+  const hasOwnerBounds = ownerRect.width > 0 && ownerRect.height > 0;
+  const boundaryLeft = hasOwnerBounds
+    ? Math.max(viewportMargin, ownerRect.left + viewportMargin)
+    : viewportMargin;
+  const boundaryTop = hasOwnerBounds
+    ? Math.max(viewportMargin, ownerRect.top + viewportMargin)
+    : viewportMargin;
+  const boundaryRight = hasOwnerBounds
+    ? Math.min(win.innerWidth - viewportMargin, ownerRect.right - viewportMargin)
+    : win.innerWidth - viewportMargin;
+  const boundaryBottom = hasOwnerBounds
+    ? Math.min(
+        win.innerHeight - viewportMargin,
+        ownerRect.bottom - viewportMargin,
+      )
+    : win.innerHeight - viewportMargin;
+  const availableWidth = Math.max(120, boundaryRight - boundaryLeft);
+  const availableHeight = Math.max(120, boundaryBottom - boundaryTop);
 
   menu.style.position = "fixed";
   menu.style.display = "grid";
   menu.style.visibility = "hidden";
-  menu.style.maxHeight = `${Math.max(120, win.innerHeight - viewportMargin * 2)}px`;
+  menu.style.maxWidth = `${availableWidth}px`;
+  menu.style.maxHeight = `${availableHeight}px`;
+  menu.style.boxSizing = "border-box";
   menu.style.overflowY = "auto";
+  menu.style.overflowX = "hidden";
 
   const anchorRect = anchor.getBoundingClientRect();
   const menuRect = menu.getBoundingClientRect();
 
   let left = anchorRect.left;
-  const maxLeft = Math.max(
-    viewportMargin,
-    win.innerWidth - menuRect.width - viewportMargin,
-  );
-  left = Math.min(Math.max(viewportMargin, left), maxLeft);
+  const maxLeft = Math.max(boundaryLeft, boundaryRight - menuRect.width);
+  left = Math.min(Math.max(boundaryLeft, left), maxLeft);
 
   const belowTop = anchorRect.bottom + gap;
   const aboveTop = anchorRect.top - gap - menuRect.height;
   let top = belowTop;
 
-  if (belowTop + menuRect.height > win.innerHeight - viewportMargin) {
-    if (aboveTop >= viewportMargin) {
+  if (belowTop + menuRect.height > boundaryBottom) {
+    if (aboveTop >= boundaryTop) {
       top = aboveTop;
     } else {
-      top = Math.max(
-        viewportMargin,
-        win.innerHeight - menuRect.height - viewportMargin,
-      );
+      top = Math.max(boundaryTop, boundaryBottom - menuRect.height);
     }
   }
 
   menu.style.left = `${Math.round(left)}px`;
-  menu.style.top = `${Math.round(top)}px`;
+  menu.style.top = `${Math.round(Math.max(boundaryTop, top))}px`;
   menu.style.visibility = "visible";
 }
