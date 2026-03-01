@@ -646,6 +646,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     if (historyToggleBtn) {
       historyToggleBtn.setAttribute("aria-expanded", "false");
     }
+    const win = body.ownerDocument?.defaultView;
+    if (win && Number.isFinite(historySectionViewportFrameId)) {
+      win.cancelAnimationFrame(historySectionViewportFrameId as number);
+    }
+    historySectionViewportFrameId = null;
     historySearchLoadSeq += 1;
     historySearchQuery = "";
     historySearchExpanded = false;
@@ -1986,6 +1991,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   };
 
   let latestConversationHistory: ConversationHistoryEntry[] = [];
+  const HISTORY_SECTION_VISIBLE_ROW_COUNT = 5;
+  let historySectionViewportFrameId: number | null = null;
   const historySectionExpandedState = new Map<"paper" | "open", boolean>([
     ["paper", true],
     ["open", false],
@@ -2480,13 +2487,88 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     if (sectionIcon) {
       sectionIcon.textContent = expanded ? "▾" : "▸";
     }
-    const sectionRows = sectionBlock.querySelector(
-      ".llm-history-menu-section-rows",
+    const sectionViewport = sectionBlock.querySelector(
+      ".llm-history-menu-section-viewport",
     ) as HTMLDivElement | null;
-    if (sectionRows) {
-      sectionRows.hidden = !expanded;
-      sectionRows.style.display = expanded ? "flex" : "none";
+    if (sectionViewport) {
+      sectionViewport.hidden = !expanded;
+      sectionViewport.style.display = expanded ? "block" : "none";
     }
+  };
+
+  const applyHistorySectionViewportHeights = () => {
+    if (!historyMenu || historyMenu.style.display === "none") return;
+    const sectionViewports = Array.from(
+      historyMenu.querySelectorAll(".llm-history-menu-section-viewport"),
+    ) as HTMLDivElement[];
+    for (const sectionViewport of sectionViewports) {
+      const shouldLimit =
+        sectionViewport.dataset.scrollLimited === "true" &&
+        !sectionViewport.hidden &&
+        sectionViewport.style.display !== "none";
+      if (!shouldLimit) {
+        sectionViewport.style.maxHeight = "";
+        continue;
+      }
+      const sectionRows = sectionViewport.querySelector(
+        ".llm-history-menu-section-rows",
+      ) as HTMLDivElement | null;
+      if (!sectionRows) {
+        sectionViewport.style.maxHeight = "";
+        continue;
+      }
+      const rowElements = Array.from(sectionRows.children).filter((child) =>
+        child.classList.contains("llm-history-menu-row"),
+      ) as HTMLDivElement[];
+      if (!rowElements.length) {
+        sectionViewport.style.maxHeight = "";
+        continue;
+      }
+      const computedRowsStyle =
+        body.ownerDocument?.defaultView?.getComputedStyle(sectionRows);
+      const parsedRowGap = Number.parseFloat(computedRowsStyle?.rowGap || "");
+      const parsedGap = Number.parseFloat(computedRowsStyle?.gap || "");
+      const rowGap = Number.isFinite(parsedRowGap)
+        ? parsedRowGap
+        : Number.isFinite(parsedGap)
+          ? parsedGap
+          : 0;
+      let visibleHeight = 0;
+      for (const row of rowElements.slice(0, HISTORY_SECTION_VISIBLE_ROW_COUNT)) {
+        const measuredHeight = row.getBoundingClientRect().height || row.offsetHeight;
+        if (measuredHeight > 0) visibleHeight += measuredHeight;
+      }
+      if (visibleHeight <= 0) {
+        sectionViewport.style.maxHeight = "";
+        continue;
+      }
+      visibleHeight +=
+        rowGap * Math.max(0, HISTORY_SECTION_VISIBLE_ROW_COUNT - 1);
+      sectionViewport.style.maxHeight = `${Math.ceil(visibleHeight)}px`;
+    }
+  };
+
+  const queueHistorySectionViewportHeights = () => {
+    const win = body.ownerDocument?.defaultView;
+    if (!win) {
+      applyHistorySectionViewportHeights();
+      return;
+    }
+    if (Number.isFinite(historySectionViewportFrameId)) {
+      win.cancelAnimationFrame(historySectionViewportFrameId as number);
+    }
+    historySectionViewportFrameId = win.requestAnimationFrame(() => {
+      historySectionViewportFrameId = null;
+      applyHistorySectionViewportHeights();
+      if (
+        historyToggleBtn &&
+        historyMenu &&
+        historyMenu.style.display !== "none"
+      ) {
+        positionMenuBelowButton(body, historyMenu, historyToggleBtn);
+        historyMenu.style.display = "flex";
+      }
+    });
   };
 
   const renderGlobalHistoryMenu = () => {
@@ -2686,12 +2768,22 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       sectionHeader.append(sectionLabel, sectionIcon);
       sectionBlock.appendChild(sectionHeader);
 
+      const sectionViewport = createElement(
+        body.ownerDocument as Document,
+        "div",
+        "llm-history-menu-section-viewport",
+      ) as HTMLDivElement;
+      sectionViewport.dataset.scrollLimited =
+        section.entries.length > HISTORY_SECTION_VISIBLE_ROW_COUNT
+          ? "true"
+          : "false";
       const sectionRows = createElement(
         body.ownerDocument as Document,
         "div",
         "llm-history-menu-section-rows",
       ) as HTMLDivElement;
-      sectionBlock.appendChild(sectionRows);
+      sectionViewport.appendChild(sectionRows);
+      sectionBlock.appendChild(sectionViewport);
       applyHistorySectionExpandedState(sectionBlock, expanded);
 
       for (const entry of section.entries) {
@@ -2797,6 +2889,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
 
       historyMenu.appendChild(sectionBlock);
     }
+
+    if (historyMenu.style.display !== "none") {
+      queueHistorySectionViewportHeights();
+    }
   };
 
   const restoreHistorySearchInputFocus = () => {
@@ -2824,6 +2920,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       historyMenu.style.display !== "none"
     ) {
       positionMenuBelowButton(body, historyMenu, historyToggleBtn);
+      queueHistorySectionViewportHeights();
     }
     restoreHistorySearchInputFocus();
   };
@@ -2841,6 +2938,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       historyMenu.style.display !== "none"
     ) {
       positionMenuBelowButton(body, historyMenu, historyToggleBtn);
+      queueHistorySectionViewportHeights();
     }
   };
 
@@ -2860,6 +2958,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         historyMenu.style.display !== "none"
       ) {
         positionMenuBelowButton(body, historyMenu, historyToggleBtn);
+        queueHistorySectionViewportHeights();
       }
       restoreHistorySearchInputFocus();
       return;
@@ -2876,6 +2975,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         historyMenu.style.display !== "none"
       ) {
         positionMenuBelowButton(body, historyMenu, historyToggleBtn);
+        queueHistorySectionViewportHeights();
       }
       restoreHistorySearchInputFocus();
       return;
@@ -2888,6 +2988,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       historyMenu.style.display !== "none"
     ) {
       positionMenuBelowButton(body, historyMenu, historyToggleBtn);
+      queueHistorySectionViewportHeights();
     }
     restoreHistorySearchInputFocus();
     await ensureHistorySearchDocuments(missingEntries);
@@ -2900,6 +3001,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       historyMenu.style.display !== "none"
     ) {
       positionMenuBelowButton(body, historyMenu, historyToggleBtn);
+      queueHistorySectionViewportHeights();
     }
     restoreHistorySearchInputFocus();
   };
@@ -4227,6 +4329,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         positionMenuBelowButton(body, historyMenu, historyToggleBtn);
         historyMenu.style.display = "flex";
         historyToggleBtn.setAttribute("aria-expanded", "true");
+        queueHistorySectionViewportHeights();
       })();
     });
   }
@@ -4306,6 +4409,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         ) as HTMLDivElement | null;
         if (sectionBlock) {
           applyHistorySectionExpandedState(sectionBlock, nextExpanded);
+          queueHistorySectionViewportHeights();
         }
         return;
       }

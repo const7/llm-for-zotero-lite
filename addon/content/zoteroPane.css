@@ -483,6 +483,7 @@
 }
 
 .llm-history-menu {
+  --llm-history-row-gap: 4px;
   position: absolute;
   z-index: 13;
   display: none;
@@ -614,6 +615,19 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.llm-history-menu-section-viewport {
+  display: block;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.llm-history-menu-section-viewport[data-scroll-limited="true"] {
+  max-height: 320px;
 }
 
 .llm-history-menu-section-rows {
