@@ -67,6 +67,7 @@ export type PanelDomRefs = {
   exportMenuNoteBtn: HTMLButtonElement | null;
   retryModelMenu: HTMLDivElement | null;
   status: HTMLElement | null;
+  tokenUsageEl: HTMLElement | null;
   liveLocateDemo: HTMLDivElement | null;
   chatBox: HTMLDivElement | null;
   panelRoot: HTMLDivElement | null;
@@ -254,6 +255,7 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
       "#llm-retry-model-menu",
     ) as HTMLDivElement | null,
     status: body.querySelector("#llm-status") as HTMLElement | null,
+    tokenUsageEl: body.querySelector("#llm-token-usage") as HTMLElement | null,
     liveLocateDemo: body.querySelector(
       "#llm-live-locate-demo",
     ) as HTMLDivElement | null,

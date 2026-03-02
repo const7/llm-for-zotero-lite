@@ -2767,10 +2767,18 @@
 }
 
 /* Status */
+.llm-status-bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
 .llm-status {
   font-size: var(--llm-fs-11);
   color: var(--fill-tertiary);
-  grid-column: 1 / -1;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -2793,6 +2801,14 @@
 
 .llm-status-context-missing {
   color: var(--fill-tertiary);
+}
+
+.llm-token-usage {
+  font-size: var(--llm-fs-11);
+  color: var(--fill-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: none;
 }
 
 .llm-live-locate-demo {

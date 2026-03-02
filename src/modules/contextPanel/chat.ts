@@ -17,7 +17,9 @@ import {
   ReasoningConfig as LLMReasoningConfig,
   ReasoningEvent,
   ReasoningLevel as LLMReasoningLevel,
+  UsageStats,
 } from "../../utils/llmClient";
+import { estimateConversationTokens } from "../../utils/modelInputCap";
 import {
   PERSISTED_HISTORY_LIMIT,
   AUTO_SCROLL_BOTTOM_THRESHOLD,
@@ -54,6 +56,7 @@ import {
   sanitizeText,
   formatTime,
   setStatus,
+  setTokenUsage,
   getSelectedTextWithinBubble,
   getAttachmentTypeLabel,
   buildQuestionWithSelectedTextContexts,
@@ -393,6 +396,39 @@ const followBottomStabilizers = new Map<
   number,
   { rafId: number | null; timeoutId: number | null }
 >();
+
+/** Cumulative API token usage per conversation key for the current session. */
+const sessionTokenTotals = new Map<number, number>();
+
+function accumulateSessionTokens(conversationKey: number, delta: number): number {
+  const prev = sessionTokenTotals.get(conversationKey) ?? 0;
+  const next = prev + delta;
+  sessionTokenTotals.set(conversationKey, next);
+  return next;
+}
+
+/**
+ * Seed the session token total from the existing chat history if it hasn't
+ * been set yet in this Zotero session. Returns the seeded (or existing) total.
+ */
+function getOrSeedSessionTokens(conversationKey: number, history: Message[]): number {
+  if (sessionTokenTotals.has(conversationKey)) {
+    return sessionTokenTotals.get(conversationKey)!;
+  }
+  if (history.length === 0) {
+    sessionTokenTotals.set(conversationKey, 0);
+    return 0;
+  }
+  const estimated = estimateConversationTokens(
+    history.map((m) => ({ role: m.role, content: m.text || "" })),
+  );
+  sessionTokenTotals.set(conversationKey, estimated);
+  return estimated;
+}
+
+export function resetSessionTokens(conversationKey: number): void {
+  sessionTokenTotals.delete(conversationKey);
+}
 
 /**
  * Guard flag: when `true` the scroll-event handler in setupHandlers must
@@ -868,6 +904,7 @@ type PanelRequestUI = {
   sendBtn: HTMLButtonElement | null;
   cancelBtn: HTMLButtonElement | null;
   status: HTMLElement | null;
+  tokenUsageEl: HTMLElement | null;
 };
 
 function getPanelRequestUI(body: Element): PanelRequestUI {
@@ -877,6 +914,7 @@ function getPanelRequestUI(body: Element): PanelRequestUI {
     sendBtn: body.querySelector("#llm-send") as HTMLButtonElement | null,
     cancelBtn: body.querySelector("#llm-cancel") as HTMLButtonElement | null,
     status: body.querySelector("#llm-status") as HTMLElement | null,
+    tokenUsageEl: body.querySelector("#llm-token-usage") as HTMLElement | null,
   };
 }
 
@@ -1727,6 +1765,10 @@ export async function retryLatestAssistantResponse(
         }
         queueRefresh();
       },
+      (usage: UsageStats) => {
+        const total = accumulateSessionTokens(conversationKey, usage.totalTokens);
+        if (ui.tokenUsageEl) setTokenUsage(ui.tokenUsageEl, total);
+      },
     );
 
     if (
@@ -2032,6 +2074,10 @@ export async function sendQuestion(
         }
         queueRefresh();
       },
+      (usage: UsageStats) => {
+        const total = accumulateSessionTokens(conversationKey, usage.totalTokens);
+        if (ui.tokenUsageEl) setTokenUsage(ui.tokenUsageEl, total);
+      },
     );
 
     if (
@@ -2087,10 +2133,14 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         <div class="llm-welcome-text">Select an item or open a PDF to start.</div>
       </div>
     `;
+    const tokenUsageEl = body.querySelector("#llm-token-usage") as HTMLElement | null;
+    if (tokenUsageEl) tokenUsageEl.style.display = "none";
     return;
   }
 
   const conversationKey = getConversationKey(item);
+  // Sync token counter for this conversation
+  const tokenUsageEl = body.querySelector("#llm-token-usage") as HTMLElement | null;
   const panelRoot = body.querySelector("#llm-main") as HTMLDivElement | null;
   const isGlobalConversation =
     isGlobalPortalItem(item) ||
@@ -2105,6 +2155,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       ? cachedSnapshot
       : buildChatScrollSnapshot(chatBox);
   const history = chatHistory.get(conversationKey) || [];
+  if (tokenUsageEl) setTokenUsage(tokenUsageEl, getOrSeedSessionTokens(conversationKey, history));
 
   if (history.length === 0) {
     chatBox.innerHTML = `

@@ -300,6 +300,18 @@ export function setStatus(
   statusEl.className = `llm-status llm-status-${variant}`;
 }
 
+export function formatTokenCount(tokens: number): string {
+  if (tokens < 0) return "0";
+  if (tokens < 1000) return `${tokens}`;
+  if (tokens < 10000) return `${(tokens / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  return `${Math.round(tokens / 1000)}k`;
+}
+
+export function setTokenUsage(el: HTMLElement, sessionTokens: number): void {
+  el.textContent = `${formatTokenCount(Math.max(0, sessionTokens))} tokens`;
+  el.style.display = "inline";
+}
+
 export function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }

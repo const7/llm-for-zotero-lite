@@ -758,6 +758,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   const sendSlot = createElement(doc, "div", "llm-action-slot");
   sendSlot.append(sendBtn, cancelBtn);
 
+  const statusBar = createElement(doc, "div", "llm-status-bar");
   const statusLine = createElement(doc, "div", "llm-status", {
     id: "llm-status",
     textContent: hasItem
@@ -766,6 +767,10 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
         : "Ready"
       : "Select an item or open a PDF",
   });
+  const tokenUsage = createElement(doc, "span", "llm-token-usage", {
+    id: "llm-token-usage",
+  });
+  statusBar.append(statusLine, tokenUsage);
   const liveLocateDemo = createElement(doc, "div", "llm-live-locate-demo", {
     id: "llm-live-locate-demo",
   });
@@ -782,7 +787,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   actionsRow.append(actionsLeft, actionsRight);
   composeArea.appendChild(actionsRow);
   container.appendChild(inputSection);
-  container.appendChild(statusLine);
+  container.appendChild(statusBar);
   container.appendChild(liveLocateDemo);
   body.appendChild(container);
 }
