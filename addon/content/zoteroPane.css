@@ -1827,11 +1827,9 @@
 .llm-bubble.assistant .llm-paper-citation-row {
   margin-top: 4px;
   display: block;
-  max-width: none;
-  padding-left: 2px;
-  overflow-x: auto;
-  overflow-y: visible;
-  white-space: nowrap;
+  max-width: 100%;
+  padding-left: 0;
+  overflow: visible;
 }
 
 .llm-bubble.assistant .llm-paper-citation-link {
@@ -1870,7 +1868,7 @@
 
 .llm-bubble.assistant .llm-paper-citation-link-label {
   display: inline-block;
-  min-width: auto;
+  min-width: 0;
   max-width: none;
   white-space: nowrap;
   overflow: visible;
@@ -1878,8 +1876,12 @@
 }
 
 .llm-bubble.assistant .llm-paper-citation-link .llm-paper-context-chip-label {
-  padding: 3px 8px;
+  padding: 2px 6px;
   font-size: var(--llm-fs-11);
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 .llm-bubble.assistant .llm-paper-citation-link:hover .llm-paper-context-chip-label {
