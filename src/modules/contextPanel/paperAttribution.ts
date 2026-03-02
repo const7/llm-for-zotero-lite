@@ -98,10 +98,15 @@ export function formatPaperCitationLabel(
   if (!paperContext) return "Paper";
   const authorLastName = extractFirstAuthorLastName(paperContext);
   const year = resolvePaperContextDisplayMetadata(paperContext).year;
+  const citationKey = normalizeText(paperContext.citationKey || "");
   if (authorLastName !== "Paper") {
-    return year
+    const authorYearLabel = year
       ? `${authorLastName} et al., ${year}`
       : `${authorLastName} et al.`;
+    if (citationKey) {
+      return `${authorYearLabel} [${citationKey}]`;
+    }
+    return authorYearLabel;
   }
   const fallbackId =
     Number.isFinite(paperContext.itemId) && paperContext.itemId > 0
@@ -109,6 +114,7 @@ export function formatPaperCitationLabel(
       : Number.isFinite(paperContext.contextItemId) && paperContext.contextItemId > 0
         ? Math.floor(paperContext.contextItemId)
         : 0;
+  if (citationKey) return citationKey;
   return fallbackId > 0 ? `Paper ${fallbackId}` : "Paper";
 }
 

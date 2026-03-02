@@ -18,6 +18,18 @@ describe("paperAttribution", function () {
     assert.equal(label, "Smith et al., 2021");
   });
 
+  it("appends citationKey to disambiguate same-author same-year labels", function () {
+    const label = formatPaperCitationLabel({
+      itemId: 1,
+      contextItemId: 2,
+      title: "Paper",
+      firstCreator: "Alice Smith",
+      year: "2021",
+      citationKey: "smith2021alpha",
+    });
+    assert.equal(label, "Smith et al., 2021 [smith2021alpha]");
+  });
+
   it("formats parenthetical source labels and quote guidance", function () {
     const paper = {
       itemId: 1,

@@ -1762,6 +1762,32 @@ export async function locateQuoteInLivePdfReader(
       );
       if (rawResult) return rawResult;
 
+      // Exact / prefix-suffix matching against normalized page texts.
+      // This catches truncated quotes that begin/end mid-sentence.
+      const exactPageTextResult = locateQuoteInPageTexts(
+        allPages,
+        cleanQuote,
+        expectedPageIndex,
+      );
+      if (exactPageTextResult.status === "resolved") {
+        return {
+          ...exactPageTextResult,
+          reason:
+            exactPageTextResult.reason ||
+            "Resolved by normalized full-quote page-text matching.",
+        };
+      }
+
+      // Progressive token query fallback on rendered/extracted page text.
+      const progressivePageTextResult = locateQuoteProgressivelyInPageTexts(
+        allPages,
+        cleanQuote,
+        expectedPageIndex,
+      );
+      if (progressivePageTextResult.result) {
+        return progressivePageTextResult.result;
+      }
+
       // For ellipsis quotes, try segments
       const segments = splitQuoteAtEllipsis(cleanQuote);
       if (segments.length >= 2) {
@@ -1779,7 +1805,31 @@ export async function locateQuoteInLivePdfReader(
             };
           }
         }
+
+        const segmentFallback = await locateQuoteBySegments(
+          reader,
+          cleanQuote,
+          allPages,
+          expectedPageIndex,
+        );
+        if (segmentFallback) {
+          return segmentFallback;
+        }
       }
+
+      // If exact matching was ambiguous, return that instead of generic not-found.
+      if (exactPageTextResult.status === "ambiguous") {
+        return exactPageTextResult;
+      }
+    }
+
+    // Final fallback: use live reader find controller search strategies.
+    const findControllerResult = await locateQuoteWithFindController(
+      reader,
+      cleanQuote,
+    );
+    if (findControllerResult) {
+      return findControllerResult;
     }
 
     // ── Not found — return error immediately ─────────────────────────
