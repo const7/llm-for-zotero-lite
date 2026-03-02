@@ -18,7 +18,7 @@ describe("paperAttribution", function () {
     assert.equal(label, "Smith et al., 2021");
   });
 
-  it("appends citationKey to disambiguate same-author same-year labels", function () {
+  it("keeps citationKey internal and user label readable", function () {
     const label = formatPaperCitationLabel({
       itemId: 1,
       contextItemId: 2,
@@ -27,7 +27,7 @@ describe("paperAttribution", function () {
       year: "2021",
       citationKey: "smith2021alpha",
     });
-    assert.equal(label, "Smith et al., 2021 [smith2021alpha]");
+    assert.equal(label, "Smith et al., 2021");
   });
 
   it("formats parenthetical source labels and quote guidance", function () {

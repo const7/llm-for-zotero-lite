@@ -112,6 +112,35 @@ describe("assistantCitationLinks", function () {
     assert.lengthOf(matches, 1);
     assert.equal(matches[0].contextItemId, 22);
   });
+
+  it("parses citation rows with external citationKey and page suffix", function () {
+    const papers: PaperContextRef[] = [
+      {
+        itemId: 1,
+        contextItemId: 11,
+        title: "Paper A",
+        firstCreator: "Alice Smith",
+        year: "2024",
+        citationKey: "smith2024a",
+      },
+      {
+        itemId: 2,
+        contextItemId: 22,
+        title: "Paper B",
+        firstCreator: "Aaron Smith",
+        year: "2024",
+        citationKey: "smith2024b",
+      },
+    ];
+
+    const matches = matchAssistantCitationCandidates(
+      "(Smith et al., 2024) [smith2024b], page 1",
+      papers,
+    );
+
+    assert.lengthOf(matches, 1);
+    assert.equal(matches[0].contextItemId, 22);
+  });
 });
 
 describe("formatSourceLabelWithPage", function () {

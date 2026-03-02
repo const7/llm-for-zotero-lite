@@ -1825,7 +1825,13 @@
 }
 
 .llm-bubble.assistant .llm-paper-citation-row {
-  margin-top: -2px;
+  margin-top: 4px;
+  display: block;
+  max-width: none;
+  padding-left: 2px;
+  overflow-x: auto;
+  overflow-y: visible;
+  white-space: nowrap;
 }
 
 .llm-bubble.assistant .llm-paper-citation-link {
@@ -1833,27 +1839,51 @@
   -moz-appearance: none;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 0;
   border: none;
   padding: 0;
+  border-radius: 0;
   background: transparent;
-  color: var(--color-accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  color: var(--fill-secondary);
+  text-decoration: none;
   font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
   line-height: inherit;
   cursor: pointer;
+  max-width: none;
+  text-align: left;
+  white-space: nowrap;
 }
 
 .llm-bubble.assistant .llm-paper-citation-link:hover:not(:disabled),
 .llm-bubble.assistant .llm-paper-citation-link:focus-visible {
-  color: color-mix(in srgb, var(--color-accent) 78%, white 22%);
+  color: inherit;
+  background: transparent;
 }
 
 .llm-bubble.assistant .llm-paper-citation-link:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-accent) 50%, white 50%);
-  outline-offset: 2px;
-  border-radius: 4px;
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+  border-radius: 8px;
+}
+
+.llm-bubble.assistant .llm-paper-citation-link-label {
+  display: inline-block;
+  min-width: auto;
+  max-width: none;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.llm-bubble.assistant .llm-paper-citation-link .llm-paper-context-chip-label {
+  padding: 3px 8px;
+  font-size: var(--llm-fs-11);
+}
+
+.llm-bubble.assistant .llm-paper-citation-link:hover .llm-paper-context-chip-label {
+  color: var(--fill-primary);
 }
 
 .llm-bubble.assistant .llm-paper-citation-link[data-loading="true"] {

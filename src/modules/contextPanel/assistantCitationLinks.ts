@@ -31,8 +31,13 @@ export type AssistantCitationPaperCandidate = {
 type ExtractedCitationLabel = {
   sourceLabel: string;
   citationLabel: string;
+  displayCitationLabel: string;
+  citationKey?: string;
+  pageLabel?: string;
   normalizedSourceLabel: string;
   normalizedCitationLabel: string;
+  normalizedDisplayCitationLabel: string;
+  normalizedCitationKey?: string;
 };
 
 const citationPageCache = new Map<
@@ -69,6 +74,52 @@ function normalizeCitationLabel(value: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+function normalizeCitationKey(value: string): string {
+  return sanitizeText(value || "")
+    .replace(/\s+/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function stripCitationKeyFromLabel(value: string): string {
+  return sanitizeText(value || "")
+    .replace(/\s*\[[^\]]+\]\s*$/g, "")
+    .trim();
+}
+
+function formatCitationChipLabel(
+  displayCitationLabel: string,
+  pageLabel?: string,
+): string {
+  const cleanCitation = stripCitationKeyFromLabel(displayCitationLabel);
+  const cleanPage = sanitizeText(pageLabel || "").trim();
+  return cleanPage
+    ? `(${cleanCitation}, page ${cleanPage})`
+    : `(${cleanCitation})`;
+}
+
+function setCitationButtonLabel(
+  button: HTMLButtonElement,
+  displayCitationLabel: string,
+  pageLabel?: string,
+): void {
+  const labelText = formatCitationChipLabel(displayCitationLabel, pageLabel);
+  let labelNode = button.querySelector(
+    ".llm-paper-citation-link-label",
+  ) as HTMLSpanElement | null;
+  if (!labelNode) {
+    const doc = button.ownerDocument || Zotero.getMainWindow?.()?.document;
+    if (!doc) return;
+    labelNode = doc.createElement("span");
+    labelNode.className =
+      "llm-paper-citation-link-label llm-paper-context-chip-label";
+    button.appendChild(labelNode);
+  }
+  labelNode.textContent = labelText;
+  button.title = `Jump to cited source: ${labelText}`;
+  button.setAttribute("aria-label", `Jump to cited source: ${labelText}`);
 }
 
 /**
@@ -228,15 +279,57 @@ export function extractStandalonePaperSourceLabel(
 ): ExtractedCitationLabel | null {
   const normalized = sanitizeText(value || "").replace(/\s+/g, " ").trim();
   if (!normalized) return null;
-  const match = normalized.match(/^\((.+)\)$/);
-  if (!match) return null;
-  const citationLabel = match[1].trim();
+
+  const parseCitationParts = (
+    rawCitation: string,
+    rawKey?: string,
+    rawPage?: string,
+  ) => {
+    const citationWithoutKey = stripCitationKeyFromLabel(rawCitation);
+    const citationKeyFromLabelMatch = rawCitation.match(/\[([^\]]+)\]\s*$/);
+    const parsedCitationKey = sanitizeText(
+      rawKey || citationKeyFromLabelMatch?.[1] || "",
+    ).trim();
+    const parsedPageLabel = sanitizeText(rawPage || "").trim();
+    const sourceLabel = parsedCitationKey
+      ? `(${citationWithoutKey} [${parsedCitationKey}])`
+      : `(${citationWithoutKey})`;
+    const citationLabel = parsedCitationKey
+      ? `${citationWithoutKey} [${parsedCitationKey}]`
+      : citationWithoutKey;
+    return {
+      sourceLabel,
+      citationLabel,
+      displayCitationLabel: citationWithoutKey,
+      citationKey: parsedCitationKey || undefined,
+      pageLabel: parsedPageLabel || undefined,
+      normalizedSourceLabel: normalizeCitationLabel(sourceLabel),
+      normalizedCitationLabel: normalizeCitationLabel(citationLabel),
+      normalizedDisplayCitationLabel: normalizeCitationLabel(citationWithoutKey),
+      normalizedCitationKey: normalizeCitationKey(parsedCitationKey) || undefined,
+    };
+  };
+
+  const wrappedMatch = normalized.match(/^\((.+)\)$/);
+  if (wrappedMatch) {
+    const inner = wrappedMatch[1].trim();
+    const innerParts = inner.match(
+      /^(.*?)(?:\s+\[([^\]]+)\])?(?:\s*,?\s*page\s+([^,;]+))?\.?$/i,
+    );
+    if (!innerParts) return null;
+    const citationLabel = sanitizeText(innerParts[1] || "").trim();
+    if (!citationLabel || citationLabel.length < 4) return null;
+    return parseCitationParts(citationLabel, innerParts[2], innerParts[3]);
+  }
+
+  const splitMatch = normalized.match(
+    /^\((.+?)\)\s*(?:\[([^\]]+)\])?(?:\s*,?\s*page\s+([^,;]+))?\.?$/i,
+  );
+  if (!splitMatch) return null;
+  const citationLabel = sanitizeText(splitMatch[1] || "").trim();
   if (!citationLabel || citationLabel.length < 4) return null;
   return {
-    sourceLabel: `(${citationLabel})`,
-    citationLabel,
-    normalizedSourceLabel: normalizeCitationLabel(`(${citationLabel})`),
-    normalizedCitationLabel: normalizeCitationLabel(citationLabel),
+    ...parseCitationParts(citationLabel, splitMatch[2], splitMatch[3]),
   };
 }
 
@@ -247,11 +340,23 @@ export function matchAssistantCitationCandidates(
   const extracted = extractStandalonePaperSourceLabel(citationLineText);
   if (!extracted) return [];
   const candidates = buildCandidateListFromPaperContexts(paperContexts);
-  return candidates.filter(
-    (candidate) =>
+  return candidates.filter((candidate) => {
+    const candidateCitationKey = normalizeCitationKey(
+      candidate.paperContext.citationKey || "",
+    );
+    if (
+      extracted.normalizedCitationKey &&
+      candidateCitationKey &&
+      extracted.normalizedCitationKey === candidateCitationKey
+    ) {
+      return true;
+    }
+    return (
       candidate.normalizedSourceLabel === extracted.normalizedSourceLabel ||
-      candidate.normalizedCitationLabel === extracted.normalizedCitationLabel,
-  );
+      candidate.normalizedCitationLabel === extracted.normalizedCitationLabel ||
+      candidate.normalizedCitationLabel === extracted.normalizedDisplayCitationLabel
+    );
+  });
 }
 
 async function waitForReaderForItem(targetItemId: number): Promise<any | null> {
@@ -267,10 +372,49 @@ async function waitForReaderForItem(targetItemId: number): Promise<any | null> {
   return null;
 }
 
-async function openReaderForItem(targetItemId: number): Promise<any | null> {
+type ReaderPageLocation = {
+  pageIndex: number;
+  pageLabel?: string;
+};
+
+function normalizeReaderPageLocation(
+  location: ReaderPageLocation | null | undefined,
+): ReaderPageLocation | undefined {
+  if (!location) return undefined;
+  const rawPageIndex = Number(location.pageIndex);
+  if (!Number.isFinite(rawPageIndex) || rawPageIndex < 0) return undefined;
+  const pageIndex = Math.floor(rawPageIndex);
+  const rawPageLabel = sanitizeText(location.pageLabel || "").trim();
+  return rawPageLabel
+    ? { pageIndex, pageLabel: rawPageLabel }
+    : { pageIndex };
+}
+
+function toZoteroReaderLocation(
+  location: ReaderPageLocation | undefined,
+): _ZoteroTypes.Reader.Location | undefined {
+  if (!location) return undefined;
+  return location.pageLabel
+    ? { pageIndex: location.pageIndex, pageLabel: location.pageLabel }
+    : { pageIndex: location.pageIndex };
+}
+
+async function openReaderForItem(
+  targetItemId: number,
+  location?: ReaderPageLocation,
+): Promise<any | null> {
   const normalizedTargetItemId = Math.floor(targetItemId);
+  const normalizedLocation = normalizeReaderPageLocation(location);
+  const zoteroLocation = toZoteroReaderLocation(normalizedLocation);
   const activeReader = getActiveReaderForSelectedTab();
   if (getReaderItemId(activeReader) === normalizedTargetItemId) {
+    if (normalizedLocation) {
+      await navigateReaderToPage(
+        activeReader,
+        normalizedLocation.pageIndex,
+        normalizedLocation.pageLabel,
+      );
+    }
     return activeReader;
   }
 
@@ -283,8 +427,15 @@ async function openReaderForItem(targetItemId: number): Promise<any | null> {
       }
     | undefined;
   if (typeof readerApi?.open === "function") {
-    const openedReader = await readerApi.open(normalizedTargetItemId);
+    const openedReader = await readerApi.open(normalizedTargetItemId, zoteroLocation);
     if (getReaderItemId(openedReader) === normalizedTargetItemId) {
+      if (normalizedLocation) {
+        await navigateReaderToPage(
+          openedReader,
+          normalizedLocation.pageIndex,
+          normalizedLocation.pageLabel,
+        );
+      }
       return openedReader;
     }
   } else {
@@ -297,23 +448,51 @@ async function openReaderForItem(targetItemId: number): Promise<any | null> {
         }
       | undefined;
     if (typeof pane?.viewPDF === "function") {
-      await pane.viewPDF(normalizedTargetItemId, {});
+      await pane.viewPDF(normalizedTargetItemId, zoteroLocation || {});
     }
   }
 
-  return waitForReaderForItem(normalizedTargetItemId);
+  const waitedReader = await waitForReaderForItem(normalizedTargetItemId);
+  if (waitedReader && normalizedLocation) {
+    await navigateReaderToPage(
+      waitedReader,
+      normalizedLocation.pageIndex,
+      normalizedLocation.pageLabel,
+    );
+  }
+  return waitedReader;
 }
 
 async function navigateReaderToPage(
   reader: any,
   pageIndex: number,
   pageLabel?: string,
-): Promise<void> {
-  if (typeof reader?.navigate !== "function") return;
-  void pageLabel;
-  await reader.navigate({
-    pageIndex: Math.floor(pageIndex),
-  });
+): Promise<boolean> {
+  if (typeof reader?.navigate !== "function") return false;
+  const normalizedPageIndex = Math.floor(pageIndex);
+  const normalizedPageLabel = sanitizeText(pageLabel || "").trim();
+  try {
+    if (normalizedPageLabel) {
+      await reader.navigate({
+        pageIndex: normalizedPageIndex,
+        pageLabel: normalizedPageLabel,
+      });
+    } else {
+      await reader.navigate({
+        pageIndex: normalizedPageIndex,
+      });
+    }
+    return true;
+  } catch {
+    try {
+      await reader.navigate({
+        pageIndex: normalizedPageIndex,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 async function navigateToCachedCitationPage(
@@ -323,14 +502,17 @@ async function navigateToCachedCitationPage(
   const cacheKey = buildCitationCacheKey(contextItemId, quoteText);
   const cached = citationPageCache.get(cacheKey);
   if (!cached) return false;
-  const reader = await openReaderForItem(contextItemId);
-  if (!reader) return false;
-
   let targetPageIndex = Math.floor(cached.pageIndex);
   let targetPageLabel =
     typeof cached.pageLabel === "string" && cached.pageLabel.trim()
       ? cached.pageLabel.trim()
       : `${targetPageIndex + 1}`;
+
+  const reader = await openReaderForItem(contextItemId, {
+    pageIndex: targetPageIndex,
+    pageLabel: targetPageLabel,
+  });
+  if (!reader) return false;
 
   try {
     const verified = await locateQuoteInLivePdfReader(reader, quoteText);
@@ -349,8 +531,19 @@ async function navigateToCachedCitationPage(
     void _err;
   }
 
-  await navigateReaderToPage(reader, targetPageIndex, targetPageLabel);
-  await flashPageInLivePdfReader(reader, targetPageIndex);
+  const navigated = await navigateReaderToPage(
+    reader,
+    targetPageIndex,
+    targetPageLabel,
+  );
+  const readerForFlash =
+    navigated
+      ? reader
+      : await openReaderForItem(contextItemId, {
+          pageIndex: targetPageIndex,
+          pageLabel: targetPageLabel,
+        });
+  await flashPageInLivePdfReader(readerForFlash || reader, targetPageIndex);
   return true;
 }
 
@@ -484,13 +677,12 @@ function sortCandidatesForActiveReader(
 
 function updateCitationButtonPage(
   button: HTMLButtonElement,
-  baseSourceLabel: string,
+  displayCitationLabel: string,
   pageLabel: string,
 ): void {
   if (!button || !pageLabel) return;
   if (!button.isConnected) return;
-  const labelWithPage = formatSourceLabelWithPage(baseSourceLabel, pageLabel);
-  button.textContent = labelWithPage;
+  setCitationButtonLabel(button, displayCitationLabel, pageLabel);
 
   const syncKey = sanitizeText(button.dataset.citationSyncKey || "").trim();
   if (!syncKey) return;
@@ -528,7 +720,7 @@ function updateCitationButtonPage(
           continue;
         }
         if (!syncButton.isConnected) continue;
-        syncButton.textContent = labelWithPage;
+        setCitationButtonLabel(syncButton, displayCitationLabel, pageLabel);
       }
     } catch (_err) {
       void _err;
@@ -538,7 +730,7 @@ function updateCitationButtonPage(
 
 async function resolvePageForCitationButton(params: {
   button: HTMLButtonElement;
-  baseSourceLabel: string;
+  displayCitationLabel: string;
   candidates: AssistantCitationPaperCandidate[];
   panelItem: Zotero.Item;
   extractedCitation: ExtractedCitationLabel;
@@ -556,7 +748,11 @@ async function resolvePageForCitationButton(params: {
       const cacheKey = buildCitationCacheKey(candidate.contextItemId, params.quoteText);
       const cached = citationPageCache.get(cacheKey);
       if (cached?.pageLabel) {
-        updateCitationButtonPage(params.button, params.baseSourceLabel, cached.pageLabel);
+        updateCitationButtonPage(
+          params.button,
+          params.displayCitationLabel,
+          cached.pageLabel,
+        );
         return;
       }
     }
@@ -576,7 +772,11 @@ async function resolvePageForCitationButton(params: {
             buildCitationCacheKey(matchingCandidate.contextItemId, params.quoteText),
             { pageIndex, pageLabel },
           );
-          updateCitationButtonPage(params.button, params.baseSourceLabel, pageLabel);
+          updateCitationButtonPage(
+            params.button,
+            params.displayCitationLabel,
+            pageLabel,
+          );
           return;
         }
       }
@@ -592,7 +792,11 @@ async function resolvePageForCitationButton(params: {
         buildCitationCacheKey(candidate.contextItemId, params.quoteText),
         { pageIndex: resolved.pageIndex, pageLabel: resolved.pageLabel },
       );
-      updateCitationButtonPage(params.button, params.baseSourceLabel, resolved.pageLabel);
+      updateCitationButtonPage(
+        params.button,
+        params.displayCitationLabel,
+        resolved.pageLabel,
+      );
       return;
     }
   } catch {
@@ -649,11 +853,17 @@ function rankCitationSearchMatch(
   extracted: ExtractedCitationLabel,
   candidate: AssistantCitationPaperCandidate,
 ): number {
+  const extractedKey = extracted.normalizedCitationKey || "";
+  const candidateKey = normalizeCitationKey(candidate.paperContext.citationKey || "");
+  if (extractedKey && candidateKey && extractedKey === candidateKey) {
+    return 5;
+  }
   if (candidate.normalizedSourceLabel === extracted.normalizedSourceLabel) {
     return 4;
   }
   if (
-    candidate.normalizedCitationLabel === extracted.normalizedCitationLabel
+    candidate.normalizedCitationLabel === extracted.normalizedCitationLabel ||
+    candidate.normalizedCitationLabel === extracted.normalizedDisplayCitationLabel
   ) {
     return 4;
   }
@@ -794,6 +1004,7 @@ async function resolveAndNavigateAssistantCitation(params: {
   body: Element;
   button: HTMLButtonElement;
   baseSourceLabel: string;
+  displayCitationLabel: string;
   candidates: AssistantCitationPaperCandidate[];
   panelItem: Zotero.Item;
   quoteText: string;
@@ -827,7 +1038,11 @@ async function resolveAndNavigateAssistantCitation(params: {
         const cacheKey = buildCitationCacheKey(candidate.contextItemId, params.quoteText);
         const cachedEntry = citationPageCache.get(cacheKey);
         if (cachedEntry?.pageLabel) {
-          updateCitationButtonPage(params.button, params.baseSourceLabel, cachedEntry.pageLabel);
+          updateCitationButtonPage(
+            params.button,
+            params.displayCitationLabel,
+            cachedEntry.pageLabel,
+          );
         }
         if (status) setStatus(status, "Jumped to cited source", "ready");
         return;
@@ -848,7 +1063,11 @@ async function resolveAndNavigateAssistantCitation(params: {
           const pageLabel = `${pageIndex + 1}`;
           await navigateReaderToPage(activeReader, pageIndex, pageLabel);
           await flashPageInLivePdfReader(activeReader, pageIndex);
-          updateCitationButtonPage(params.button, params.baseSourceLabel, pageLabel);
+          updateCitationButtonPage(
+            params.button,
+            params.displayCitationLabel,
+            pageLabel,
+          );
           if (status) setStatus(status, `Jumped to cited source (page ${pageLabel})`, "ready");
           return;
         }
@@ -874,9 +1093,18 @@ async function resolveAndNavigateAssistantCitation(params: {
           buildCitationCacheKey(candidate.contextItemId, params.quoteText),
           { pageIndex, pageLabel },
         );
-        await navigateReaderToPage(reader, pageIndex, pageLabel);
-        await flashPageInLivePdfReader(reader, pageIndex);
-        updateCitationButtonPage(params.button, params.baseSourceLabel, pageLabel);
+        const targetReader =
+          (await openReaderForItem(candidate.contextItemId, {
+            pageIndex,
+            pageLabel,
+          })) || reader;
+        await navigateReaderToPage(targetReader, pageIndex, pageLabel);
+        await flashPageInLivePdfReader(targetReader, pageIndex);
+        updateCitationButtonPage(
+          params.button,
+          params.displayCitationLabel,
+          pageLabel,
+        );
         if (status) {
           setStatus(status, `Jumped to cited source (page ${pageLabel})`, "ready");
         }
@@ -982,20 +1210,23 @@ export function decorateAssistantCitationLinks(params: {
     // click handler will resolve fallback candidates dynamically.
 
     const baseSourceLabel = extractedCitation.sourceLabel;
+    const displayCitationLabel = extractedCitation.displayCitationLabel;
     const citationButton = ownerDoc.createElement("button") as HTMLButtonElement;
     citationButton.type = "button";
-    citationButton.className = "llm-paper-citation-link";
-    citationButton.textContent = baseSourceLabel;
+    citationButton.className =
+      "llm-paper-citation-link llm-paper-context-chip-header";
     citationButton.title = "Jump to the cited source in the paper";
     citationButton.dataset.loading = "false";
     citationButton.dataset.citationSyncKey =
       `${normalizeCitationLabel(baseSourceLabel)}\u241f${normalizeQuoteKey(quoteText)}`;
+    setCitationButtonLabel(citationButton, displayCitationLabel, extractedCitation.pageLabel);
 
     const handleCitationClick = () => {
       void resolveAndNavigateAssistantCitation({
         body: params.body,
         button: citationButton,
         baseSourceLabel,
+        displayCitationLabel,
         candidates: matchingCandidates,
         panelItem: params.panelItem,
         quoteText,
@@ -1020,13 +1251,17 @@ export function decorateAssistantCitationLinks(params: {
       handleCitationClick();
     });
 
-    citationEl.classList.add("llm-paper-citation-row");
+    citationEl.classList.add(
+      "llm-paper-citation-row",
+      "llm-paper-context-chip",
+      "llm-paper-context-chip-pinned",
+    );
     citationEl.textContent = "";
     citationEl.appendChild(citationButton);
 
     void resolvePageForCitationButton({
       button: citationButton,
-      baseSourceLabel,
+      displayCitationLabel,
       candidates: matchingCandidates,
       panelItem: params.panelItem,
       extractedCitation,
