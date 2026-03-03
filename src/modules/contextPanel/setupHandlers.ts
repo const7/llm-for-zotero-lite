@@ -158,6 +158,7 @@ import {
 } from "./attachmentStorage";
 import {
   clearConversation as clearStoredConversation,
+  clearConversationTitle,
   createGlobalConversation,
   createPaperConversation,
   deleteTurnMessages,
@@ -6339,6 +6340,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     },
     clearTransientAgentStatus: clearTransientAgentStatusForConversation,
     clearStoredConversation,
+    resetConversationTitle: clearConversationTitle,
     clearOwnerAttachmentRefs,
     removeConversationAttachmentFiles,
     refreshChatPreservingScroll,

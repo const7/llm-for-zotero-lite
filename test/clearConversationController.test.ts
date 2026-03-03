@@ -39,6 +39,9 @@ describe("clearConversationController", function () {
       clearStoredConversation: async (conversationKey) => {
         calls.push(`stored:${conversationKey}`);
       },
+      resetConversationTitle: async (conversationKey) => {
+        calls.push(`title:${conversationKey}`);
+      },
       clearOwnerAttachmentRefs: async (_ownerType, ownerKey) => {
         calls.push(`refs:${ownerKey}`);
       },
@@ -76,6 +79,7 @@ describe("clearConversationController", function () {
       "history:7001",
       "loaded:7001",
       "stored:7001",
+      "title:7001",
       "refs:7001",
       "files:7001",
       "refresh",
@@ -102,6 +106,9 @@ describe("clearConversationController", function () {
         called = true;
       },
       clearStoredConversation: async () => {
+        called = true;
+      },
+      resetConversationTitle: async () => {
         called = true;
       },
       clearOwnerAttachmentRefs: async () => {

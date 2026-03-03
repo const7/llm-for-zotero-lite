@@ -10,6 +10,7 @@ type ClearConversationControllerDeps = {
   markConversationLoaded: (conversationKey: number) => void;
   clearTransientAgentStatus?: (conversationKey: number) => void;
   clearStoredConversation: (conversationKey: number) => Promise<void>;
+  resetConversationTitle: (conversationKey: number) => Promise<void>;
   clearOwnerAttachmentRefs: (
     ownerType: "conversation",
     ownerKey: number,
@@ -55,6 +56,11 @@ export function createClearConversationController(
       await deps.clearStoredConversation(normalizedConversationKey);
     } catch (err) {
       deps.logError?.("LLM: Failed to clear persisted chat history", err);
+    }
+    try {
+      await deps.resetConversationTitle(normalizedConversationKey);
+    } catch (err) {
+      deps.logError?.("LLM: Failed to reset conversation title", err);
     }
     try {
       await deps.clearOwnerAttachmentRefs(

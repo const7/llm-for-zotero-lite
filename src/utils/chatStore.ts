@@ -1388,6 +1388,27 @@ export async function setPaperConversationTitle(
   );
 }
 
+export async function clearConversationTitle(
+  conversationKey: number,
+): Promise<void> {
+  const normalizedKey = normalizeConversationKey(conversationKey);
+  if (!normalizedKey) return;
+  await Zotero.DB.executeTransaction(async () => {
+    await Zotero.DB.queryAsync(
+      `UPDATE ${GLOBAL_CONVERSATIONS_TABLE}
+       SET title = NULL
+       WHERE conversation_key = ?`,
+      [normalizedKey],
+    );
+    await Zotero.DB.queryAsync(
+      `UPDATE ${PAPER_CONVERSATIONS_TABLE}
+       SET title = NULL
+       WHERE conversation_key = ?`,
+      [normalizedKey],
+    );
+  });
+}
+
 export async function deleteGlobalConversation(
   conversationKey: number,
 ): Promise<void> {
