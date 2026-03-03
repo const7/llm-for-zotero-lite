@@ -27,7 +27,6 @@ import {
 } from "./constants";
 import {
   selectedModelCache,
-  selectedAgentCache,
   selectedReasoningCache,
   selectedImageCache,
   selectedFileAttachmentCache,
@@ -83,9 +82,7 @@ import {
   applyPanelFontScale,
   getAdvancedModelParamsForProfile,
   getLastUsedModelProfileKey,
-  getLastUsedAgentEnabled,
   setLastUsedModelProfileKey,
-  setLastUsedAgentEnabled,
   getLastUsedReasoningLevel,
   setLastUsedReasoningLevel,
   getLastUsedPaperConversationKey,
@@ -318,7 +315,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashReferenceOption,
     slashLocateSelectionOption,
     slashLocateQuoteOption,
-    contextAgentToggleBtn,
     imagePreview,
     selectedContextList,
     previewStrip,
@@ -3293,7 +3289,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     restoreDraftInputForCurrentConversation();
     refreshChatPreservingScroll();
     resetComposePreviewUI();
-    updateAgentToggleButton();
     updateModelButton();
     updateReasoningButton();
     void refreshGlobalHistoryHeader();
@@ -3368,7 +3363,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     restoreDraftInputForCurrentConversation();
     refreshChatPreservingScroll();
     resetComposePreviewUI();
-    updateAgentToggleButton();
     updateModelButton();
     updateReasoningButton();
     void refreshGlobalHistoryHeader();
@@ -3543,7 +3537,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     chatHistory.delete(conversationKey);
     loadedConversationKeys.delete(conversationKey);
     selectedModelCache.delete(conversationKey);
-    selectedAgentCache.delete(conversationKey);
     selectedReasoningCache.delete(conversationKey);
     clearTransientComposeStateForItem(conversationKey);
   };
@@ -4253,27 +4246,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     });
   }
 
-  if (contextAgentToggleBtn) {
-    contextAgentToggleBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item || contextAgentToggleBtn.disabled) return;
-      closeModelMenu();
-      closeReasoningMenu();
-      closeRetryModelMenu();
-      closeSlashMenu();
-      closeResponseMenu();
-      closePromptMenu();
-      closeExportMenu();
-      closeHistoryNewMenu();
-      closeHistoryMenu();
-      const nextEnabled = !getSelectedAgentEnabled();
-      selectedAgentCache.set(item.id, nextEnabled);
-      setLastUsedAgentEnabled(nextEnabled);
-      updateAgentToggleButton();
-    });
-  }
-
   if (historyNewOpenBtn) {
     historyNewOpenBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
@@ -4617,37 +4589,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       choices,
       currentModel: current?.model || "default",
     };
-  };
-
-  const getSelectedAgentEnabled = () => {
-    if (!item) return false;
-    const cached = selectedAgentCache.get(item.id);
-    if (typeof cached === "boolean") return cached;
-    const persisted = getLastUsedAgentEnabled();
-    const enabled = persisted === true;
-    selectedAgentCache.set(item.id, enabled);
-    return enabled;
-  };
-
-  const updateAgentToggleButton = () => {
-    if (!contextAgentToggleBtn) return;
-    const agentEnabled = getSelectedAgentEnabled();
-    contextAgentToggleBtn.style.display = item ? "inline-flex" : "none";
-    contextAgentToggleBtn.disabled = !item;
-    contextAgentToggleBtn.setAttribute(
-      "aria-disabled",
-      !item ? "true" : "false",
-    );
-    contextAgentToggleBtn.setAttribute(
-      "aria-pressed",
-      agentEnabled ? "true" : "false",
-    );
-    contextAgentToggleBtn.classList.toggle(
-      "llm-agent-toggle-enabled",
-      agentEnabled,
-    );
-    contextAgentToggleBtn.title =
-      agentEnabled ? "Agent mode on" : "Agent mode off";
   };
 
   type ActionLabelMode = "icon" | "full";
@@ -5260,7 +5201,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           profile.apiKey,
           retryReasoning,
           retryAdvanced,
-          getSelectedAgentEnabled(),
         );
       };
       option.addEventListener("click", (e: Event) => {
@@ -5420,7 +5360,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   };
 
   const syncModelFromPrefs = () => {
-    updateAgentToggleButton();
     updateModelButton();
     updateReasoningButton();
     if (isFloatingMenuOpen(modelMenu)) {
@@ -6462,7 +6401,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     getSelectedProfile,
     getCurrentModelName: () => getSelectedModelInfo().currentModel,
     isScreenshotUnsupportedModel,
-    getAgentEnabled: getSelectedAgentEnabled,
     getSelectedReasoning,
     getAdvancedModelParams,
     getActiveEditSession: () => activeEditSession,

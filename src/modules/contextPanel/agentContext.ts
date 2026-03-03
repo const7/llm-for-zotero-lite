@@ -11,9 +11,14 @@ import {
 } from "./paperSearch";
 import { sanitizeText } from "./textUtils";
 import type { PaperContextRef } from "./types";
-import type { AgentQueryPlan } from "./agentTypes";
+import { AGENT_METADATA_PREFIX_RATIO } from "./agentConfig";
 
-const AGENT_METADATA_PREFIX_RATIO = 0.25;
+/** Minimal plan shape consumed by resolveAgentContext. */
+type AgentContextPlan = {
+  action?: string;
+  searchQuery?: string;
+  maxPapersToRead?: number;
+};
 
 export type AgentContextResolution = {
   mode: "library-overview" | "library-search";
@@ -280,7 +285,7 @@ export async function resolveAgentContext(params: {
   question: string;
   libraryID: number;
   conversationMode: "paper" | "open";
-  plan?: AgentQueryPlan | null;
+  plan?: AgentContextPlan | null;
   availableContextBudgetTokens?: number;
   onStatus?: (statusText: string) => void;
 }): Promise<AgentContextResolution | null> {

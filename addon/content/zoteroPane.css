@@ -1031,6 +1031,165 @@
   white-space: pre-wrap;
 }
 
+/* ── Agent trace rich lines ──────────────────────────────────────────────── */
+.llm-agent-trace {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 2px 0;
+}
+
+.llm-at-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--llm-fs-11);
+  line-height: 1.4;
+  min-width: 0;
+}
+
+.llm-at-icon {
+  flex: 0 0 16px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* plan */
+.llm-at-row-plan .llm-at-plan-text {
+  color: var(--fill-tertiary);
+  font-style: italic;
+  font-size: var(--llm-fs-10);
+}
+
+/* tool call */
+.llm-at-tool-name {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: var(--llm-fs-10);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--color-accent) 13%, var(--fill-quinary));
+  color: var(--color-accent);
+  letter-spacing: 0.02em;
+  flex: 0 0 auto;
+}
+
+.llm-at-sep {
+  color: var(--fill-quaternary);
+  font-size: var(--llm-fs-10);
+  flex: 0 0 auto;
+}
+
+.llm-at-target {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: var(--llm-fs-10);
+  font-weight: 500;
+  background: var(--fill-quinary);
+  color: var(--fill-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+  max-width: 200px;
+}
+
+/* ok / success */
+.llm-at-row-ok .llm-at-icon {
+  color: #4caf82;
+  font-size: 9px;
+}
+
+.llm-at-ok-text {
+  font-size: var(--llm-fs-10);
+  font-weight: 600;
+  color: var(--fill-primary);
+  flex: 0 0 auto;
+}
+
+.llm-at-paper-label {
+  font-size: var(--llm-fs-10);
+  color: var(--fill-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 0;
+}
+
+/* duplicate */
+.llm-at-row-dup .llm-at-icon {
+  color: var(--fill-quaternary);
+}
+
+.llm-at-dup-text {
+  color: var(--fill-tertiary);
+  font-size: var(--llm-fs-10);
+  font-style: italic;
+}
+
+/* skip */
+.llm-at-row-skip .llm-at-icon {
+  color: var(--fill-quaternary);
+  font-size: 9px;
+}
+
+.llm-at-skip-text {
+  color: var(--fill-tertiary);
+  font-size: var(--llm-fs-10);
+}
+
+/* budget */
+.llm-at-row-budget .llm-at-icon {
+  color: var(--fill-tertiary);
+}
+
+.llm-at-budget-text {
+  color: var(--fill-tertiary);
+  font-size: var(--llm-fs-10);
+  font-style: italic;
+}
+
+/* done / grounding */
+.llm-at-row-done {
+  margin-top: 2px;
+}
+
+.llm-at-done-text {
+  font-size: var(--llm-fs-11);
+  font-weight: 600;
+  color: var(--fill-secondary);
+}
+
+/* LLM thought fallback */
+.llm-at-thought-text {
+  font-size: var(--llm-fs-11);
+  color: var(--fill-tertiary);
+  font-style: italic;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Animated pulse dot on the summary label while streaming */
+.llm-agent-process[data-thinking="true"] .llm-agent-toggle-indicator::after {
+  content: " \25CF";
+  color: var(--color-accent);
+  font-size: 7px;
+  vertical-align: middle;
+  animation: llm-at-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes llm-at-pulse {
+  0%, 100% { opacity: 0.25; }
+  50%       { opacity: 1; }
+}
+
 /* Message Bubbles */
 .llm-bubble {
   padding: 10px 14px;
@@ -2078,46 +2237,6 @@
 .llm-context-previews > #llm-paper-context-preview.expanded {
   flex: 0 0 auto;
   width: fit-content;
-}
-
-.llm-context-agent-toggle {
-  appearance: none;
-  -moz-appearance: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 24px;
-  padding: 3px 0;
-  margin: 0;
-  border: none;
-  background: transparent;
-  color: var(--fill-secondary);
-  font: inherit;
-  font-size: var(--llm-fs-12);
-  line-height: 1.25;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-  align-self: center;
-}
-
-.llm-context-agent-toggle:hover {
-  color: var(--fill-primary);
-}
-
-.llm-context-agent-toggle:disabled {
-  color: var(--fill-tertiary);
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.llm-context-agent-toggle:disabled:hover {
-  color: var(--fill-tertiary);
-}
-
-.llm-context-agent-toggle:focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: 2px;
 }
 
 .llm-compose-area {

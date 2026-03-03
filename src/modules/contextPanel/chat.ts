@@ -155,6 +155,245 @@ function appendAgentTraceLine(
   return previousLines.join("\n");
 }
 
+/**
+ * Converts flat agent trace lines into a rich HTML element with chips per action.
+ * Unrecognised lines (LLM thoughts) fall back to dim italic text.
+ */
+function buildAgentTraceHtml(doc: Document, lines: string[]): HTMLDivElement {
+  const TOOL_READABLE: Record<string, string> = {
+    find_claim_evidence: "Find Evidence",
+    read_paper_text: "Read Paper",
+    read_references: "Read References",
+    list_papers: "Search Library",
+  };
+
+  function prettyTarget(raw: string): string {
+    const m = raw.match(/^(active|selected|pinned|recent|retrieved)-paper(?:#(\d+))?$/);
+    if (!m) return raw;
+    const kindMap: Record<string, string> = {
+      active: "Active Paper",
+      selected: "Selected",
+      pinned: "Pinned",
+      recent: "Recent",
+      retrieved: "Retrieved",
+    };
+    return m[2] ? `${kindMap[m[1]!] ?? m[1]} #${m[2]}` : (kindMap[m[1]!] ?? raw);
+  }
+
+  function trunc(s: string, max = 48): string {
+    const t = (s || "").trim();
+    return t.length > max ? t.slice(0, max - 1) + "\u2026" : t;
+  }
+
+  function el<T extends HTMLElement>(tag: string, cls: string, text?: string): T {
+    const e = doc.createElement(tag) as T;
+    e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function row(typeClass: string): HTMLDivElement {
+    return el<HTMLDivElement>("div", `llm-at-row llm-at-row-${typeClass}`);
+  }
+
+  const container = el<HTMLDivElement>("div", "llm-agent-trace");
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+
+    // ── Planning header ───────────────────────────────────────────────────────
+    if (/^Planning Zotero retrieval/i.test(t)) {
+      const r = row("plan");
+      r.appendChild(el("span", "llm-at-icon", "\uD83D\uDD0D"));
+      r.appendChild(el("span", "llm-at-plan-text", "Planning retrieval\u2026"));
+      container.appendChild(r);
+      continue;
+    }
+
+    // ── Tool call dispatch chip ───────────────────────────────────────────────
+    {
+      const m = t.match(/^Tool call: ([\w_]+)\((.+)\)\.?$/);
+      if (m) {
+        const [, name, rawTarget] = m;
+        const r = row("tool");
+        r.appendChild(el("span", "llm-at-icon", "\u2699\uFE0F"));
+        r.appendChild(el("span", "llm-at-tool-name", TOOL_READABLE[name!] ?? name!));
+        r.appendChild(el("span", "llm-at-sep", "\u00B7"));
+        r.appendChild(el("span", "llm-at-target", prettyTarget(rawTarget ?? "")));
+        container.appendChild(r);
+        continue;
+      }
+    }
+
+    // ── Evidence snippets retrieved ───────────────────────────────────────────
+    {
+      const m = t.match(/^Retrieved (\d+) evidence snippets? for (.+?)\.?$/);
+      if (m) {
+        const r = row("ok");
+        r.appendChild(el("span", "llm-at-icon", "\u2726"));
+        r.appendChild(el("span", "llm-at-ok-text", `${m[1]} snippet${Number(m[1]) !== 1 ? "s" : ""}`));
+        r.appendChild(el("span", "llm-at-sep", "\u00B7"));
+        r.appendChild(el("span", "llm-at-paper-label", trunc(m[2]!)));
+        container.appendChild(r);
+        continue;
+      }
+    }
+
+    // ── No evidence snippets ──────────────────────────────────────────────────
+    {
+      const m = t.match(/^No strong evidence snippets were found for (.+?)\.?$/);
+      if (m) {
+        const r = row("skip");
+        r.appendChild(el("span", "llm-at-icon", "\u2715"));
+        r.appendChild(el("span", "llm-at-skip-text", `No snippets \u00B7 ${trunc(m[1]!, 40)}`));
+        container.appendChild(r);
+        continue;
+      }
+    }
+
+    // ── Full text loaded ──────────────────────────────────────────────────────
+    {
+      const m = t.match(/^Loaded full text for (.+?)(\.|;| \(|$)/);
+      if (m) {
+        const r = row("ok");
+        r.appendChild(el("span", "llm-at-icon", "\u2726"));
+        r.appendChild(el("span", "llm-at-ok-text", "Full text loaded"));
+        r.appendChild(el("span", "llm-at-sep", "\u00B7"));
+        r.appendChild(el("span", "llm-at-paper-label", trunc(m[1]!)));
+        container.appendChild(r);
+        continue;
+      }
+    }
+
+    // ── Full text unavailable ─────────────────────────────────────────────────
+    {
+      const m = t.match(/^Full text unavailable for (.+?)\.?$/);
+      if (m) {
+        const r = row("skip");
+        r.appendChild(el("span", "llm-at-icon", "\u2715"));
+        r.appendChild(el("span", "llm-at-skip-text", `No full text \u00B7 ${trunc(m[1]!, 40)}`));
+        container.appendChild(r);
+        continue;
+      }
+    }
+
+    // ── References loaded ─────────────────────────────────────────────────────
+    {
+      const m = t.match(/^Loaded (\d+) reference entr(?:y|ies) for (.+?)\.?$/);
+      if (m) {
+        const r = row("ok");
+        r.appendChild(el("span", "llm-at-icon", "\u2726"));
+        r.appendChild(el("span", "llm-at-ok-text", `${m[1]} ref${Number(m[1]) !== 1 ? "s" : ""} loaded`));
+        r.appendChild(el("span", "llm-at-sep", "\u00B7"));
+        r.appendChild(el("span", "llm-at-paper-label", trunc(m[2]!)));
+        container.appendChild(r);
+        continue;
+      }
+    }
+
+    // ── Library papers retrieved ──────────────────────────────────────────────
+    {
+      const m = t.match(/^(?:Retrieved|Matched) (\d+) readable papers/i);
+      if (m) {
+        const r = row("ok");
+        r.appendChild(el("span", "llm-at-icon", "\u2726"));
+        r.appendChild(el("span", "llm-at-ok-text", `${m[1]} papers from library`));
+        container.appendChild(r);
+        continue;
+      }
+    }
+
+    // ── Library search query ──────────────────────────────────────────────────
+    {
+      const m = t.match(/^Library search query:\s+(.+)$/);
+      if (m) {
+        const r = row("plan");
+        r.appendChild(el("span", "llm-at-icon", "\uD83D\uDD0D"));
+        r.appendChild(el("span", "llm-at-plan-text", `Searching: \u201C${trunc(m[1]!, 50)}\u201D`));
+        container.appendChild(r);
+        continue;
+      }
+    }
+
+    // ── Selected papers summary ───────────────────────────────────────────────
+    if (/^Selected papers:/i.test(t)) {
+      const r = row("ok");
+      r.appendChild(el("span", "llm-at-icon", "\u2726"));
+      r.appendChild(el("span", "llm-at-ok-text", trunc(t, 80)));
+      container.appendChild(r);
+      continue;
+    }
+
+    // ── Duplicate call ────────────────────────────────────────────────────────
+    if (/^Duplicate.+call was ignored/i.test(t)) {
+      const r = row("dup");
+      r.appendChild(el("span", "llm-at-icon", "\u21BB"));
+      r.appendChild(el("span", "llm-at-dup-text", "Duplicate \u2014 skipped"));
+      container.appendChild(r);
+      continue;
+    }
+
+    // ── Unknown / malformed tool ──────────────────────────────────────────────
+    if (/^(?:Unknown|Malformed) tool call was ignored/i.test(t)) {
+      const r = row("skip");
+      r.appendChild(el("span", "llm-at-icon", "\u2715"));
+      r.appendChild(el("span", "llm-at-skip-text", "Unsupported tool \u2014 skipped"));
+      container.appendChild(r);
+      continue;
+    }
+
+    // ── Target unavailable ────────────────────────────────────────────────────
+    if (/^Tool target was unavailable/i.test(t)) {
+      const r = row("skip");
+      r.appendChild(el("span", "llm-at-icon", "\u2715"));
+      r.appendChild(el("span", "llm-at-skip-text", "Target unavailable \u2014 skipped"));
+      container.appendChild(r);
+      continue;
+    }
+
+    // ── No library / no result ────────────────────────────────────────────────
+    if (/^(?:No Zotero library is available|Library retrieval returned no result)/i.test(t)) {
+      const r = row("skip");
+      r.appendChild(el("span", "llm-at-icon", "\u2715"));
+      r.appendChild(el("span", "llm-at-skip-text", "No library available"));
+      container.appendChild(r);
+      continue;
+    }
+
+    // ── Budget exhausted ──────────────────────────────────────────────────────
+    if (/^(?:Context budget exhausted|No remaining context budget)/i.test(t)) {
+      const r = row("budget");
+      r.appendChild(el("span", "llm-at-icon", "\u23F1"));
+      r.appendChild(el("span", "llm-at-budget-text", "Budget reached \u2014 stopping"));
+      container.appendChild(r);
+      continue;
+    }
+
+    // ── Grounding done ────────────────────────────────────────────────────────
+    {
+      const m = t.match(/^Grounding the answer from (\d+) paper/i);
+      if (m) {
+        const r = row("done");
+        r.appendChild(el("span", "llm-at-icon", "\uD83D\uDCC4"));
+        r.appendChild(el("span", "llm-at-done-text",
+          `${m[1]} paper${Number(m[1]) !== 1 ? "s" : ""} ready`));
+        container.appendChild(r);
+        continue;
+      }
+    }
+
+    // ── LLM thought fallback ──────────────────────────────────────────────────
+    {
+      const r = row("thought");
+      r.appendChild(el("span", "llm-at-thought-text", trunc(t, 100)));
+      container.appendChild(r);
+    }
+  }
+
+  return container;
+}
+
 function setHistoryControlsDisabled(body: Element, disabled: boolean): void {
   const historyNewBtn = body.querySelector(
     "#llm-history-new",
@@ -1051,7 +1290,6 @@ async function buildContextPlanForRequest(params: {
   recentPaperContexts: PaperContextRef[];
   history: ChatMessage[];
   effectiveRequestConfig: EffectiveRequestConfig;
-  agentEnabled?: boolean;
   setStatusSafely: (
     text: string,
     kind: Parameters<typeof setStatus>[2],
@@ -1086,42 +1324,41 @@ async function buildContextPlanForRequest(params: {
     systemPrompt,
   });
 
-  if (params.agentEnabled) {
-    const agentLoop = await runAgentLoop({
-      item: params.item,
-      question: params.question,
-      activeContextItem,
-      conversationMode,
-      paperContexts,
-      pinnedPaperContexts,
-      recentPaperContexts,
-      model: params.effectiveRequestConfig.model,
-      apiBase: params.effectiveRequestConfig.apiBase,
-      apiKey: params.effectiveRequestConfig.apiKey,
-      reasoning: params.effectiveRequestConfig.reasoning,
-      advanced: params.effectiveRequestConfig.advanced,
-      availableContextBudgetTokens: baseContextBudget.contextBudgetTokens,
-      onStatus: (statusText) => {
-        params.setStatusSafely(statusText, "sending");
-      },
-      onTrace: (traceLine) => {
-        params.setAgentStatusSafely?.(traceLine);
-      },
-    });
-    activeContextItem = agentLoop.activeContextItem;
-    conversationMode = agentLoop.conversationMode;
-    paperContexts = agentLoop.paperContexts;
-    pinnedPaperContexts = agentLoop.pinnedPaperContexts;
-    recentPaperContexts = agentLoop.recentPaperContexts;
-    contextPrefix = sanitizeText(agentLoop.contextPrefix || "").trim();
-    ztoolkit.log("LLM: Agent loop result", {
-      conversationMode,
-      paperContextCount: paperContexts.length,
-      pinnedPaperContextCount: pinnedPaperContexts.length,
-      recentPaperContextCount: recentPaperContexts.length,
-      hasContextPrefix: Boolean(contextPrefix),
-    });
-  }
+  const agentLoop = await runAgentLoop({
+    item: params.item,
+    question: params.question,
+    images: params.images,
+    activeContextItem,
+    conversationMode,
+    paperContexts,
+    pinnedPaperContexts,
+    recentPaperContexts,
+    model: params.effectiveRequestConfig.model,
+    apiBase: params.effectiveRequestConfig.apiBase,
+    apiKey: params.effectiveRequestConfig.apiKey,
+    reasoning: params.effectiveRequestConfig.reasoning,
+    advanced: params.effectiveRequestConfig.advanced,
+    availableContextBudgetTokens: baseContextBudget.contextBudgetTokens,
+    onStatus: (statusText) => {
+      params.setStatusSafely(statusText, "sending");
+    },
+    onTrace: (traceLine) => {
+      params.setAgentStatusSafely?.(traceLine);
+    },
+  });
+  activeContextItem = agentLoop.activeContextItem;
+  conversationMode = agentLoop.conversationMode;
+  paperContexts = agentLoop.paperContexts;
+  pinnedPaperContexts = agentLoop.pinnedPaperContexts;
+  recentPaperContexts = agentLoop.recentPaperContexts;
+  contextPrefix = sanitizeText(agentLoop.contextPrefix || "").trim();
+  ztoolkit.log("LLM: Agent loop result", {
+    conversationMode,
+    paperContextCount: paperContexts.length,
+    pinnedPaperContextCount: pinnedPaperContexts.length,
+    recentPaperContextCount: recentPaperContexts.length,
+    hasContextPrefix: Boolean(contextPrefix),
+  });
 
   const plan = await resolveMultiContextPlan({
     activeContextItem,
@@ -1147,11 +1384,9 @@ async function buildContextPlanForRequest(params: {
         ? `Using full context (${plan.selectedPaperCount} papers)`
         : `Using retrieved evidence (${plan.selectedPaperCount} papers, ${plan.selectedChunkCount} chunks)`;
     params.setStatusSafely(modeStatus, "sending");
-    if (params.agentEnabled) {
-      params.setAgentStatusSafely?.(
-        `Grounding the answer from ${plan.selectedPaperCount} paper${plan.selectedPaperCount === 1 ? "" : "s"}.`,
-      );
-    }
+    params.setAgentStatusSafely?.(
+      `Grounding the answer from ${plan.selectedPaperCount} paper${plan.selectedPaperCount === 1 ? "" : "s"}.`,
+    );
   }
   ztoolkit.log("LLM: Multi-context plan", {
     mode: plan.mode,
@@ -1472,7 +1707,6 @@ export async function editLatestUserMessageAndRetry(
   apiKey?: string,
   reasoning?: LLMReasoningConfig,
   advanced?: AdvancedModelParams,
-  agentEnabled?: boolean,
 ): Promise<EditLatestTurnResult> {
   await ensureConversationLoaded(item);
   const conversationKey = getConversationKey(item);
@@ -1588,7 +1822,6 @@ export async function editLatestUserMessageAndRetry(
     apiKey,
     reasoning,
     advanced,
-    agentEnabled,
   );
   return "ok";
 }
@@ -1601,7 +1834,6 @@ export async function retryLatestAssistantResponse(
   apiKey?: string,
   reasoning?: LLMReasoningConfig,
   advanced?: AdvancedModelParams,
-  agentEnabled?: boolean,
 ) {
   const ui = getPanelRequestUI(body);
 
@@ -1683,7 +1915,6 @@ export async function retryLatestAssistantResponse(
       recentPaperContexts,
       history: llmHistory,
       effectiveRequestConfig,
-      agentEnabled,
       setStatusSafely,
       setAgentStatusSafely,
     });
@@ -1847,7 +2078,6 @@ export async function sendQuestion(
   paperContexts?: PaperContextRef[],
   pinnedPaperContexts?: PaperContextRef[],
   attachments?: ChatAttachment[],
-  agentEnabled?: boolean,
 ) {
   const ui = getPanelRequestUI(body);
 
@@ -2010,7 +2240,6 @@ export async function sendQuestion(
       recentPaperContexts,
       history: llmHistory,
       effectiveRequestConfig,
-      agentEnabled,
       setStatusSafely,
       setAgentStatusSafely,
     });
@@ -2725,10 +2954,10 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       }
     } else {
       const hasModelName = Boolean(msg.modelName?.trim());
-      const agentTraceText = normalizeAgentTraceLines(
+      const agentTraceLines = normalizeAgentTraceLines(
         msg.agentTraceText || "",
-      ).join("\n");
-      const showAgentStatus = Boolean(agentTraceText);
+      );
+      const showAgentStatus = agentTraceLines.length > 0;
       const hasAnswerText = Boolean(msg.text);
       if (hasAnswerText) {
         const safeText = sanitizeText(msg.text);
@@ -2831,6 +3060,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         const details = doc.createElement("details") as HTMLDetailsElement;
         details.className = "llm-reasoning llm-agent-process";
         details.open = msg.agentOpen !== false;
+        details.setAttribute("data-thinking", msg.streaming ? "true" : "false");
 
         const summary = doc.createElement("summary") as HTMLElement;
         summary.className =
@@ -2840,7 +3070,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         indicator.setAttribute("aria-hidden", "true");
         const summaryLabel = doc.createElement("span") as HTMLSpanElement;
         summaryLabel.className = "llm-agent-process-summary-label";
-        summaryLabel.textContent = "Agent";
+        summaryLabel.textContent = msg.streaming ? "Agent is thinking" : "Agent";
         summary.append(indicator, summaryLabel);
         const toggleAgent = (e: Event) => {
           e.preventDefault();
@@ -2866,16 +3096,8 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         const bodyWrap = doc.createElement("div") as HTMLDivElement;
         bodyWrap.className = "llm-reasoning-body";
 
-        const processBlock = doc.createElement("div") as HTMLDivElement;
-        processBlock.className = "llm-reasoning-block";
-        const label = doc.createElement("div") as HTMLDivElement;
-        label.className = "llm-reasoning-label";
-        label.textContent = "Process";
-        const text = doc.createElement("div") as HTMLDivElement;
-        text.className = "llm-reasoning-text llm-agent-process-text";
-        text.textContent = agentTraceText;
-        processBlock.append(label, text);
-        bodyWrap.appendChild(processBlock);
+        const traceEl = buildAgentTraceHtml(doc, agentTraceLines);
+        bodyWrap.appendChild(traceEl);
         details.appendChild(bodyWrap);
         bubbleHeaderNodes.push(details);
       }

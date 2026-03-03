@@ -313,13 +313,30 @@ export function extractStandalonePaperSourceLabel(
   const wrappedMatch = normalized.match(/^\((.+)\)$/);
   if (wrappedMatch) {
     const inner = wrappedMatch[1].trim();
-    const innerParts = inner.match(
-      /^(.*?)(?:\s+\[([^\]]+)\])?(?:\s*,?\s*page\s+([^,;]+))?\.?$/i,
-    );
-    if (!innerParts) return null;
-    const citationLabel = sanitizeText(innerParts[1] || "").trim();
-    if (!citationLabel || citationLabel.length < 4) return null;
-    return parseCitationParts(citationLabel, innerParts[2], innerParts[3]);
+    // Verify the outer parens form a single top-level group: no unmatched ')'
+    // inside the inner content (depth must never go negative). Without this
+    // check, a paragraph like "(Author, 2026) Some text... (Author, 2026, page 5)"
+    // would incorrectly match because it starts with '(' and ends with ')'.
+    let parenDepth = 0;
+    let isValidSingleGroup = true;
+    for (const ch of inner) {
+      if (ch === "(") { parenDepth++; }
+      else if (ch === ")") {
+        parenDepth--;
+        if (parenDepth < 0) { isValidSingleGroup = false; break; }
+      }
+    }
+    if (!isValidSingleGroup) {
+      // Fall through to the stricter splitMatch path below.
+    } else {
+      const innerParts = inner.match(
+        /^(.*?)(?:\s+\[([^\]]+)\])?(?:\s*,?\s*page\s+([^,;]+))?\.?$/i,
+      );
+      if (!innerParts) return null;
+      const citationLabel = sanitizeText(innerParts[1] || "").trim();
+      if (!citationLabel || citationLabel.length < 4) return null;
+      return parseCitationParts(citationLabel, innerParts[2], innerParts[3]);
+    }
   }
 
   const splitMatch = normalized.match(
