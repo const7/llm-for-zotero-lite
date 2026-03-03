@@ -3610,16 +3610,10 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           const retryModelMenu = body.querySelector(
             "#llm-retry-model-menu",
           ) as HTMLDivElement | null;
-          const promptMenuEditBtn = promptMenu?.querySelector(
-            "#llm-prompt-menu-edit",
-          ) as HTMLButtonElement | null;
           const promptMenuDeleteBtn = promptMenu?.querySelector(
             "#llm-prompt-menu-delete",
           ) as HTMLButtonElement | null;
           if (!promptMenu) return;
-          if (promptMenuEditBtn) {
-            promptMenuEditBtn.disabled = true;
-          }
           if (promptMenuDeleteBtn) {
             promptMenuDeleteBtn.disabled = !canDeletePromptTurn;
           }

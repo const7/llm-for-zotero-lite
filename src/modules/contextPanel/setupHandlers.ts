@@ -349,7 +349,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     responseMenuNoteBtn,
     responseMenuDeleteBtn,
     promptMenu,
-    promptMenuEditBtn,
     promptMenuDeleteBtn,
     exportMenu,
     exportMenuCopyBtn,
@@ -1079,7 +1078,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     }
   }
 
-  if (promptMenu && promptMenuEditBtn) {
+  if (promptMenu) {
     if (!promptMenu.dataset.listenerAttached) {
       promptMenu.dataset.listenerAttached = "true";
       promptMenu.addEventListener("pointerdown", (e: Event) => {
@@ -1091,167 +1090,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       promptMenu.addEventListener("contextmenu", (e: Event) => {
         e.preventDefault();
         e.stopPropagation();
-      });
-      promptMenuEditBtn.addEventListener("click", async (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const target = promptMenuTarget;
-        closePromptMenu();
-        if (!item || !target) return;
-        if (!target.editable) {
-          if (status)
-            setStatus(status, "Only the latest prompt is editable", "ready");
-          return;
-        }
-        if (
-          target.item.id !== item.id ||
-          target.conversationKey !== getConversationKey(item)
-        ) {
-          activeEditSession = null;
-          if (status) setStatus(status, EDIT_STALE_STATUS_TEXT, "error");
-          return;
-        }
-        const latest = await getLatestEditablePair();
-        if (!latest) {
-          activeEditSession = null;
-          if (status) setStatus(status, "No editable latest prompt", "error");
-          return;
-        }
-        const { conversationKey: latestKey, pair } = latest;
-        if (
-          pair.assistantMessage.streaming ||
-          pair.userMessage.timestamp !== target.userTimestamp ||
-          pair.assistantMessage.timestamp !== target.assistantTimestamp
-        ) {
-          activeEditSession = null;
-          if (status) setStatus(status, EDIT_STALE_STATUS_TEXT, "error");
-          return;
-        }
-
-        inputBox.value = sanitizeText(pair.userMessage.text || "");
-        persistDraftInputForCurrentConversation();
-
-        const restoredSelectedTexts = Array.isArray(
-          pair.userMessage.selectedTexts,
-        )
-          ? pair.userMessage.selectedTexts
-              .map((value) =>
-                typeof value === "string" ? sanitizeText(value).trim() : "",
-              )
-              .filter(Boolean)
-          : typeof pair.userMessage.selectedText === "string" &&
-              sanitizeText(pair.userMessage.selectedText).trim()
-            ? [sanitizeText(pair.userMessage.selectedText).trim()]
-            : [];
-        const selectedTextPaperContexts = normalizeSelectedTextPaperContexts(
-          pair.userMessage.selectedTextPaperContexts,
-          restoredSelectedTexts.length,
-          { sanitizeText },
-        );
-        const restoredSelectedEntries = restoredSelectedTexts.map(
-          (text, index) => ({
-            text,
-            source: normalizeSelectedTextSource(
-              pair.userMessage.selectedTextSources?.[index],
-            ),
-            paperContext: selectedTextPaperContexts[index],
-          }),
-        );
-        const textContextKey = getTextContextConversationKey();
-        if (!textContextKey) return;
-        if (restoredSelectedEntries.length) {
-          setSelectedTextContextEntries(
-            textContextKey,
-            restoredSelectedEntries,
-          );
-        } else {
-          clearSelectedTextState(textContextKey);
-        }
-        setSelectedTextExpandedIndex(textContextKey, null);
-
-        const restoredPaperContexts = normalizePaperContextEntries(
-          pair.userMessage.paperContexts,
-        );
-        if (restoredPaperContexts.length) {
-          selectedPaperContextCache.set(item.id, restoredPaperContexts);
-          selectedPaperPreviewExpandedCache.set(item.id, false);
-        } else {
-          clearSelectedPaperState(item.id);
-        }
-
-        const restoredFiles = (
-          Array.isArray(pair.userMessage.attachments)
-            ? pair.userMessage.attachments.filter(
-                (attachment) =>
-                  Boolean(attachment) &&
-                  typeof attachment === "object" &&
-                  attachment.category !== "image" &&
-                  typeof attachment.id === "string" &&
-                  attachment.id.trim() &&
-                  typeof attachment.name === "string" &&
-                  attachment.name.trim(),
-              )
-            : []
-        ).map((attachment) => ({
-          ...attachment,
-          id: attachment.id.trim(),
-          name: attachment.name.trim(),
-          mimeType:
-            typeof attachment.mimeType === "string" &&
-            attachment.mimeType.trim()
-              ? attachment.mimeType.trim()
-              : "application/octet-stream",
-          sizeBytes: Number.isFinite(attachment.sizeBytes)
-            ? Math.max(0, attachment.sizeBytes)
-            : 0,
-          textContent:
-            typeof attachment.textContent === "string"
-              ? attachment.textContent
-              : undefined,
-          storedPath:
-            typeof attachment.storedPath === "string" &&
-            attachment.storedPath.trim()
-              ? attachment.storedPath.trim()
-              : undefined,
-          contentHash:
-            typeof attachment.contentHash === "string" &&
-            /^[a-f0-9]{64}$/i.test(attachment.contentHash.trim())
-              ? attachment.contentHash.trim().toLowerCase()
-              : undefined,
-        }));
-        if (restoredFiles.length) {
-          selectedFileAttachmentCache.set(item.id, restoredFiles);
-          selectedFilePreviewExpandedCache.set(item.id, false);
-        } else {
-          clearSelectedFileState(item.id);
-        }
-
-        const restoredImages = Array.isArray(pair.userMessage.screenshotImages)
-          ? pair.userMessage.screenshotImages
-              .filter((entry): entry is string => typeof entry === "string")
-              .map((entry) => entry.trim())
-              .filter(Boolean)
-              .slice(0, MAX_SELECTED_IMAGES)
-          : [];
-        if (restoredImages.length) {
-          selectedImageCache.set(item.id, restoredImages);
-          selectedImagePreviewExpandedCache.set(item.id, false);
-          selectedImagePreviewActiveIndexCache.set(item.id, 0);
-        } else {
-          clearSelectedImageState(item.id);
-        }
-
-        updatePaperPreviewPreservingScroll();
-        updateFilePreviewPreservingScroll();
-        updateImagePreviewPreservingScroll();
-        updateSelectedTextPreviewPreservingScroll();
-        activeEditSession = {
-          conversationKey: latestKey,
-          userTimestamp: pair.userMessage.timestamp,
-          assistantTimestamp: pair.assistantMessage.timestamp,
-        };
-        inputBox.focus({ preventScroll: true });
-        if (status) setStatus(status, "Editing latest prompt", "ready");
       });
       if (promptMenuDeleteBtn) {
         promptMenuDeleteBtn.addEventListener("click", async (e: Event) => {

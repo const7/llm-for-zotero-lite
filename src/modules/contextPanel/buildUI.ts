@@ -328,16 +328,6 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     id: "llm-prompt-menu",
   });
   promptMenu.style.display = "none";
-  const promptMenuEditBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-prompt-menu-edit",
-      type: "button",
-      textContent: "Edit",
-    },
-  );
   const promptMenuDeleteBtn = createElement(
     doc,
     "button",
@@ -349,7 +339,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       title: "Delete this prompt and response",
     },
   );
-  promptMenu.append(promptMenuEditBtn, promptMenuDeleteBtn);
+  promptMenu.append(promptMenuDeleteBtn);
   container.appendChild(promptMenu);
 
   // Export menu
