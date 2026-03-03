@@ -31,6 +31,10 @@ import {
   executeWriteNoteCall,
   validateWriteNoteCall,
 } from "./tools/writeNote";
+import {
+  executeFixMetadataCall,
+  validateFixMetadataCall,
+} from "./tools/fixMetadata";
 
 export type AgentToolDefinition = {
   name: AgentToolName;
@@ -111,6 +115,14 @@ const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     callExample: '{"name":"write_note","target":{"scope":"active-paper"},"query":"one sentence key point"}',
     validate: validateWriteNoteCall,
     execute: executeWriteNoteCall,
+  },
+  {
+    name: "fix_metadata",
+    plannerDescription:
+      "inspect the paper text and propose values for any missing Zotero metadata fields (title, abstract, date, journal, volume, issue, pages, DOI, authors, etc.); opens an inline review panel so the user can accept or reject each change",
+    callExample: '{"name":"fix_metadata","target":{"scope":"active-paper"}}',
+    validate: validateFixMetadataCall,
+    execute: executeFixMetadataCall,
   },
 ];
 

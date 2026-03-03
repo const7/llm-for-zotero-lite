@@ -51,7 +51,10 @@ import {
   nextRequestId,
   setResponseMenuTarget,
   setPromptMenuTarget,
+  pendingMetadataProposals,
+  pendingNoteProposals,
 } from "./state";
+import type { MetadataProposal, PendingNoteProposal } from "./state";
 import {
   sanitizeText,
   formatTime,
@@ -87,7 +90,7 @@ import {
 } from "./contextResolution";
 import { isGlobalPortalItem } from "./portalScope";
 import { runAgentLoop } from "./agentLoop";
-import { buildChatHistoryNotePayload } from "./notes";
+import { buildChatHistoryNotePayload, createNoteFromAssistantText } from "./notes";
 import { extractManagedBlobHash } from "./attachmentStorage";
 import { toFileUrl } from "../../utils/pathFileUrl";
 import { replaceOwnerAttachmentRefs } from "../../utils/attachmentRefStore";
@@ -175,6 +178,7 @@ function buildAgentTraceHtml(
     search_paper_content: "Search Content",
     write_note: "Write Note",
     search_internet: "Internet Search",
+    fix_metadata: "Fix Metadata",
   };
 
   function prettyTarget(raw: string): string {
@@ -520,6 +524,43 @@ function buildAgentTraceHtml(
       }
     }
 
+    // ── Metadata fields found ─────────────────────────────────────────────────
+    {
+      const m = t.match(/^Found (\d+) fields? to fill in for (.+?)\.?$/);
+      if (m) {
+        const r = row("ok");
+        r.appendChild(el("span", "llm-at-icon", "\uD83D\uDD8A"));
+        r.appendChild(el("span", "llm-at-ok-text", `${m[1]} field${Number(m[1]) !== 1 ? "s" : ""}  to update`));
+        r.appendChild(el("span", "llm-at-sep", "\u00B7"));
+        r.appendChild(el("span", "llm-at-paper-label", trunc(m[2]!)));
+        container.appendChild(r);
+        continue;
+      }
+    }
+
+    // ── Metadata complete ─────────────────────────────────────────────────────
+    {
+      const m = t.match(/^Metadata appears complete for (.+?) \u2014 nothing to fix\.?$/);
+      if (m) {
+        const r = row("ok");
+        r.appendChild(el("span", "llm-at-icon", "\u2726"));
+        r.appendChild(el("span", "llm-at-ok-text", "Metadata already complete"));
+        r.appendChild(el("span", "llm-at-sep", "\u00B7"));
+        r.appendChild(el("span", "llm-at-paper-label", trunc(m[1]!)));
+        container.appendChild(r);
+        continue;
+      }
+    }
+
+    // ── Metadata extraction failed / not found ────────────────────────────────
+    if (/^Could not extract missing metadata from/i.test(t)) {
+      const r = row("skip");
+      r.appendChild(el("span", "llm-at-icon", "\u2715"));
+      r.appendChild(el("span", "llm-at-skip-text", "No metadata extracted"));
+      container.appendChild(r);
+      continue;
+    }
+
     // ── LLM thought fallback ──────────────────────────────────────────────────
     {
       const r = row("thought");
@@ -529,6 +570,276 @@ function buildAgentTraceHtml(
   }
 
   return container;
+}
+
+/**
+ * Build the inline metadata review card shown below the chat after a
+ * fix_metadata tool call.  The user can check individual fields and click
+ * "Accept Selected" to write the changes to the Zotero item.
+ */
+function buildMetadataReviewCard(
+  doc: Document,
+  item: Zotero.Item,
+  body: Element,
+  proposal: MetadataProposal,
+): HTMLDivElement {
+  function el<T extends HTMLElement>(tag: string, cls: string, text?: string): T {
+    const e = doc.createElement(tag) as T;
+    e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  const card = el<HTMLDivElement>("div", "llm-metadata-review-card");
+
+  // ── Header ─────────────────────────────────────────────────────────────────
+  const header = el("div", "llm-mrc-header");
+  header.appendChild(el("div", "llm-mrc-title", "\uD83D\uDCC4 Metadata Review"));
+  header.appendChild(
+    el("div", "llm-mrc-subtitle",
+      `${proposal.targetLabel} \u2014 check each proposed change and click Accept to apply.`)
+  );
+  card.appendChild(header);
+
+  // ── Table of proposed changes ──────────────────────────────────────────────
+  const table = el("div", "llm-mrc-table");
+  const checkboxMap = new Map<string, HTMLInputElement>();
+
+  function addRow(
+    fieldKey: string,
+    displayName: string,
+    currentVal: string,
+    proposedVal: string,
+  ): void {
+    const row = el("div", "llm-mrc-row");
+
+    const checkLabel = doc.createElement("label") as HTMLLabelElement;
+    checkLabel.className = "llm-mrc-check-label";
+    const checkbox = doc.createElement("input") as HTMLInputElement;
+    checkbox.type = "checkbox";
+    checkbox.className = "llm-mrc-checkbox";
+    checkbox.checked = true;
+    checkbox.dataset.fieldKey = fieldKey;
+    checkLabel.appendChild(checkbox);
+    checkboxMap.set(fieldKey, checkbox);
+
+    const nameCel = el("div", "llm-mrc-field-name", displayName);
+    const currentCel = el("div", "llm-mrc-current", currentVal || "\u2014");
+    const arrowCel = el("div", "llm-mrc-arrow", "\u2192");
+    arrowCel.setAttribute("aria-hidden", "true");
+
+    const proposedCel = el("div", "llm-mrc-proposed");
+    const TRUNCATE_AT = 240;
+    if (proposedVal.length > TRUNCATE_AT) {
+      const shortText = proposedVal.slice(0, TRUNCATE_AT) + "\u2026";
+      const textSpan = doc.createElement("span") as HTMLSpanElement;
+      textSpan.textContent = shortText;
+      const expandBtn = doc.createElement("button") as HTMLButtonElement;
+      expandBtn.type = "button";
+      expandBtn.className = "llm-mrc-expand-btn";
+      expandBtn.textContent = "show more";
+      let isExpanded = false;
+      expandBtn.addEventListener("click", (e: Event) => {
+        e.preventDefault();
+        isExpanded = !isExpanded;
+        textSpan.textContent = isExpanded ? proposedVal : shortText;
+        expandBtn.textContent = isExpanded ? "show less" : "show more";
+      });
+      proposedCel.append(textSpan, " ", expandBtn);
+    } else {
+      proposedCel.textContent = proposedVal;
+    }
+
+    row.append(checkLabel, nameCel, currentCel, arrowCel, proposedCel);
+    table.appendChild(row);
+  }
+
+  for (const field of proposal.fields) {
+    addRow(field.fieldName, field.displayName, field.currentValue, field.proposedValue);
+  }
+  if (proposal.authors) {
+    addRow("__authors__", "Authors", proposal.authors.current, proposal.authors.proposed);
+  }
+  card.appendChild(table);
+
+  // ── Action row ─────────────────────────────────────────────────────────────
+  const actions = el("div", "llm-mrc-actions");
+  const acceptBtn = el<HTMLButtonElement>("button", "llm-mrc-accept-btn", "Accept Selected");
+  acceptBtn.type = "button";
+  const dismissBtn = el<HTMLButtonElement>("button", "llm-mrc-dismiss-btn", "Dismiss");
+  dismissBtn.type = "button";
+  const statusMsg = el("span", "llm-mrc-status");
+
+  dismissBtn.addEventListener("click", () => {
+    pendingMetadataProposals.delete(item.id);
+    card.remove();
+  });
+
+  acceptBtn.addEventListener("click", () => {
+    void (async () => {
+      acceptBtn.disabled = true;
+      dismissBtn.disabled = true;
+      statusMsg.textContent = "Applying\u2026";
+
+      let applied = 0;
+      const errors: string[] = [];
+
+      // Regular fields
+      for (const field of proposal.fields) {
+        const cb = checkboxMap.get(field.fieldName);
+        if (!cb?.checked) continue;
+        try {
+          (item as any).setField(field.fieldName, field.proposedValue);
+          applied++;
+        } catch (err) {
+          errors.push(`${field.displayName}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // Authors
+      if (proposal.authors) {
+        const cb = checkboxMap.get("__authors__");
+        if (cb?.checked) {
+          try {
+            const authorTypeId: number = Zotero.CreatorTypes.getID("author") as number;
+            const existing: any[] = (item as any).getCreators?.() ?? [];
+            const nonAuthors = existing.filter((c: any) => c.creatorTypeID !== authorTypeId);
+            const newAuthors = proposal.authors.parsedAuthors.map((a) => ({
+              firstName: a.firstName,
+              lastName: a.lastName,
+              creatorTypeID: authorTypeId,
+              fieldMode: a.firstName ? 0 : 1,
+            }));
+            (item as any).setCreators([...newAuthors, ...nonAuthors]);
+            applied++;
+          } catch (err) {
+            errors.push(`Authors: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      }
+
+      if (applied > 0) {
+        try {
+          await (item as any).saveTx();
+        } catch (err) {
+          errors.push(`Save: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      pendingMetadataProposals.delete(item.id);
+
+      if (errors.length > 0) {
+        statusMsg.textContent = `\u26A0 ${errors.join("; ")}`;
+        acceptBtn.disabled = false;
+        dismissBtn.disabled = false;
+      } else {
+        statusMsg.textContent = `\u2713 ${applied} field${applied !== 1 ? "s" : ""} updated.`;
+        card.classList.add("llm-mrc-done");
+        const win = doc.defaultView;
+        refreshChat(body, item);
+        if (win) win.setTimeout(() => card.remove(), 1800);
+        else card.remove();
+      }
+    })();
+  });
+
+  actions.append(acceptBtn, dismissBtn, statusMsg);
+  card.appendChild(actions);
+  return card;
+}
+
+function buildNoteReviewCard(
+  doc: Document,
+  item: Zotero.Item,
+  body: Element,
+  proposal: PendingNoteProposal,
+): HTMLDivElement {
+  function el<T extends HTMLElement>(tag: string, cls: string, text?: string): T {
+    const e = doc.createElement(tag) as T;
+    e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  const card = el<HTMLDivElement>("div", "llm-note-review-card");
+
+  // ── Header ────────────────────────────────────────────────────────────────
+  const header = el("div", "llm-mrc-header");
+  header.appendChild(el("div", "llm-mrc-title", "\uD83D\uDCDD Note Review"));
+  header.appendChild(
+    el("div", "llm-mrc-subtitle",
+      `${proposal.targetLabel} \u2014 edit if needed, then click Save to Zotero.`)
+  );
+  card.appendChild(header);
+
+  // ── Editable textarea ──────────────────────────────────────────────────
+  const textareaWrap = el("div", "llm-nrc-textarea-wrap");
+  const textarea = doc.createElement("textarea") as HTMLTextAreaElement;
+  textarea.className = "llm-nrc-textarea";
+  textarea.value = proposal.content;
+  textarea.spellcheck = false;
+  textareaWrap.appendChild(textarea);
+  card.appendChild(textareaWrap);
+
+  // ── Actions ──────────────────────────────────────────────────────────────
+  const actions = el("div", "llm-mrc-actions");
+  const saveBtn = el<HTMLButtonElement>("button", "llm-mrc-accept-btn", "Save to Zotero");
+  saveBtn.type = "button";
+  const dismissBtn = el<HTMLButtonElement>("button", "llm-mrc-dismiss-btn", "Dismiss");
+  dismissBtn.type = "button";
+  const statusMsg = el("span", "llm-mrc-status");
+
+  dismissBtn.addEventListener("click", () => {
+    pendingNoteProposals.delete(item.id);
+    card.remove();
+  });
+
+  saveBtn.addEventListener("click", () => {
+    void (async () => {
+      saveBtn.disabled = true;
+      dismissBtn.disabled = true;
+      statusMsg.textContent = "Saving\u2026";
+
+      const editedContent = textarea.value.trim();
+      if (!editedContent) {
+        statusMsg.textContent = "\u26A0 Note is empty.";
+        saveBtn.disabled = false;
+        dismissBtn.disabled = false;
+        return;
+      }
+
+      try {
+        const parentItem = Zotero.Items.get(proposal.itemId) as Zotero.Item | false;
+        if (!parentItem) {
+          statusMsg.textContent = "\u26A0 Could not find the Zotero item.";
+          saveBtn.disabled = false;
+          dismissBtn.disabled = false;
+          return;
+        }
+        const saveOutcome = await createNoteFromAssistantText(
+          parentItem,
+          editedContent,
+          proposal.model || "agent",
+        );
+        pendingNoteProposals.delete(item.id);
+        statusMsg.textContent = `\u2713 Note ${saveOutcome} in Zotero.`;
+        card.classList.add("llm-mrc-done");
+        const win = doc.defaultView;
+        refreshChat(body, item);
+        if (win) win.setTimeout(() => card.remove(), 1800);
+        else card.remove();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        statusMsg.textContent = `\u26A0 ${msg}`;
+        saveBtn.disabled = false;
+        dismissBtn.disabled = false;
+      }
+    })();
+  });
+
+  actions.append(saveBtn, dismissBtn, statusMsg);
+  card.appendChild(actions);
+  return card;
 }
 
 function setHistoryControlsDisabled(body: Element, disabled: boolean): void {
@@ -3388,6 +3699,31 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         win.clearTimeout(active.timeoutId);
       }
       followBottomStabilizers.delete(conversationKey);
+    }
+  }
+
+  // ── Review card slot ───────────────────────────────────────────────────────
+  // The card lives in #llm-review-card-slot which is OUTSIDE the constrained
+  // .llm-chat-shell (height: 50vh, overflow: hidden).  That means it always
+  // renders at full size in the normal document flow – no scrolling required.
+  const reviewSlot = body.querySelector(
+    "#llm-review-card-slot",
+  ) as HTMLDivElement | null;
+  if (reviewSlot) {
+    reviewSlot.textContent = ""; // clear any card from a previous render
+    if (item) {
+      const metaProposal = pendingMetadataProposals.get(item.id);
+      if (metaProposal) {
+        reviewSlot.appendChild(
+          buildMetadataReviewCard(doc, item, body, metaProposal),
+        );
+      }
+      const noteProposal = pendingNoteProposals.get(item.id);
+      if (noteProposal) {
+        reviewSlot.appendChild(
+          buildNoteReviewCard(doc, item, body, noteProposal),
+        );
+      }
     }
   }
 }

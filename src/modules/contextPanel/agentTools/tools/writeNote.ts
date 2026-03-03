@@ -1,11 +1,10 @@
 import { callLLM } from "../../../../utils/llmClient";
 import { estimateTextTokens } from "../../../../utils/modelInputCap";
-import { pdfTextCache } from "../../state";
+import { pdfTextCache, pendingNoteProposals } from "../../state";
 import {
   buildTruncatedFullPaperContext,
   ensurePDFTextCached,
 } from "../../pdfContext";
-import { createNoteFromAssistantText } from "../../notes";
 import { validateSinglePaperToolCall } from "./shared";
 import type {
   AgentToolCall,
@@ -106,52 +105,23 @@ export async function executeWriteNoteCall(
     };
   }
 
-  // Persist the note to Zotero
-  const parentItem = Zotero.Items.get(target.paperContext.itemId) as Zotero.Item | false;
-  if (!parentItem) {
-    return {
-      name: "write_note",
-      targetLabel: target.targetLabel,
-      ok: false,
-      traceLines: [`Could not resolve parent item for ${target.targetLabel}; note was not saved.`],
-      groundingText: "",
-      addedPaperContexts: [],
-      estimatedTokens: 0,
-      truncated: false,
-    };
-  }
-
-  let saveOutcome: "created" | "appended";
-  try {
-    saveOutcome = await createNoteFromAssistantText(
-      parentItem,
-      noteContent,
-      ctx.model || "agent",
-    );
-  } catch (saveErr) {
-    const errMsg = saveErr instanceof Error ? saveErr.message : String(saveErr);
-    return {
-      name: "write_note",
-      targetLabel: target.targetLabel,
-      ok: false,
-      traceLines: [`Note was generated but could not be saved for ${target.targetLabel}: ${errMsg}`],
-      groundingText: "",
-      addedPaperContexts: [],
-      estimatedTokens: 0,
-      truncated: false,
-    };
-  }
+  // Store note as a pending proposal so the user can review, edit, and
+  // save it via the review panel in the chat UI.
+  pendingNoteProposals.set(target.paperContext.itemId, {
+    itemId: target.paperContext.itemId,
+    targetLabel: target.targetLabel,
+    content: noteContent,
+    model: ctx.model || "agent",
+  });
 
   const groundingLines = [
     "Agent Tool Result",
     "- Tool: write_note",
     `- Target: ${target.targetLabel}`,
-    `- Note ${saveOutcome} in Zotero`,
+    "- Note content generated, awaiting user review",
     topicFocus ? `- Topic focus: ${topicFocus}` : "",
     "",
-    `A note was saved to Zotero for ${target.targetLabel}. Tell the user exactly what was written to the note, quoting the note content below verbatim:`,
-    "",
-    noteContent,
+    `A note review panel has appeared for ${target.targetLabel}. Tell the user a note has been drafted and they can review and edit it in the panel below, then click \"Save to Zotero\" to save it. Do NOT quote the full note content in your reply — the user can already see it in the panel.`,
   ].filter((line) => line !== "");
 
   const groundingText = groundingLines.join("\n");
@@ -161,7 +131,7 @@ export async function executeWriteNoteCall(
     name: "write_note",
     targetLabel: target.targetLabel,
     ok: true,
-    traceLines: [`Note written for ${target.targetLabel}.`],
+    traceLines: [`Note ready to review for ${target.targetLabel}.`],
     groundingText,
     addedPaperContexts: [target.paperContext],
     estimatedTokens,

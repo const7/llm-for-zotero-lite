@@ -8,7 +8,8 @@ export type AgentToolName =
   | "get_paper_sections"
   | "search_paper_content"
   | "write_note"
-  | "search_internet";
+  | "search_internet"
+  | "fix_metadata";
 
 export type AgentToolTarget =
   | { scope: "active-paper" }

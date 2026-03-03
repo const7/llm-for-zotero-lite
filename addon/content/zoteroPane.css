@@ -3855,3 +3855,220 @@ button.llm-at-target-btn:focus-visible {
   outline: 1px solid var(--color-accent);
   outline-offset: 1px;
 }
+
+/* ── Review Card Slot & Metadata Review Card ──────────────────────────────── */
+
+/* The slot sits between the shortcuts row and the input section.              */
+/* When populated it gets padding so the card doesn't touch the edges.         */
+#llm-review-card-slot:not(:empty) {
+  padding: 0 12px 6px;
+}
+
+.llm-metadata-review-card {
+  margin: 4px 0 0;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--material-sidepanel));
+  overflow: hidden;
+  font-size: var(--llm-fs-12);
+}
+
+.llm-metadata-review-card.llm-mrc-done {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.llm-mrc-header {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.llm-mrc-title {
+  font-size: var(--llm-fs-13);
+  font-weight: 600;
+  color: var(--fill-primary);
+  margin-bottom: 2px;
+}
+
+.llm-mrc-subtitle {
+  font-size: var(--llm-fs-11);
+  color: var(--fill-secondary);
+}
+
+.llm-mrc-table {
+  padding: 4px 0;
+}
+
+.llm-mrc-row {
+  display: grid;
+  grid-template-columns: 20px 100px 1fr 18px 1fr;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--fill-quinary, var(--fill-tertiary)) 40%, transparent);
+}
+
+.llm-mrc-row:last-child {
+  border-bottom: none;
+}
+
+.llm-mrc-check-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.llm-mrc-checkbox {
+  cursor: pointer;
+  accent-color: var(--color-accent);
+  width: 13px;
+  height: 13px;
+}
+
+.llm-mrc-field-name {
+  font-weight: 600;
+  color: var(--fill-secondary);
+  font-size: var(--llm-fs-11);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.llm-mrc-current {
+  color: var(--fill-tertiary);
+  font-size: var(--llm-fs-11);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.llm-mrc-arrow {
+  color: var(--fill-tertiary);
+  font-size: var(--llm-fs-11);
+  text-align: center;
+}
+
+.llm-mrc-proposed {
+  color: var(--fill-primary);
+  font-size: var(--llm-fs-12);
+  word-break: break-word;
+  min-width: 0;
+}
+
+.llm-mrc-expand-btn {
+  appearance: none;
+  -moz-appearance: none;
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: var(--llm-fs-11);
+  padding: 0 2px;
+  text-decoration: underline;
+}
+
+.llm-mrc-expand-btn:hover {
+  opacity: 0.8;
+}
+
+.llm-mrc-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.llm-mrc-accept-btn,
+.llm-mrc-dismiss-btn {
+  appearance: none;
+  -moz-appearance: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: var(--llm-fs-12);
+  font-weight: 500;
+  padding: 4px 12px;
+  transition: opacity 0.15s;
+}
+
+.llm-mrc-accept-btn {
+  background: var(--color-accent);
+  border: none;
+  color: #fff;
+}
+
+.llm-mrc-accept-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.llm-mrc-dismiss-btn {
+  background: transparent;
+  border: 1px solid var(--fill-tertiary);
+  color: var(--fill-secondary);
+}
+
+.llm-mrc-dismiss-btn:hover:not(:disabled) {
+  background: var(--fill-quinary, color-mix(in srgb, var(--fill-primary) 8%, transparent));
+}
+
+.llm-mrc-accept-btn:disabled,
+.llm-mrc-dismiss-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.llm-mrc-status {
+  font-size: var(--llm-fs-11);
+  color: var(--fill-secondary);
+  flex: 1;
+  text-align: right;
+}
+
+/* ─── Note Review Card ──────────────────────────────────────────────────────── */
+
+.llm-note-review-card {
+  margin: 4px 0 0;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--material-sidepanel));
+  overflow: hidden;
+  font-size: var(--llm-fs-12);
+}
+
+.llm-note-review-card.llm-mrc-done {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* reuse .llm-mrc-header, .llm-mrc-title, .llm-mrc-subtitle, .llm-mrc-actions,
+   .llm-mrc-accept-btn, .llm-mrc-dismiss-btn, .llm-mrc-status from the
+   metadata card — they apply to both card types */
+
+.llm-nrc-textarea-wrap {
+  padding: 6px 12px 8px;
+}
+
+.llm-nrc-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 120px;
+  max-height: 360px;
+  background: var(--fill-quinary, color-mix(in srgb, var(--fill-primary) 5%, transparent));
+  border: 1px solid var(--stroke-secondary, color-mix(in srgb, var(--fill-primary) 15%, transparent));
+  border-radius: 4px;
+  color: var(--fill-primary);
+  font-size: var(--llm-fs-12);
+  font-family: inherit;
+  padding: 8px;
+  line-height: 1.5;
+}
+
+.llm-nrc-textarea:focus {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+  border-color: var(--color-accent);
+}

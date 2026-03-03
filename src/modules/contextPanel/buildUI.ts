@@ -242,6 +242,14 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   });
   container.appendChild(shortcutsRow);
 
+  // Review card slot – receives tool-generated review panels (e.g. fix_metadata).
+  // Lives OUTSIDE the height-constrained chat shell so the card is always
+  // fully visible without any scrolling or panel resizing.
+  const reviewCardSlot = createElement(doc, "div", "llm-review-card-slot", {
+    id: "llm-review-card-slot",
+  });
+  container.appendChild(reviewCardSlot);
+
   // Shortcut context menu
   const shortcutMenu = createElement(doc, "div", "llm-shortcut-menu", {
     id: "llm-shortcut-menu",

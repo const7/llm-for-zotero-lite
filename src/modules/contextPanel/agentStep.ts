@@ -143,6 +143,7 @@ function buildStepPrompt(ctx: AgentStepContext): string {
     "- Use search_internet when the user wants to discover or find academic papers (e.g. 'find papers on X', 'search for papers about X', 'what papers exist on X'). This searches Semantic Scholar on the internet. Prefer this over list_papers for open-ended paper discovery questions.",
     "- Use list_papers only when the user explicitly refers to their own Zotero library or collection (e.g. 'in my library', 'do I have papers on', 'search my Zotero'). Also use it to load retrieved-paper#N targets.",
     "- Call list_papers before using retrieved-paper#N targets (they don't exist yet otherwise).",
+    "- Use fix_metadata when the user asks to fix, complete, fill in, or update the metadata of a paper (e.g. 'fix the metadata', 'fill in missing fields', 'the author is missing', 'add the abstract').",
     "- traceLines: exactly 1 short action line (\u2264 80 chars). State what you are doing or why you are stopping. No multi-sentence reasoning.",
     "",
     `Step ${ctx.iterationIndex + 1} of ${ctx.maxIterations}`,
@@ -256,7 +257,7 @@ function normalizeToolCall(value: unknown): AgentToolCall | null {
     return { name: "list_papers", query: query || undefined, limit };
   }
 
-  const targetOnlyTools = ["read_paper_text", "find_claim_evidence", "read_references", "get_paper_sections", "write_note"] as const;
+  const targetOnlyTools = ["read_paper_text", "find_claim_evidence", "read_references", "get_paper_sections", "write_note", "fix_metadata"] as const;
   if (targetOnlyTools.includes(name as (typeof targetOnlyTools)[number])) {
     const target = normalizeToolTarget(typed.target);
     if (!target) return null;

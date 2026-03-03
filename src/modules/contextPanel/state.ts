@@ -101,3 +101,53 @@ export const pinnedPaperKeys = new Map<number, Set<string>>();
 export const recentReaderSelectionCache = new Map<number, string>();
 
 export const activePaperConversationByPaper = new Map<string, number>();
+
+// ── Metadata fix proposals ────────────────────────────────────────────────────
+
+export type MetadataFieldProposal = {
+  fieldName: string;
+  displayName: string;
+  currentValue: string;
+  proposedValue: string;
+};
+
+export type MetadataAuthorEntry = {
+  firstName: string;
+  lastName: string;
+};
+
+export type MetadataProposal = {
+  itemId: number;
+  targetLabel: string;
+  fields: MetadataFieldProposal[];
+  authors?: {
+    current: string;
+    proposed: string;
+    parsedAuthors: MetadataAuthorEntry[];
+  };
+};
+
+/**
+ * Pending metadata proposals keyed by Zotero item ID.
+ * Populated by the fix_metadata agent tool; consumed and cleared by the
+ * inline review card rendered in chat.ts.
+ */
+export const pendingMetadataProposals = new Map<number, MetadataProposal>();
+
+// ── Pending note proposals ──────────────────────────────────────────
+
+export type PendingNoteProposal = {
+  itemId: number;
+  targetLabel: string;
+  /** LLM-generated note content (markdown). User may edit before saving. */
+  content: string;
+  /** Model name used to generate the note, forwarded to createNoteFromAssistantText. */
+  model: string;
+};
+
+/**
+ * Pending note proposals keyed by Zotero parent item ID.
+ * Populated by write_note agent tool; consumed and cleared by the
+ * note review card rendered in chat.ts.
+ */
+export const pendingNoteProposals = new Map<number, PendingNoteProposal>();
