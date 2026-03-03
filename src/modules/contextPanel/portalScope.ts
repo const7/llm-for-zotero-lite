@@ -3,7 +3,10 @@ import {
   PAPER_CONVERSATION_KEY_BASE,
 } from "./constants";
 import { normalizePositiveInt } from "./normalizers";
-import { getLastUsedPaperConversationKey } from "./prefHelpers";
+import {
+  getLastUsedPaperConversationKey,
+  getLockedGlobalConversationKey,
+} from "./prefHelpers";
 import { activePaperConversationByPaper } from "./state";
 import type { GlobalPortalItem, PaperPortalItem } from "./types";
 
@@ -184,6 +187,16 @@ export function resolveInitialPanelItemState(
   }
 
   const libraryID = resolveLibraryIdFromItem(basePaperItem);
+
+  // If open-chat is locked for this library, always open to that session.
+  const lockedGlobalKey = getLockedGlobalConversationKey(libraryID);
+  if (lockedGlobalKey !== null) {
+    return {
+      item: createGlobalPortalItem(libraryID, lockedGlobalKey),
+      basePaperItem: null,
+    };
+  }
+
   const paperItemID = Number(basePaperItem.id || 0);
   const rememberedPaperKey = Number(
     activePaperConversationByPaper.get(

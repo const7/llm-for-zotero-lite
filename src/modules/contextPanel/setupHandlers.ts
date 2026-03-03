@@ -88,6 +88,8 @@ import {
   getLastUsedPaperConversationKey,
   setLastUsedPaperConversationKey,
   removeLastUsedPaperConversationKey,
+  getLockedGlobalConversationKey,
+  setLockedGlobalConversationKey,
 } from "./prefHelpers";
 import {
   sendQuestion,
@@ -301,6 +303,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     historyToggleBtn,
     historyModeIndicator,
     historyMenu,
+    modeCapsule,
+    modeChipBtn,
+    modeLockBtn,
     historyRowMenu,
     historyRowRenameBtn,
     historyUndo,
@@ -407,39 +412,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   let conversationKey = item ? getConversationKey(item) : null;
   const getTextContextConversationKey = (): number | null =>
     item ? getConversationKey(item) : null;
-  const updateHistoryModeIndicatorPosition = () => {
-    if (!historyModeIndicator || !historyNewBtn || !exportBtn || !headerTop) {
-      return;
-    }
-    if (!historyBar || historyBar.style.display === "none") return;
-    if (!item) return;
-
-    const hostRect = headerTop.getBoundingClientRect();
-    const historyAnchorRect = historyNewBtn.getBoundingClientRect();
-    const exportRect = exportBtn.getBoundingClientRect();
-    if (
-      hostRect.width <= 0 ||
-      historyAnchorRect.width <= 0 ||
-      exportRect.width <= 0
-    ) {
-      return;
-    }
-
-    const indicatorWidth = Math.max(
-      historyModeIndicator.getBoundingClientRect().width,
-      historyModeIndicator.offsetWidth,
-      0,
-    );
-    const preferredLeft = historyAnchorRect.right - hostRect.left + 6;
-    const maxLeft = exportRect.left - hostRect.left - indicatorWidth - 8;
-    let left = preferredLeft;
-    if (Number.isFinite(maxLeft) && maxLeft >= preferredLeft) {
-      left = clampNumber(preferredLeft, preferredLeft, maxLeft);
-    } else {
-      left = clampNumber(left, 0, Math.max(0, hostRect.width - indicatorWidth));
-    }
-    historyModeIndicator.style.left = `${Math.round(left)}px`;
-  };
   const syncConversationIdentity = () => {
     conversationKey = item ? getConversationKey(item) : null;
     panelRoot.dataset.itemId =
@@ -487,27 +459,40 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       }
     }
     if (historyModeIndicator) {
-      const modeLabel = item
-        ? mode === "global"
-          ? "Open chat"
-          : "Paper chat"
-        : "";
-      historyModeIndicator.textContent = item ? modeLabel : "";
-      historyModeIndicator.title = modeLabel
-        ? `${modeLabel} history`
-        : "Conversation history";
-      historyModeIndicator.setAttribute(
+      // Keep historyModeIndicator (which is the clock history button) accessible.
+      // Its label is static "Conversation history" — no text update needed.
+    }
+    // Update mode capsule data-active state
+    if (modeCapsule) {
+      modeCapsule.dataset.mode = isGlobalMode() ? "global" : "paper";
+    }
+    if (modeChipBtn) {
+      modeChipBtn.textContent = isGlobalMode() ? "Open chat" : "Paper chat";
+      modeChipBtn.title = isGlobalMode() ? "Switch to paper chat" : "Switch to open chat";
+      modeChipBtn.setAttribute(
         "aria-label",
-        modeLabel ? `${modeLabel} history` : "Conversation history",
+        isGlobalMode() ? "Switch to paper chat" : "Switch to open chat",
       );
-      const requestFrame = panelWin?.requestAnimationFrame;
-      if (typeof requestFrame === "function") {
-        requestFrame(() => {
-          updateHistoryModeIndicatorPosition();
-        });
-      } else {
-        updateHistoryModeIndicatorPosition();
-      }
+    }
+    // Lock button: visible only in open-chat mode; reflect lock state
+    if (modeLockBtn) {
+      modeLockBtn.style.visibility = isGlobalMode() ? "visible" : "hidden";
+      const libraryID = getCurrentLibraryID();
+      const lockedKey = libraryID > 0 ? getLockedGlobalConversationKey(libraryID) : null;
+      const currentKey =
+        conversationKey !== null ? Math.floor(conversationKey as number) : null;
+      const isLocked =
+        lockedKey !== null &&
+        currentKey !== null &&
+        lockedKey === currentKey;
+      modeLockBtn.dataset.locked = isLocked ? "true" : "false";
+      modeLockBtn.title = isLocked
+        ? "Unlock open chat default"
+        : "Lock open chat as default";
+      modeLockBtn.setAttribute(
+        "aria-label",
+        isLocked ? "Unlock open chat default" : "Lock open chat as default",
+      );
     }
   };
   syncConversationIdentity();
@@ -3252,7 +3237,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     titleStatic.style.display = "none";
     historyBar.style.display = "inline-flex";
     renderGlobalHistoryMenu();
-    updateHistoryModeIndicatorPosition();
   };
 
   const resetComposePreviewUI = () => {
@@ -4197,7 +4181,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     historyRowMenu.style.display = "grid";
   };
 
-  if (historyNewBtn && historyNewMenu) {
+  if (historyNewBtn) {
     historyNewBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
@@ -4207,11 +4191,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         historyNewBtn.disabled ||
         inputBox?.disabled
       ) {
-        closeHistoryNewMenu();
         if (status) {
           setStatus(
             status,
-            "New chat is unavailable while generating",
+            "Wait for the current response to finish before starting a new chat",
             "ready",
           );
         }
@@ -4225,24 +4208,12 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       closePromptMenu();
       closeExportMenu();
       closeHistoryMenu();
-      const paperContextAvailable = Boolean(resolveCurrentPaperBaseItem());
-      if (historyNewPaperBtn) {
-        historyNewPaperBtn.disabled = !paperContextAvailable;
-        historyNewPaperBtn.setAttribute(
-          "aria-disabled",
-          paperContextAvailable ? "false" : "true",
-        );
-        historyNewPaperBtn.title = paperContextAvailable
-          ? "Start a new paper chat session"
-          : "Open a paper to enable paper chat";
+      // Create new session directly in whichever mode is currently active
+      if (isGlobalMode()) {
+        void createAndSwitchGlobalConversation();
+      } else {
+        void createAndSwitchPaperConversation();
       }
-      if (isHistoryNewMenuOpen()) {
-        closeHistoryNewMenu();
-        return;
-      }
-      positionMenuBelowButton(body, historyNewMenu, historyNewBtn);
-      historyNewMenu.style.display = "flex";
-      historyNewBtn.setAttribute("aria-expanded", "true");
     });
   }
 
@@ -4277,7 +4248,67 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     });
   }
 
-  if (historyToggleBtn && historyMenu) {
+  // --- Mode chip + lock button handlers ---
+  if (modeChipBtn) {
+    modeChipBtn.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!item) return;
+      if (currentAbortController || inputBox?.disabled) {
+        if (status) {
+          setStatus(
+            status,
+            "Wait for the current response to finish before switching modes",
+            "ready",
+          );
+        }
+        return;
+      }
+      closeHistoryMenu();
+      closeHistoryNewMenu();
+      if (isGlobalMode()) {
+        void switchPaperConversation();
+      } else {
+        void (async () => {
+          const libraryID = getCurrentLibraryID();
+          if (!libraryID) return;
+          const remembered = activeGlobalConversationByLibrary.get(libraryID);
+          const rememberedKey =
+            remembered && Number.isFinite(Number(remembered))
+              ? Math.floor(Number(remembered))
+              : 0;
+          if (rememberedKey > 0) {
+            await switchGlobalConversation(rememberedKey);
+          } else {
+            await createAndSwitchGlobalConversation();
+          }
+        })();
+      }
+    });
+  }
+
+  if (modeLockBtn) {
+    modeLockBtn.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!item || !isGlobalMode()) return;
+      const libraryID = getCurrentLibraryID();
+      if (!libraryID) return;
+      const currentKey =
+        conversationKey !== null ? Math.floor(conversationKey as number) : null;
+      if (!currentKey) return;
+      const lockedKey = getLockedGlobalConversationKey(libraryID);
+      const isLocked = lockedKey !== null && lockedKey === currentKey;
+      if (isLocked) {
+        setLockedGlobalConversationKey(libraryID, null);
+      } else {
+        setLockedGlobalConversationKey(libraryID, currentKey);
+      }
+      syncConversationIdentity();
+    });
+  }
+
+  if (historyToggleBtn) {
     historyToggleBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
@@ -4312,6 +4343,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           closeHistoryMenu();
           return;
         }
+        if (!historyMenu) return;
         renderGlobalHistoryMenu();
         positionMenuBelowButton(body, historyMenu, historyToggleBtn);
         historyMenu.style.display = "flex";
@@ -5409,7 +5441,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         () => {
           applyResponsiveActionButtonsLayout();
           syncUserContextAlignmentWidths(body);
-          updateHistoryModeIndicatorPosition();
         },
         "relative",
       );

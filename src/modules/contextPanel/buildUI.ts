@@ -113,24 +113,47 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     title: "Start a new chat",
   });
   historyNewBtn.setAttribute("aria-label", "Start a new chat");
-  historyNewBtn.setAttribute("aria-haspopup", "menu");
-  historyNewBtn.setAttribute("aria-expanded", "false");
-  const historyModeIndicator = createElement(
-    doc,
-    "button",
-    "llm-history-toggle llm-history-mode-indicator",
-    {
-      id: "llm-history-toggle",
-      type: "button",
-      textContent: hasItem ? (isGlobalMode ? "Open chat" : "Paper chat") : "",
-      title: "Conversation history",
-    },
+
+  // History toggle button (clock icon)
+  const historyToggle = createElement(doc, "button", "llm-history-toggle", {
+    id: "llm-history-toggle",
+    type: "button",
+    title: "Conversation history",
+  });
+  historyToggle.setAttribute("aria-label", "Conversation history");
+  historyToggle.setAttribute("aria-haspopup", "menu");
+  historyToggle.setAttribute("aria-expanded", "false");
+
+  // Mode chip: single pill showing current mode + lock
+  const modeSwitchWrap = createElement(doc, "div", "llm-mode-switch", {
+    id: "llm-mode-capsule",
+  });
+  modeSwitchWrap.dataset.mode = hasItem && isGlobalMode ? "global" : "paper";
+
+  const modeChipBtn = createElement(doc, "button", "llm-mode-chip", {
+    id: "llm-mode-chip",
+    type: "button",
+    textContent: hasItem && isGlobalMode ? "Open chat" : "Paper chat",
+    title: hasItem && isGlobalMode ? "Switch to paper chat" : "Switch to open chat",
+  });
+  modeChipBtn.setAttribute(
+    "aria-label",
+    hasItem && isGlobalMode ? "Switch to paper chat" : "Switch to open chat",
   );
-  historyModeIndicator.setAttribute("aria-label", "Conversation history");
-  historyModeIndicator.setAttribute("aria-haspopup", "menu");
-  historyModeIndicator.setAttribute("aria-expanded", "false");
-  historyModeIndicator.setAttribute("aria-live", "polite");
-  historyBar.append(historyNewBtn, historyModeIndicator);
+
+  // Lock button, right of chip (only visible in open-chat mode)
+  const modeLockBtn = createElement(doc, "button", "llm-mode-lock", {
+    id: "llm-mode-lock",
+    type: "button",
+    title: "Lock open chat as default",
+  });
+  modeLockBtn.dataset.locked = "false";
+  modeLockBtn.setAttribute("aria-label", "Lock open chat as default");
+  modeLockBtn.style.visibility = hasItem && isGlobalMode ? "visible" : "hidden";
+
+  modeSwitchWrap.append(modeChipBtn, modeLockBtn);
+
+  historyBar.append(historyNewBtn, historyToggle, modeSwitchWrap);
 
   headerInfo.append(title, historyBar);
   headerTop.appendChild(headerInfo);
@@ -174,38 +197,6 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   );
   historyRowMenu.append(historyRowRenameBtn);
   header.appendChild(historyRowMenu);
-
-  const historyNewMenu = createElement(doc, "div", "llm-history-new-menu", {
-    id: "llm-history-new-menu",
-  });
-  historyNewMenu.style.display = "none";
-  const historyNewOpenBtn = createElement(
-    doc,
-    "button",
-    "llm-history-new-menu-item",
-    {
-      id: "llm-history-new-open",
-      type: "button",
-      textContent: "Open Chat",
-      title: "Start a new open chat",
-    },
-  );
-  const historyNewPaperBtn = createElement(
-    doc,
-    "button",
-    "llm-history-new-menu-item",
-    {
-      id: "llm-history-new-paper",
-      type: "button",
-      textContent: "Paper Chat",
-      title: hasPaperContext
-        ? "Start a new paper chat session"
-        : "Open a paper to enable paper chat",
-      disabled: !hasPaperContext,
-    },
-  );
-  historyNewMenu.append(historyNewOpenBtn, historyNewPaperBtn);
-  header.appendChild(historyNewMenu);
 
   const historyUndo = createElement(doc, "div", "llm-history-undo", {
     id: "llm-history-undo",

@@ -446,3 +446,41 @@ export function rememberAssistantNoteForParent(
   map[String(parentItemId)] = String(noteId);
   setAssistantNoteMap(map);
 }
+
+// =============================================================================
+// Locked Global Conversation Preference
+// =============================================================================
+
+const LOCKED_GLOBAL_CONVERSATION_PREF_KEY = "lockedGlobalConversation";
+
+/**
+ * Returns the conversation key that is locked as the default open-chat session
+ * for the given library, or null if no lock is active.
+ */
+export function getLockedGlobalConversationKey(
+  libraryID: number,
+): number | null {
+  if (!Number.isFinite(libraryID) || libraryID <= 0) return null;
+  const prefKey = `${config.prefsPrefix}.${LOCKED_GLOBAL_CONVERSATION_PREF_KEY}.${Math.floor(libraryID)}`;
+  const raw = getZoteroPrefs()?.get?.(prefKey, true);
+  const normalized = Number(raw);
+  if (!Number.isFinite(normalized) || normalized <= 0) return null;
+  return Math.floor(normalized);
+}
+
+/**
+ * Locks (or unlocks) a global-chat session as the default for the given library.
+ * Pass null or 0 to clear the lock.
+ */
+export function setLockedGlobalConversationKey(
+  libraryID: number,
+  key: number | null,
+): void {
+  if (!Number.isFinite(libraryID) || libraryID <= 0) return;
+  const prefKey = `${config.prefsPrefix}.${LOCKED_GLOBAL_CONVERSATION_PREF_KEY}.${Math.floor(libraryID)}`;
+  if (key === null || !Number.isFinite(key) || key <= 0) {
+    getZoteroPrefs()?.set?.(prefKey, 0, true);
+  } else {
+    getZoteroPrefs()?.set?.(prefKey, Math.floor(key), true);
+  }
+}

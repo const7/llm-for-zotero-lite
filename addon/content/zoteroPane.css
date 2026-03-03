@@ -137,49 +137,37 @@
 }
 
 .llm-history-toggle {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 0;
-  min-height: 22px;
-  max-width: min(42vw, 220px);
-  padding: 0 16px 0 10px;
-  border: 1px solid var(--stroke-secondary);
-  border-radius: 999px;
-  background: var(--fill-quinary);
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition:
-    color 0.15s,
-    background 0.15s,
-    border-color 0.15s;
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 20px;
+  font-size: 0;
+  line-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
-.llm-history-mode-indicator {
-  text-align: center;
-}
-
-.llm-history-toggle::after {
-  content: "▾";
-  position: absolute;
-  right: 5px;
-  top: 50%;
-  transform: translateY(-54%);
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1;
+.llm-history-toggle::before {
+  content: "";
+  display: block;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  mask-image: url("icons/action-history-clock.svg");
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-image: url("icons/action-history-clock.svg");
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
   pointer-events: none;
-  opacity: 0.9;
-}
-
-.llm-history-toggle[aria-expanded="true"]::after {
-  content: "▴";
 }
 
 .llm-history-new-menu {
@@ -248,14 +236,6 @@
   color: var(--color-accent);
 }
 
-.llm-history-toggle:hover {
-  border-color: color-mix(
-    in srgb,
-    var(--color-accent) 50%,
-    var(--stroke-secondary)
-  );
-  background: color-mix(in srgb, var(--color-accent) 10%, var(--fill-quinary));
-}
 
 .llm-history-new:disabled {
   color: var(--fill-tertiary);
@@ -275,14 +255,106 @@
 
 .llm-history-toggle:disabled:hover {
   color: var(--fill-tertiary);
-  border-color: var(--stroke-secondary);
-  background: var(--fill-quinary);
 }
 
 .llm-history-new:focus-visible,
 .llm-history-toggle:focus-visible {
   outline: 1px solid var(--color-accent);
   outline-offset: 2px;
+}
+
+/* ---- Mode chip: single pill showing current mode + lock ---- */
+
+.llm-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.llm-mode-chip {
+  appearance: none;
+  -moz-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--stroke-secondary);
+  background: var(--fill-quinary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--llm-fs-12);
+  font-weight: 600;
+  color: var(--fill-primary);
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  line-height: 1.5;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.llm-mode-chip:hover {
+  background: var(--fill-secondary);
+  border-color: var(--stroke-secondary);
+}
+
+.llm-mode-chip:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ---- Lock icon (after 'Open chat' label) ---- */
+
+.llm-mode-lock {
+  appearance: none;
+  -moz-appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fill-tertiary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  padding: 0;
+  font-size: 0;
+  line-height: 0;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+
+.llm-mode-lock[data-locked="true"] {
+  color: var(--color-accent);
+}
+
+.llm-mode-lock:not([data-locked="true"]):hover {
+  color: var(--fill-secondary);
+}
+
+.llm-mode-lock:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.llm-mode-lock::before {
+  content: "";
+  display: block;
+  width: 11px;
+  height: 11px;
+  background-color: currentColor;
+  mask-image: url("icons/action-mode-lock.svg");
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-image: url("icons/action-mode-lock.svg");
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  pointer-events: none;
 }
 
 .llm-subtitle {
