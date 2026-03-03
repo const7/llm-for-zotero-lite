@@ -18,7 +18,10 @@ import type {
 import type { PaperContextCandidate } from "../../types";
 
 const RAW_EVIDENCE_TOP_K = 12;
-const DEFAULT_EVIDENCE_TOP_K = 5;
+/** Default cap when no token budget is provided (pure count limit). */
+const DEFAULT_EVIDENCE_TOP_K = 8;
+/** Hard safety ceiling to avoid pathological responses (budget should control normally). */
+const MAX_EVIDENCE_TOP_K = 12;
 const ENABLE_FIND_CLAIM_EVIDENCE_VERIFIER = false;
 
 type EvidenceVerifierLabel =
@@ -143,15 +146,19 @@ function selectEvidenceCandidates(
   const deduped = dedupeEvidenceCandidates(candidates);
   const maxTokens = Math.floor(Number(toolTokenCap));
   if (!Number.isFinite(maxTokens) || maxTokens <= 0) {
+    // No budget provided — fall back to a fixed count cap.
     return {
       selected: deduped.slice(0, DEFAULT_EVIDENCE_TOP_K),
       truncated: deduped.length > DEFAULT_EVIDENCE_TOP_K,
     };
   }
 
+  // Budget-aware selection: include as many snippets as the token budget
+  // allows, up to the hard safety ceiling.
   const selected: PaperContextCandidate[] = [];
   let usedTokens = 0;
   for (const candidate of deduped) {
+    if (selected.length >= MAX_EVIDENCE_TOP_K) break;
     const nextTokens = usedTokens + candidate.estimatedTokens;
     if (selected.length && nextTokens > maxTokens) break;
     if (!selected.length && candidate.estimatedTokens > maxTokens) {
@@ -160,7 +167,6 @@ function selectEvidenceCandidates(
     if (nextTokens > maxTokens) break;
     selected.push(candidate);
     usedTokens = nextTokens;
-    if (selected.length >= DEFAULT_EVIDENCE_TOP_K) break;
   }
   return {
     selected,

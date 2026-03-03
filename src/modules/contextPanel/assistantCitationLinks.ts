@@ -1191,9 +1191,30 @@ export function decorateAssistantCitationLinks(params: {
         (blockquote.textContent || "").slice(0, 60));
       continue;
     }
-    const extractedCitation = extractStandalonePaperSourceLabel(
+
+    // Primary attempt: entire element is a standalone citation label.
+    let extractedCitation = extractStandalonePaperSourceLabel(
       citationEl.textContent || "",
     );
+
+    // Edge-case fallback: the element may start with a citation label followed
+    // by continuation paragraph text on subsequent lines (no blank line between
+    // them in the LLM output → single <p> block in rendered HTML).
+    // We extract only the first non-empty line and re-attempt parsing.
+    let citationRemainder: string | null = null;
+    if (!extractedCitation) {
+      const rawLines = (citationEl.textContent || "").split("\n");
+      const firstLine = sanitizeText(rawLines[0] || "").trim();
+      if (firstLine) {
+        const leadingAttempt = extractStandalonePaperSourceLabel(firstLine);
+        if (leadingAttempt) {
+          extractedCitation = leadingAttempt;
+          // Collect the remainder so it can be re-inserted as a sibling para.
+          const tailLines = rawLines.slice(1).join("\n").trim();
+          if (tailLines) citationRemainder = sanitizeText(tailLines).trim();
+        }
+      }
+    }
     if (!extractedCitation) {
       ztoolkit.log("LLM citation decoration: sibling text not a citation, text =",
         JSON.stringify((citationEl.textContent || "").slice(0, 80)));
@@ -1275,6 +1296,15 @@ export function decorateAssistantCitationLinks(params: {
     );
     citationEl.textContent = "";
     citationEl.appendChild(citationButton);
+
+    // If the citation was mixed with continuation text (edge-case leading-line
+    // extraction), re-insert the remainder as a new paragraph after this element
+    // so the overall reading flow is preserved.
+    if (citationRemainder) {
+      const remainderEl = ownerDoc.createElement("p");
+      remainderEl.textContent = citationRemainder;
+      citationEl.parentElement?.insertBefore(remainderEl, citationEl.nextSibling);
+    }
 
     void resolvePageForCitationButton({
       button: citationButton,

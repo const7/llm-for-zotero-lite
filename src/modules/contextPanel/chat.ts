@@ -158,8 +158,14 @@ function appendAgentTraceLine(
 /**
  * Converts flat agent trace lines into a rich HTML element with chips per action.
  * Unrecognised lines (LLM thoughts) fall back to dim italic text.
+ * @param papers Optional paper context list from the paired user message;
+ *   used to make target chips expandable.
  */
-function buildAgentTraceHtml(doc: Document, lines: string[]): HTMLDivElement {
+function buildAgentTraceHtml(
+  doc: Document,
+  lines: string[],
+  papers?: Array<{ title: string; firstCreator?: string; year?: string }>,
+): HTMLDivElement {
   const TOOL_READABLE: Record<string, string> = {
     find_claim_evidence: "Find Evidence",
     read_paper_text: "Read Paper",
@@ -183,6 +189,27 @@ function buildAgentTraceHtml(doc: Document, lines: string[]): HTMLDivElement {
   function trunc(s: string, max = 48): string {
     const t = (s || "").trim();
     return t.length > max ? t.slice(0, max - 1) + "\u2026" : t;
+  }
+
+  /** Resolve which known paper (if any) a target string like "active-paper"
+   *  or "selected-paper#2" maps to, so we can show a popover. */
+  function resolvePaperForTarget(
+    rawTarget: string,
+  ): { title: string; firstCreator?: string; year?: string } | null {
+    if (!papers?.length) return null;
+    const m = rawTarget.match(
+      /^(active|selected|pinned|recent|retrieved)-paper(?:#(\d+))?$/,
+    );
+    if (!m) return null;
+    const kind = m[1];
+    const n = m[2] ? parseInt(m[2], 10) : 0;
+    if (kind === "active") return papers[0] ?? null;
+    if (kind === "selected" || kind === "pinned") {
+      const idx = n > 0 ? n - 1 : 0;
+      return papers[idx] ?? papers[0] ?? null;
+    }
+    // retrieved-paper / recent-paper have no static mapping at render time
+    return papers[0] ?? null;
   }
 
   function el<T extends HTMLElement>(tag: string, cls: string, text?: string): T {
@@ -220,7 +247,48 @@ function buildAgentTraceHtml(doc: Document, lines: string[]): HTMLDivElement {
         r.appendChild(el("span", "llm-at-icon", "\u2699\uFE0F"));
         r.appendChild(el("span", "llm-at-tool-name", TOOL_READABLE[name!] ?? name!));
         r.appendChild(el("span", "llm-at-sep", "\u00B7"));
-        r.appendChild(el("span", "llm-at-target", prettyTarget(rawTarget ?? "")));
+
+        const resolvedPaper = resolvePaperForTarget(rawTarget ?? "");
+        if (resolvedPaper) {
+          // Clickable target button — expands an inline paper card
+          const targetBtn = doc.createElement("button") as HTMLButtonElement;
+          targetBtn.type = "button";
+          targetBtn.className = "llm-at-target llm-at-target-btn";
+          targetBtn.textContent = prettyTarget(rawTarget ?? "");
+          targetBtn.addEventListener("mousedown", (e: Event) => {
+            const me = e as MouseEvent;
+            if (me.button !== 0) return;
+            me.preventDefault();
+            me.stopPropagation();
+            // Toggle the inline paper card immediately after the row
+            const next = r.nextElementSibling as HTMLElement | null;
+            if (next?.classList.contains("llm-at-paper-popover")) {
+              next.remove();
+              return;
+            }
+            const popover = doc.createElement("div") as HTMLDivElement;
+            popover.className = "llm-at-paper-popover";
+            const ptitle = el("span", "llm-at-popover-title", resolvedPaper.title);
+            popover.appendChild(ptitle);
+            const metaParts = [
+              resolvedPaper.firstCreator || "",
+              resolvedPaper.year || "",
+            ].filter(Boolean);
+            if (metaParts.length) {
+              popover.appendChild(
+                el("span", "llm-at-popover-meta", metaParts.join(" \u00B7 ")),
+              );
+            }
+            r.parentElement?.insertBefore(popover, r.nextSibling);
+          });
+          targetBtn.addEventListener("click", (e: Event) => {
+            e.preventDefault();
+            e.stopPropagation();
+          });
+          r.appendChild(targetBtn);
+        } else {
+          r.appendChild(el("span", "llm-at-target", prettyTarget(rawTarget ?? "")));
+        }
         container.appendChild(r);
         continue;
       }
@@ -370,17 +438,9 @@ function buildAgentTraceHtml(doc: Document, lines: string[]): HTMLDivElement {
       continue;
     }
 
-    // ── Grounding done ────────────────────────────────────────────────────────
-    {
-      const m = t.match(/^Grounding the answer from (\d+) paper/i);
-      if (m) {
-        const r = row("done");
-        r.appendChild(el("span", "llm-at-icon", "\uD83D\uDCC4"));
-        r.appendChild(el("span", "llm-at-done-text",
-          `${m[1]} paper${Number(m[1]) !== 1 ? "s" : ""} ready`));
-        container.appendChild(r);
-        continue;
-      }
+    // ── Grounding done — intentionally suppressed from display ────────────────
+    if (/^Grounding the answer from \d+ paper/i.test(t)) {
+      continue;
     }
 
     // ── LLM thought fallback ──────────────────────────────────────────────────
@@ -2605,14 +2665,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           const paperItem = doc.createElement("div") as HTMLDivElement;
           paperItem.className = "llm-user-papers-item";
 
-          if (paperContext.citationKey) {
-            const keyBadge = doc.createElement("span") as HTMLSpanElement;
-            keyBadge.className = "llm-user-papers-item-key";
-            keyBadge.textContent = paperContext.citationKey;
-            keyBadge.title = paperContext.citationKey;
-            paperItem.appendChild(keyBadge);
-          }
-
           const paperTitle = doc.createElement("span") as HTMLSpanElement;
           paperTitle.className = "llm-user-papers-item-title";
           paperTitle.textContent = paperContext.title;
@@ -3070,7 +3122,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         indicator.setAttribute("aria-hidden", "true");
         const summaryLabel = doc.createElement("span") as HTMLSpanElement;
         summaryLabel.className = "llm-agent-process-summary-label";
-        summaryLabel.textContent = msg.streaming ? "Agent is thinking" : "Agent";
+        summaryLabel.textContent = msg.streaming ? "Agent is thinking" : "Agent logs";
         summary.append(indicator, summaryLabel);
         const toggleAgent = (e: Event) => {
           e.preventDefault();
@@ -3096,7 +3148,14 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         const bodyWrap = doc.createElement("div") as HTMLDivElement;
         bodyWrap.className = "llm-reasoning-body";
 
-        const traceEl = buildAgentTraceHtml(doc, agentTraceLines);
+        const traceEl = buildAgentTraceHtml(
+          doc,
+          agentTraceLines,
+          normalizePaperContexts(
+            (history[index - 1]?.role === "user" ? history[index - 1] : null)
+              ?.paperContexts || [],
+          ),
+        );
         bodyWrap.appendChild(traceEl);
         details.appendChild(bodyWrap);
         bubbleHeaderNodes.push(details);
