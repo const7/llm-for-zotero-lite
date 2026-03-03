@@ -1,24 +1,45 @@
 import type { AgentToolCall } from "./agentTools/types";
+import type { ReasoningConfig } from "../../utils/llmClient";
+import type { PaperContextRef } from "./types";
 
-export type AgentPlannerAction =
-  | "skip"
-  | "active-paper"
-  | "existing-paper-contexts"
-  | "library-overview"
-  | "library-search";
-
-export type AgentQueryPlan = {
-  action: AgentPlannerAction;
-  searchQuery?: string;
-  maxPapersToRead: number;
-  traceLines: string[];
-  toolCalls: AgentToolCall[];
+/** Summary of a completed tool call, recorded in the loop's execution history. */
+export type AgentExecutedStep = {
+  toolName: string;
+  targetLabel: string;
+  ok: boolean;
+  /** Compact one-liner, e.g. "read_paper_text | Kim et al., 2025 | complete" */
+  summary: string;
 };
 
-export type AgentContinuationDecision = "stop" | "tool";
+/**
+ * The decision returned by `runAgentStep` for one iteration of the ReAct loop.
+ * "stop"  → agent has enough grounding to answer.
+ * "tool"  → agent wants to execute one more tool call.
+ */
+export type AgentStepDecision =
+  | { type: "stop"; traceLines: string[] }
+  | { type: "tool"; call: AgentToolCall; traceLines: string[] };
 
-export type AgentContinuationPlan = {
-  decision: AgentContinuationDecision;
-  traceLines: string[];
-  toolCalls: AgentToolCall[];
+/** All context provided to `runAgentStep` for one iteration of the loop. */
+export type AgentStepContext = {
+  question: string;
+  conversationMode: "paper" | "open";
+  libraryID: number;
+  model: string;
+  apiBase?: string;
+  apiKey?: string;
+  reasoning?: ReasoningConfig;
+  /** Zero-based index of the current iteration. */
+  iterationIndex: number;
+  maxIterations: number;
+  activePaperContext?: PaperContextRef | null;
+  selectedPaperContexts: PaperContextRef[];
+  pinnedPaperContexts: PaperContextRef[];
+  recentPaperContexts: PaperContextRef[];
+  /** Papers loaded from the library by a prior list_papers call. */
+  retrievedPaperContexts: PaperContextRef[];
+  /** History of tool calls already executed this loop. */
+  executedSteps: AgentExecutedStep[];
+  /** Approximate tokens still available for tool output in this request. */
+  remainingBudgetTokens: number;
 };

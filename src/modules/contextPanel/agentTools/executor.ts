@@ -1,13 +1,13 @@
 import { getAgentToolDefinition } from "./registry";
 import { resolveAgentToolTarget } from "./resolveTarget";
+import { executeListPapersCall } from "./tools/listPapers";
+import { sanitizeText } from "../textUtils";
 import type {
   AgentToolCall,
   AgentToolExecutionContext,
   AgentToolExecutionResult,
   AgentToolExecutorState,
 } from "./types";
-
-export const MAX_AGENT_TOOL_CALLS = 2;
 
 export function createAgentToolExecutorState(): AgentToolExecutorState {
   return {
@@ -34,14 +34,40 @@ function buildSkipResult(
   };
 }
 
+function buildListPapersCallKey(call: AgentToolCall): string {
+  const query = sanitizeText(call.query || "").trim();
+  return `list_papers:${query || "overview"}:${call.limit ?? 6}`;
+}
+
 export async function executeAgentToolCall(params: {
   call?: AgentToolCall | null;
   ctx: AgentToolExecutionContext;
   state: AgentToolExecutorState;
 }): Promise<AgentToolExecutionResult | null> {
   if (!params.call) return null;
+
+  // ── list_papers: library tool — no paper-target resolution needed ──────────
+  if (params.call.name === "list_papers") {
+    const callKey = buildListPapersCallKey(params.call);
+    if (params.state.executedCallKeys.has(callKey)) {
+      return buildSkipResult(
+        params.call,
+        "library",
+        "Duplicate list_papers call was ignored.",
+      );
+    }
+    const result = await executeListPapersCall(params.call, params.ctx);
+    if (result.ok) {
+      params.state.executedCallKeys.add(callKey);
+      params.state.totalEstimatedTokens += result.estimatedTokens;
+      params.state.executedCallCount += 1;
+    }
+    return result;
+  }
+
+  // ── paper tools: read_paper_text / find_claim_evidence / read_references ───
   const definition = getAgentToolDefinition(params.call.name);
-  if (!definition) {
+  if (!definition || !definition.execute) {
     return buildSkipResult(
       params.call,
       params.call.name,
@@ -58,20 +84,13 @@ export async function executeAgentToolCall(params: {
     );
   }
 
-  if (params.state.executedCallCount >= MAX_AGENT_TOOL_CALLS) {
-    return buildSkipResult(
-      validatedCall,
-      validatedCall.name,
-      "Tool call limit reached; additional tool use was skipped.",
-    );
-  }
-
-  const resolvedTarget = resolveAgentToolTarget(params.ctx, validatedCall.target);
+  const resolvedTarget = resolveAgentToolTarget(params.ctx, validatedCall.target!);
   if (!resolvedTarget.paperContext) {
     return buildSkipResult(
       validatedCall,
       resolvedTarget.targetLabel,
-      resolvedTarget.error || `Tool target was unavailable: ${resolvedTarget.targetLabel}.`,
+      resolvedTarget.error ||
+        `Tool target was unavailable: ${resolvedTarget.targetLabel}.`,
     );
   }
 

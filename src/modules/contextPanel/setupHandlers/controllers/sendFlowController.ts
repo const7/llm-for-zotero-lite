@@ -75,7 +75,6 @@ type SendFlowControllerDeps = {
   getSelectedProfile: () => SelectedProfile | null;
   getCurrentModelName: () => string;
   isScreenshotUnsupportedModel: (modelName: string) => boolean;
-  getAgentEnabled: () => boolean;
   getSelectedReasoning: () => LLMReasoningConfig | undefined;
   getAdvancedModelParams: (
     profileKey: ModelProfileKey | undefined,
@@ -100,7 +99,6 @@ type SendFlowControllerDeps = {
     apiKey?: string,
     reasoning?: LLMReasoningConfig,
     advanced?: AdvancedModelParams,
-    agentEnabled?: boolean,
   ) => Promise<EditLatestTurnResult>;
   sendQuestion: (
     body: Element,
@@ -119,7 +117,6 @@ type SendFlowControllerDeps = {
     paperContexts?: PaperContextRef[],
     pinnedPaperContexts?: PaperContextRef[],
     attachments?: ChatAttachment[],
-    agentEnabled?: boolean,
   ) => Promise<void>;
   retainPinnedImageState: (itemId: number) => void;
   retainPinnedPaperState: (itemId: number) => void;
@@ -240,7 +237,6 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       ? []
       : selectedImages;
     const selectedReasoning = deps.getSelectedReasoning();
-    const agentEnabled = deps.getAgentEnabled();
     const advancedParams = deps.getAdvancedModelParams(selectedProfile?.key);
 
     const activeEditSession = deps.getActiveEditSession();
@@ -280,7 +276,6 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         selectedProfile?.apiKey,
         selectedReasoning,
         advancedParams,
-        agentEnabled,
       );
       if (editResult !== "ok") {
         if (editResult === "stale") {
@@ -353,7 +348,6 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       selectedPaperContexts.length ? selectedPaperContexts : undefined,
       pinnedPaperContexts.length ? pinnedPaperContexts : undefined,
       selectedFiles.length ? selectedFiles : undefined,
-      agentEnabled,
     );
     const win = deps.body.ownerDocument?.defaultView;
     if (win) {

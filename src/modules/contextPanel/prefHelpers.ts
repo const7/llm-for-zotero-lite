@@ -36,7 +36,6 @@ export function getStringPref(key: string): string {
 }
 
 const LAST_MODEL_PROFILE_PREF_KEY = "lastUsedModelProfile";
-const LAST_AGENT_ENABLED_PREF_KEY = "lastUsedAgentEnabled";
 const LAST_REASONING_LEVEL_PREF_KEY = "lastUsedReasoningLevel";
 const LAST_REASONING_EXPANDED_PREF_KEY = "lastReasoningExpanded";
 const LAST_PAPER_CONVERSATION_MAP_PREF_KEY = "lastUsedPaperConversationMap";
@@ -74,28 +73,6 @@ export function setLastUsedModelProfileKey(key: ModelProfileKey): void {
   getZoteroPrefs()?.set?.(
     `${config.prefsPrefix}.${LAST_MODEL_PROFILE_PREF_KEY}`,
     key,
-    true,
-  );
-}
-
-export function getLastUsedAgentEnabled(): boolean | null {
-  const value = getZoteroPrefs()?.get?.(
-    `${config.prefsPrefix}.${LAST_AGENT_ENABLED_PREF_KEY}`,
-    true,
-  );
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true") return true;
-    if (normalized === "false") return false;
-  }
-  return null;
-}
-
-export function setLastUsedAgentEnabled(enabled: boolean): void {
-  getZoteroPrefs()?.set?.(
-    `${config.prefsPrefix}.${LAST_AGENT_ENABLED_PREF_KEY}`,
-    Boolean(enabled),
     true,
   );
 }

@@ -1,9 +1,6 @@
 import { assert } from "chai";
 import { createAgentLoopRunner } from "../src/modules/contextPanel/agentLoop";
-import type {
-  AgentContinuationPlan,
-  AgentQueryPlan,
-} from "../src/modules/contextPanel/agentTypes";
+import type { AgentStepDecision } from "../src/modules/contextPanel/agentTypes";
 import type { AgentToolExecutionResult } from "../src/modules/contextPanel/agentTools/types";
 import type { PaperContextRef } from "../src/modules/contextPanel/types";
 
@@ -35,269 +32,294 @@ describe("agentLoop", function () {
     year: "2025",
   };
 
-  function buildInitialPlan(): AgentQueryPlan {
-    return {
-      action: "library-search",
-      searchQuery: "memory",
-      maxPapersToRead: 2,
-      traceLines: ["Initial planner trace."],
-      toolCalls: [
-        {
-          name: "read_paper_text",
-          target: { scope: "retrieved-paper", index: 1 },
-        },
-      ],
-    };
-  }
-
-  function buildContinuationPlan(): AgentContinuationPlan {
-    return {
-      decision: "stop",
-      traceLines: ["Continuation planner stopped."],
-      toolCalls: [],
-    };
-  }
-
-  it("runs retrieval and one tool call, then combines context prefixes", async function () {
-    const traces: string[] = [];
+  it("skips all LLM calls when images are attached (vision questions bypass agent retrieval)", async function () {
+    let stepCalled = false;
     const runAgentLoop = createAgentLoopRunner({
-      planAgentQuery: async () => buildInitialPlan(),
-      resolveAgentContext: async () => ({
-        mode: "library-search",
-        contextPrefix: "Library prefix",
-        paperContexts: [retrievedPaper],
-        pinnedPaperContexts: [retrievedPaper],
-        statusText: "Searching library (1 match)",
-        traceLines: ["Library matched 1 paper."],
+      runAgentStep: async (): Promise<AgentStepDecision> => {
+        stepCalled = true;
+        return { type: "stop", traceLines: [] };
+      },
+      executeAgentToolCall: async () => null,
+    });
+
+    const result = await runAgentLoop({
+      item: { libraryID: 5 } as Zotero.Item,
+      question: "can you explain this figure to me?",
+      activeContextItem: { id: 20 } as Zotero.Item,
+      conversationMode: "paper",
+      paperContexts: [activePaper],
+      pinnedPaperContexts: [],
+      recentPaperContexts: [],
+      model: "gpt-4o-mini",
+      images: ["data:image/png;base64,ABC"],
+    });
+
+    assert.isFalse(stepCalled, "runAgentStep must not be called when images are attached");
+    assert.equal(result.contextPrefix, "");
+    // Paper contexts should pass through unchanged
+    assert.deepEqual(result.paperContexts, [activePaper]);
+  });
+
+  it("immediately stops when runAgentStep returns stop on the first iteration", async function () {
+    const traces: string[] = [];
+    const toolCallCount = { n: 0 };
+    const runAgentLoop = createAgentLoopRunner({
+      runAgentStep: async (): Promise<AgentStepDecision> => ({
+        type: "stop",
+        traceLines: ["Nothing to retrieve."],
       }),
-      executeAgentToolCall: async () => ({
+      executeAgentToolCall: async () => {
+        toolCallCount.n += 1;
+        return null;
+      },
+    });
+
+    const result = await runAgentLoop({
+      item: { libraryID: 5 } as Zotero.Item,
+      question: "what is the meaning of life?",
+      activeContextItem: null,
+      conversationMode: "open",
+      paperContexts: [],
+      pinnedPaperContexts: [],
+      recentPaperContexts: [],
+      model: "gpt-4o-mini",
+      onTrace: (line) => traces.push(line),
+    });
+
+    assert.equal(toolCallCount.n, 0);
+    assert.equal(result.contextPrefix, "");
+    assert.include(traces, "Nothing to retrieve.");
+  });
+
+  it("runs one tool call then stops, combining context prefixes", async function () {
+    const traces: string[] = [];
+    let step = 0;
+    const runAgentLoop = createAgentLoopRunner({
+      runAgentStep: async (): Promise<AgentStepDecision> => {
+        if (step === 0) {
+          step += 1;
+          return {
+            type: "tool",
+            traceLines: ["Reading retrieved paper."],
+            call: {
+              name: "read_paper_text",
+              target: { scope: "retrieved-paper", index: 1 },
+            },
+          };
+        }
+        return { type: "stop", traceLines: ["Done."] };
+      },
+      executeAgentToolCall: async (): Promise<AgentToolExecutionResult> => ({
         name: "read_paper_text",
         targetLabel: "Retrieved Paper",
         ok: true,
         traceLines: ["Loaded full text for Retrieved Paper."],
-        groundingText: "Tool prefix",
+        groundingText: "Full text content",
         addedPaperContexts: [retrievedPaper],
         estimatedTokens: 500,
         truncated: false,
       }),
-      planAgentContinuation: async () => buildContinuationPlan(),
     });
 
     const result = await runAgentLoop({
       item: { libraryID: 5 } as Zotero.Item,
-      question: "read the paper",
+      question: "summarise the retrieved paper",
       activeContextItem: null,
       conversationMode: "open",
-      paperContexts: [],
+      paperContexts: [retrievedPaper],
       pinnedPaperContexts: [],
       recentPaperContexts: [],
       model: "gpt-4o-mini",
+      availableContextBudgetTokens: 10000,
       onTrace: (line) => traces.push(line),
     });
 
     assert.equal(result.conversationMode, "open");
-    assert.deepEqual(result.paperContexts, [retrievedPaper]);
-    assert.include(result.contextPrefix, "Library prefix");
-    assert.include(result.contextPrefix, "Tool prefix");
-    assert.include(traces, "Planner selected library-search.");
+    assert.include(result.contextPrefix, "Full text content");
+    assert.include(traces, "Reading retrieved paper.");
     assert.include(traces, "Tool call: read_paper_text(retrieved-paper#1).");
-    assert.include(traces, "Continuation planner stopped.");
+    assert.include(traces, "Done.");
   });
 
-  it("lets the continuation planner request one more tool call", async function () {
-    const toolResults: AgentToolExecutionResult[] = [];
+  it("list_papers result switches loop to library mode", async function () {
+    const traces: string[] = [];
+    let step = 0;
     const runAgentLoop = createAgentLoopRunner({
-      planAgentQuery: async () => ({
-        action: "active-paper",
-        maxPapersToRead: 1,
-        traceLines: ["Use active paper first."],
-        toolCalls: [],
-      }),
-      resolveAgentContext: async () => null,
-      executeAgentToolCall: async ({ call }) => {
-        const result: AgentToolExecutionResult = {
-          name: "read_paper_text",
-          targetLabel: call?.name || "",
-          ok: true,
-          traceLines: ["Loaded active paper text."],
-          groundingText: "Active paper full text",
-          addedPaperContexts: [activePaper],
-          estimatedTokens: 400,
-          truncated: false,
-        };
-        toolResults.push(result);
-        return result;
+      runAgentStep: async (): Promise<AgentStepDecision> => {
+        if (step === 0) {
+          step += 1;
+          return {
+            type: "tool",
+            traceLines: ["Searching library."],
+            call: { name: "list_papers", query: "memory consolidation", limit: 3 },
+          };
+        }
+        return { type: "stop", traceLines: ["Library loaded."] };
       },
-      planAgentContinuation: async () => ({
-        decision: "tool",
-        traceLines: ["Continuation planner requested a tool."],
-        toolCalls: [
-          {
-            name: "read_paper_text",
-            target: { scope: "active-paper" },
-          },
-        ],
+      executeAgentToolCall: async (): Promise<AgentToolExecutionResult> => ({
+        name: "list_papers",
+        targetLabel: "library",
+        ok: true,
+        traceLines: ["Found 2 papers."],
+        groundingText: "Library overview text",
+        addedPaperContexts: [],
+        retrievedPaperContexts: [retrievedPaper, activePaper],
+        estimatedTokens: 300,
+        truncated: false,
       }),
     });
 
     const result = await runAgentLoop({
       item: { libraryID: 5 } as Zotero.Item,
-      question: "read active paper",
-      activeContextItem: { id: 20 } as Zotero.Item,
-      conversationMode: "paper",
+      question: "what papers do I have about memory?",
+      activeContextItem: null,
+      conversationMode: "open",
       paperContexts: [],
       pinnedPaperContexts: [],
       recentPaperContexts: [],
       model: "gpt-4o-mini",
-    });
-
-    assert.lengthOf(toolResults, 1);
-    assert.include(result.contextPrefix, "Active paper full text");
-  });
-
-  it("recovers from a wrong retrieved-paper target and reads both selected papers", async function () {
-    const executedTargets: string[] = [];
-    const traces: string[] = [];
-    const runAgentLoop = createAgentLoopRunner({
-      planAgentQuery: async () => ({
-        action: "existing-paper-contexts",
-        maxPapersToRead: 2,
-        traceLines: ["Use the selected papers."],
-        toolCalls: [
-          {
-            name: "read_paper_text",
-            target: { scope: "retrieved-paper", index: 1 },
-          },
-        ],
-      }),
-      resolveAgentContext: async () => null,
-      executeAgentToolCall: async ({ call }) => {
-        const target =
-          call?.target && "index" in call.target
-            ? `${call.target.scope}#${call.target.index}`
-            : call?.target.scope || "unknown";
-        executedTargets.push(target);
-        if (target === "retrieved-paper#1") {
-          return {
-            name: "read_paper_text",
-            targetLabel: "retrieved-paper#1",
-            ok: false,
-            traceLines: ["Target was unavailable: retrieved-paper#1."],
-            groundingText: "",
-            addedPaperContexts: [],
-            estimatedTokens: 0,
-            truncated: false,
-          };
-        }
-        const paper =
-          target === "selected-paper#1" ? selectedPaperA : selectedPaperB;
-        return {
-          name: "read_paper_text",
-          targetLabel: target,
-          ok: true,
-          traceLines: [`Loaded full text for ${target}.`],
-          groundingText: `Tool output for ${target}`,
-          addedPaperContexts: [paper],
-          estimatedTokens: 400,
-          truncated: false,
-        };
-      },
-      planAgentContinuation: async () => ({
-        decision: "stop",
-        traceLines: ["Continuation planner stopped."],
-        toolCalls: [],
-      }),
-    });
-
-    const result = await runAgentLoop({
-      item: { libraryID: 5 } as Zotero.Item,
-      question:
-        "can you help me read both the papers and tell me what mathematical theories they proposed?",
-      activeContextItem: null,
-      conversationMode: "open",
-      paperContexts: [selectedPaperA, selectedPaperB],
-      pinnedPaperContexts: [],
-      recentPaperContexts: [],
-      model: "gpt-4o-mini",
+      availableContextBudgetTokens: 10000,
       onTrace: (line) => traces.push(line),
     });
 
-    assert.deepEqual(executedTargets, [
-      "retrieved-paper#1",
-      "selected-paper#1",
-      "selected-paper#2",
-    ]);
-    assert.include(
-      traces,
-      "Using selected-paper#1 from existing paper contexts because the previous tool target was unavailable.",
-    );
-    assert.include(
-      traces,
-      "Question asks to read both selected papers, so I will also read selected-paper#2.",
-    );
-    assert.include(result.contextPrefix, "Tool output for selected-paper#1");
-    assert.include(result.contextPrefix, "Tool output for selected-paper#2");
+    assert.equal(result.conversationMode, "open");
+    assert.isNull(result.activeContextItem);
+    assert.deepEqual(result.paperContexts, [retrievedPaper, activePaper]);
+    assert.include(result.contextPrefix, "Library overview text");
+    assert.include(traces, 'Tool call: list_papers("memory consolidation").');
   });
 
-  it("balances tool budget across two selected-paper full-text reads", async function () {
-    const toolTokenCaps: number[] = [];
+  it("respects maxIterations and does not call runAgentStep more than maxIterations times", async function () {
+    let stepCalls = 0;
     const runAgentLoop = createAgentLoopRunner({
-      planAgentQuery: async () => ({
-        action: "existing-paper-contexts",
-        maxPapersToRead: 2,
-        traceLines: ["Use the selected papers."],
-        toolCalls: [
-          {
-            name: "read_paper_text",
-            target: { scope: "selected-paper", index: 1 },
-          },
-        ],
+      runAgentStep: async (): Promise<AgentStepDecision> => {
+        stepCalls += 1;
+        return {
+          type: "tool",
+          traceLines: [],
+          call: { name: "read_paper_text", target: { scope: "active-paper" } },
+        };
+      },
+      executeAgentToolCall: async (): Promise<AgentToolExecutionResult> => ({
+        name: "read_paper_text",
+        targetLabel: "active-paper",
+        ok: true,
+        traceLines: [],
+        groundingText: "text",
+        addedPaperContexts: [],
+        estimatedTokens: 100,
+        truncated: false,
       }),
-      resolveAgentContext: async () => null,
-      executeAgentToolCall: async ({ call, ctx, state }) => {
-        toolTokenCaps.push(ctx.toolTokenCap || 0);
-        const target =
-          call?.target && "index" in call.target
-            ? `${call.target.scope}#${call.target.index}`
-            : call?.target.scope || "unknown";
-        const estimatedTokens = target === "selected-paper#1" ? 2200 : 2200;
-        state.executedCallKeys.add(`${call?.name}:${target}`);
-        state.totalEstimatedTokens += estimatedTokens;
-        state.executedCallCount += 1;
+    });
+
+    await runAgentLoop({
+      item: { libraryID: 5 } as Zotero.Item,
+      question: "summarise",
+      activeContextItem: { id: 20 } as Zotero.Item,
+      conversationMode: "paper",
+      paperContexts: [activePaper],
+      pinnedPaperContexts: [],
+      recentPaperContexts: [],
+      model: "gpt-4o-mini",
+      availableContextBudgetTokens: 100000,
+      maxIterations: 2,
+    });
+
+    assert.equal(stepCalls, 2);
+  });
+
+  it("stops when context budget is exhausted after the first tool call", async function () {
+    let stepCalls = 0;
+    const runAgentLoop = createAgentLoopRunner({
+      runAgentStep: async (): Promise<AgentStepDecision> => {
+        stepCalls += 1;
+        return {
+          type: "tool",
+          traceLines: [],
+          call: { name: "read_paper_text", target: { scope: "selected-paper", index: 1 } },
+        };
+      },
+      executeAgentToolCall: async (): Promise<AgentToolExecutionResult> => ({
+        name: "read_paper_text",
+        targetLabel: "selected-paper#1",
+        ok: true,
+        traceLines: [],
+        groundingText: "text",
+        addedPaperContexts: [selectedPaperA],
+        estimatedTokens: 5000,
+        truncated: false,
+      }),
+    });
+
+    const traces: string[] = [];
+    await runAgentLoop({
+      item: { libraryID: 5 } as Zotero.Item,
+      question: "compare",
+      activeContextItem: null,
+      conversationMode: "open",
+      paperContexts: [selectedPaperA],
+      pinnedPaperContexts: [],
+      recentPaperContexts: [],
+      model: "gpt-4o-mini",
+      availableContextBudgetTokens: 4999,
+      maxIterations: 4,
+      onTrace: (line) => traces.push(line),
+    });
+
+    // After first call spends 5000 tokens on a 4999 budget, the loop stops.
+    assert.equal(stepCalls, 1);
+    assert.include(traces, "Context budget exhausted; stopping retrieval.");
+  });
+
+  it("deduplicates paper contexts added by multiple tool calls", async function () {
+    let step = 0;
+    const runAgentLoop = createAgentLoopRunner({
+      runAgentStep: async (): Promise<AgentStepDecision> => {
+        if (step < 2) {
+          const index = step + 1;
+          step += 1;
+          return {
+            type: "tool",
+            traceLines: [],
+            call: { name: "read_paper_text", target: { scope: "selected-paper", index } },
+          };
+        }
+        return { type: "stop", traceLines: [] };
+      },
+      executeAgentToolCall: async ({ call }): Promise<AgentToolExecutionResult> => {
+        const idx =
+          call.target && "index" in call.target ? call.target.index : 1;
+        const paper = idx === 1 ? selectedPaperA : selectedPaperB;
         return {
           name: "read_paper_text",
-          targetLabel: target,
+          targetLabel: `selected-paper#${idx}`,
           ok: true,
-          traceLines: [`Loaded full text for ${target}.`],
-          groundingText: `Tool output for ${target}`,
-          addedPaperContexts: [
-            target === "selected-paper#1" ? selectedPaperA : selectedPaperB,
-          ],
-          estimatedTokens,
+          traceLines: [],
+          groundingText: `text for paper ${idx}`,
+          addedPaperContexts: [paper],
+          estimatedTokens: 200,
           truncated: false,
         };
       },
-      planAgentContinuation: async () => ({
-        decision: "stop",
-        traceLines: [],
-        toolCalls: [],
-      }),
     });
 
     const result = await runAgentLoop({
       item: { libraryID: 5 } as Zotero.Item,
-      question: "please read both papers and tell me the mathematical theories",
+      question: "compare both papers",
       activeContextItem: null,
       conversationMode: "open",
       paperContexts: [selectedPaperA, selectedPaperB],
       pinnedPaperContexts: [],
       recentPaperContexts: [],
       model: "gpt-4o-mini",
-      availableContextBudgetTokens: 4500,
+      availableContextBudgetTokens: 10000,
+      maxIterations: 4,
     });
 
-    assert.deepEqual(toolTokenCaps, [2250, 2300]);
-    assert.include(result.contextPrefix, "Tool output for selected-paper#1");
-    assert.include(result.contextPrefix, "Tool output for selected-paper#2");
+    // selectedPaperA and selectedPaperB have the same itemId but different contextItemId.
+    // After two tool calls that each add one of them, there should be 2 unique entries.
+    assert.equal(result.paperContexts.length, 2);
+    assert.include(result.contextPrefix, "text for paper 1");
+    assert.include(result.contextPrefix, "text for paper 2");
   });
 });

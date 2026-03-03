@@ -3,7 +3,8 @@ import type { PaperContextRef } from "../types";
 export type AgentToolName =
   | "read_paper_text"
   | "find_claim_evidence"
-  | "read_references";
+  | "read_references"
+  | "list_papers";
 
 export type AgentToolTarget =
   | { scope: "active-paper" }
@@ -14,7 +15,12 @@ export type AgentToolTarget =
 
 export type AgentToolCall = {
   name: AgentToolName;
-  target: AgentToolTarget;
+  /** Required for paper tools; absent for list_papers. */
+  target?: AgentToolTarget;
+  /** For list_papers: optional search query (omit for full library overview). */
+  query?: string;
+  /** For list_papers: number of papers to return (1-12, default 6). */
+  limit?: number;
 };
 
 export type ResolvedAgentToolTarget = {
@@ -32,6 +38,11 @@ export type AgentToolExecutionResult = {
   traceLines: string[];
   groundingText: string;
   addedPaperContexts: PaperContextRef[];
+  /**
+   * For list_papers: the retrieved papers to be used as retrieved-paper#N
+   * targets in subsequent tool calls.  Undefined for paper tools.
+   */
+  retrievedPaperContexts?: PaperContextRef[];
   estimatedTokens: number;
   truncated: boolean;
 };
