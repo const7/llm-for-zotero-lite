@@ -36,6 +36,8 @@ export type StoredChatMessage = {
     contentHash?: string;
   }>;
   modelName?: string;
+  modelEntryId?: string;
+  modelProviderLabel?: string;
   reasoningSummary?: string;
   reasoningDetails?: string;
 };
@@ -163,6 +165,8 @@ export async function initChatStore(): Promise<void> {
         screenshot_images TEXT,
         attachments_json TEXT,
         model_name TEXT,
+        model_entry_id TEXT,
+        model_provider_label TEXT,
         reasoning_summary TEXT,
         reasoning_details TEXT
       )`,
@@ -178,6 +182,24 @@ export async function initChatStore(): Promise<void> {
       await Zotero.DB.queryAsync(
         `ALTER TABLE ${CHAT_MESSAGES_TABLE}
          ADD COLUMN model_name TEXT`,
+      );
+    }
+    const hasModelEntryIdColumn = Boolean(
+      columns?.some((column) => column?.name === "model_entry_id"),
+    );
+    if (!hasModelEntryIdColumn) {
+      await Zotero.DB.queryAsync(
+        `ALTER TABLE ${CHAT_MESSAGES_TABLE}
+         ADD COLUMN model_entry_id TEXT`,
+      );
+    }
+    const hasModelProviderLabelColumn = Boolean(
+      columns?.some((column) => column?.name === "model_provider_label"),
+    );
+    if (!hasModelProviderLabelColumn) {
+      await Zotero.DB.queryAsync(
+        `ALTER TABLE ${CHAT_MESSAGES_TABLE}
+         ADD COLUMN model_provider_label TEXT`,
       );
     }
     const hasSelectedTextColumn = Boolean(
@@ -322,6 +344,8 @@ export async function loadConversation(
             screenshot_images AS screenshotImages,
             attachments_json AS attachmentsJson,
             model_name AS modelName,
+            model_entry_id AS modelEntryId,
+            model_provider_label AS modelProviderLabel,
             reasoning_summary AS reasoningSummary,
             reasoning_details AS reasoningDetails
      FROM ${CHAT_MESSAGES_TABLE}
@@ -342,6 +366,8 @@ export async function loadConversation(
         screenshotImages?: unknown;
         attachmentsJson?: unknown;
         modelName?: unknown;
+        modelEntryId?: unknown;
+        modelProviderLabel?: unknown;
         reasoningSummary?: unknown;
         reasoningDetails?: unknown;
       }>
@@ -542,6 +568,12 @@ export async function loadConversation(
       screenshotImages,
       attachments,
       modelName: typeof row.modelName === "string" ? row.modelName : undefined,
+      modelEntryId:
+        typeof row.modelEntryId === "string" ? row.modelEntryId : undefined,
+      modelProviderLabel:
+        typeof row.modelProviderLabel === "string"
+          ? row.modelProviderLabel
+          : undefined,
       reasoningSummary:
         typeof row.reasoningSummary === "string"
           ? row.reasoningSummary
@@ -603,8 +635,8 @@ export async function appendMessage(
     : [];
   await Zotero.DB.queryAsync(
     `INSERT INTO ${CHAT_MESSAGES_TABLE}
-      (conversation_key, role, text, timestamp, selected_text, selected_texts_json, selected_text_sources_json, selected_text_paper_contexts_json, paper_contexts_json, screenshot_images, attachments_json, model_name, reasoning_summary, reasoning_details)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (conversation_key, role, text, timestamp, selected_text, selected_texts_json, selected_text_sources_json, selected_text_paper_contexts_json, paper_contexts_json, screenshot_images, attachments_json, model_name, model_entry_id, model_provider_label, reasoning_summary, reasoning_details)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       normalizedKey,
       message.role,
@@ -620,6 +652,8 @@ export async function appendMessage(
       screenshotImages.length ? JSON.stringify(screenshotImages) : null,
       attachments.length ? JSON.stringify(attachments) : null,
       message.modelName || null,
+      message.modelEntryId || null,
+      message.modelProviderLabel || null,
       message.reasoningSummary || null,
       message.reasoningDetails || null,
     ],
@@ -722,7 +756,13 @@ export async function updateLatestAssistantMessage(
   conversationKey: number,
   message: Pick<
     StoredChatMessage,
-    "text" | "timestamp" | "modelName" | "reasoningSummary" | "reasoningDetails"
+    | "text"
+    | "timestamp"
+    | "modelName"
+    | "modelEntryId"
+    | "modelProviderLabel"
+    | "reasoningSummary"
+    | "reasoningDetails"
   >,
 ): Promise<void> {
   const normalizedKey = normalizeConversationKey(conversationKey);
@@ -734,6 +774,8 @@ export async function updateLatestAssistantMessage(
      SET text = ?,
          timestamp = ?,
          model_name = ?,
+         model_entry_id = ?,
+         model_provider_label = ?,
          reasoning_summary = ?,
          reasoning_details = ?
      WHERE id = (
@@ -747,6 +789,8 @@ export async function updateLatestAssistantMessage(
       message.text || "",
       Number.isFinite(timestamp) ? Math.floor(timestamp) : Date.now(),
       message.modelName || null,
+      message.modelEntryId || null,
+      message.modelProviderLabel || null,
       message.reasoningSummary || null,
       message.reasoningDetails || null,
       normalizedKey,

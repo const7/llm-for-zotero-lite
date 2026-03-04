@@ -84,11 +84,12 @@ import {
 } from "./normalizers";
 import { positionMenuAtPointer } from "./menuPositioning";
 import {
-  getSelectedProfileForItem,
-  getAdvancedModelParamsForProfile,
-  getStringPref,
+  getAvailableModelEntries,
+  getAdvancedModelParamsForEntry,
   getLastReasoningExpanded,
   getLastUsedReasoningLevel,
+  getSelectedModelEntryForItem,
+  getStringPref,
   setLastReasoningExpanded,
 } from "./prefHelpers";
 import { resolveMultiContextPlan } from "./multiContextPlanner";
@@ -664,6 +665,8 @@ function toPanelMessage(message: StoredChatMessage): Message {
     screenshotExpanded: false,
     screenshotActiveIndex: screenshotImages?.length ? 0 : undefined,
     modelName: message.modelName,
+    modelEntryId: message.modelEntryId,
+    modelProviderLabel: message.modelProviderLabel,
     reasoningSummary: message.reasoningSummary,
     reasoningDetails: message.reasoningDetails,
     reasoningOpen: isReasoningExpandedByDefault(),
@@ -955,8 +958,10 @@ type EffectiveRequestConfig = {
   model: string;
   apiBase: string;
   apiKey: string;
+  modelEntryId?: string;
+  modelProviderLabel?: string;
   reasoning: LLMReasoningConfig | undefined;
-  advanced: AdvancedModelParams;
+  advanced: AdvancedModelParams | undefined;
 };
 
 function resolveEffectiveRequestConfig(params: {
@@ -964,25 +969,50 @@ function resolveEffectiveRequestConfig(params: {
   model?: string;
   apiBase?: string;
   apiKey?: string;
+  modelEntryId?: string;
+  modelProviderLabel?: string;
   reasoning?: LLMReasoningConfig;
   advanced?: AdvancedModelParams;
 }): EffectiveRequestConfig {
-  const fallbackProfile = getSelectedProfileForItem(params.item.id);
+  const fallbackEntry = getSelectedModelEntryForItem(params.item.id);
+  const explicitEntry =
+    params.model || params.apiBase || params.apiKey
+      ? getAvailableModelEntries().find(
+          (entry) =>
+            entry.model === (params.model || "").trim() &&
+            entry.apiBase === (params.apiBase || "").trim() &&
+            entry.apiKey === (params.apiKey || "").trim(),
+        ) || null
+      : null;
   const model = (
     params.model ||
-    fallbackProfile.model ||
+    fallbackEntry?.model ||
     getStringPref("modelPrimary") ||
     getStringPref("model") ||
     "gpt-4o-mini"
   ).trim();
-  const apiBase = (params.apiBase || fallbackProfile.apiBase).trim();
-  const apiKey = (params.apiKey || fallbackProfile.apiKey).trim();
+  const apiBase = (params.apiBase || fallbackEntry?.apiBase || "").trim();
+  const apiKey = (params.apiKey || fallbackEntry?.apiKey || "").trim();
   const reasoning =
     params.reasoning ||
     getSelectedReasoningForItem(params.item.id, model, apiBase);
   const advanced =
-    params.advanced || getAdvancedModelParamsForProfile(fallbackProfile.key);
-  return { model, apiBase, apiKey, reasoning, advanced };
+    params.advanced ||
+    getAdvancedModelParamsForEntry(fallbackEntry?.entryId) ||
+    fallbackEntry?.advanced;
+  return {
+    model,
+    apiBase,
+    apiKey,
+    modelEntryId:
+      params.modelEntryId || explicitEntry?.entryId || fallbackEntry?.entryId,
+    modelProviderLabel:
+      params.modelProviderLabel ||
+      explicitEntry?.providerLabel ||
+      fallbackEntry?.providerLabel,
+    reasoning,
+    advanced,
+  };
 }
 
 async function buildContextPlanForRequest(params: {
@@ -1076,6 +1106,8 @@ type AssistantMessageSnapshot = Pick<
   | "text"
   | "timestamp"
   | "modelName"
+  | "modelEntryId"
+  | "modelProviderLabel"
   | "reasoningSummary"
   | "reasoningDetails"
   | "reasoningOpen"
@@ -1101,6 +1133,8 @@ function takeAssistantSnapshot(message: Message): AssistantMessageSnapshot {
     text: message.text,
     timestamp: message.timestamp,
     modelName: message.modelName,
+    modelEntryId: message.modelEntryId,
+    modelProviderLabel: message.modelProviderLabel,
     reasoningSummary: message.reasoningSummary,
     reasoningDetails: message.reasoningDetails,
     reasoningOpen: message.reasoningOpen,
@@ -1114,6 +1148,8 @@ function restoreAssistantSnapshot(
   message.text = snapshot.text;
   message.timestamp = snapshot.timestamp;
   message.modelName = snapshot.modelName;
+  message.modelEntryId = snapshot.modelEntryId;
+  message.modelProviderLabel = snapshot.modelProviderLabel;
   message.reasoningSummary = snapshot.reasoningSummary;
   message.reasoningDetails = snapshot.reasoningDetails;
   message.reasoningOpen = snapshot.reasoningOpen;
@@ -1522,6 +1558,8 @@ export async function retryLatestAssistantResponse(
   });
   // Update model name before first refresh so streaming UI shows the correct model immediately
   assistantMessage.modelName = effectiveRequestConfig.model;
+  assistantMessage.modelEntryId = effectiveRequestConfig.modelEntryId;
+  assistantMessage.modelProviderLabel = effectiveRequestConfig.modelProviderLabel;
   refreshChatSafely();
   let streamedAnswer = "";
   let streamedReasoningSummary: string | undefined;
@@ -1646,6 +1684,9 @@ export async function retryLatestAssistantResponse(
       sanitizeText(answer) || streamedAnswer || "No response.";
     assistantMessage.timestamp = Date.now();
     assistantMessage.modelName = effectiveRequestConfig.model;
+    assistantMessage.modelEntryId = effectiveRequestConfig.modelEntryId;
+    assistantMessage.modelProviderLabel =
+      effectiveRequestConfig.modelProviderLabel;
     assistantMessage.reasoningSummary = streamedReasoningSummary;
     assistantMessage.reasoningDetails = streamedReasoningDetails;
     assistantMessage.reasoningOpen = isReasoningExpandedByDefault();
@@ -1656,6 +1697,8 @@ export async function retryLatestAssistantResponse(
       text: assistantMessage.text,
       timestamp: assistantMessage.timestamp,
       modelName: assistantMessage.modelName,
+      modelEntryId: assistantMessage.modelEntryId,
+      modelProviderLabel: assistantMessage.modelProviderLabel,
       reasoningSummary: assistantMessage.reasoningSummary,
       reasoningDetails: assistantMessage.reasoningDetails,
     });
@@ -1774,19 +1817,19 @@ export async function editUserTurnAndRetry(
   }
 
   // Resolve current model settings and retry
-  const profile = getSelectedProfileForItem(item.id);
+  const profile = getSelectedModelEntryForItem(item.id);
   const reasoning = getSelectedReasoningForItem(
     item.id,
-    profile.model,
-    profile.apiBase,
+    profile?.model || "",
+    profile?.apiBase,
   );
-  const advanced = getAdvancedModelParamsForProfile(profile.key);
+  const advanced = getAdvancedModelParamsForEntry(profile?.entryId);
   await retryLatestAssistantResponse(
     body,
     item,
-    profile.model,
-    profile.apiBase,
-    profile.apiKey,
+    profile?.model,
+    profile?.apiBase,
+    profile?.apiKey,
     reasoning,
     advanced,
   );
@@ -1913,6 +1956,8 @@ export async function sendQuestion(
     text: "",
     timestamp: Date.now(),
     modelName: effectiveRequestConfig.model,
+    modelEntryId: effectiveRequestConfig.modelEntryId,
+    modelProviderLabel: effectiveRequestConfig.modelProviderLabel,
     streaming: true,
     reasoningOpen: isReasoningExpandedByDefault(),
   };
@@ -1937,6 +1982,8 @@ export async function sendQuestion(
       text: assistantMessage.text,
       timestamp: assistantMessage.timestamp,
       modelName: assistantMessage.modelName,
+      modelEntryId: assistantMessage.modelEntryId,
+      modelProviderLabel: assistantMessage.modelProviderLabel,
       reasoningSummary: assistantMessage.reasoningSummary,
       reasoningDetails: assistantMessage.reasoningDetails,
     });

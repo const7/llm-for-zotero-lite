@@ -30,6 +30,8 @@ export interface Message {
   screenshotExpanded?: boolean;
   screenshotActiveIndex?: number;
   modelName?: string;
+  modelEntryId?: string;
+  modelProviderLabel?: string;
   streaming?: boolean;
   reasoningSummary?: string;
   reasoningDetails?: string;
@@ -64,12 +66,7 @@ export type ActionDropdownSpec = {
 export type AdvancedModelParams = {
   temperature: number;
   maxTokens: number;
-  inputTokenCap: number;
-};
-export type ApiProfile = {
-  apiBase: string;
-  apiKey: string;
-  model: string;
+  inputTokenCap?: number;
 };
 export type CustomShortcut = {
   id: string;
