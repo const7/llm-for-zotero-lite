@@ -8,6 +8,7 @@
   <img src="./assets/label.png" alt="LLM for Zotero icon" width="512" />
 </p>
 
+
 ## 🚀 This plugin is now renamed to LLM-for-Zotero
 
 Please see the latest [release notes](https://github.com/yilewang/llm-for-zotero/releases). The plugin name is now changed to `llm-for-zotero`.
@@ -182,7 +183,12 @@ Type a question in the chat box, such as "What is the main conclusion of this pa
 
 > Q: Is it free to use?
 
-A: Yes, absolutely free. You only pay for API calls, if you choose to use a paid API provider. If you think this tool is helpful, please consider supporting me with a star on GitHub or [buy me a coffee](https://buymeacoffee.com/yat.lok) .
+A: Yes, absolutely free. You only pay for API calls, if you choose to use a paid API provider. If you find this tool helpful, please consider leaving a ⭐ on GitHub or buying me a coffee via [Buy Me a Coffee](https://buymeacoffee.com/yat.lok) / Alipay. Either way is greatly appreciated!
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/1e945e57-4b99-4d25-b8d5-fb120e100b62" width="200">
+</p>
+
 
 > Q: Does this work with local models?
 
