@@ -22,6 +22,19 @@ describe("assistantCitationLinks", function () {
     });
   });
 
+  it("normalizes leading cue text in inline citations for matching", function () {
+    const mentions = extractInlineCitationMentions(
+      "These systems can interact (as in Kossio et al) under drift.",
+    );
+
+    assert.lengthOf(mentions, 1);
+    assert.equal(
+      mentions[0]?.extractedCitation.displayCitationLabel,
+      "as in Kossio et al",
+    );
+    assert.equal(mentions[0]?.extractedCitation.citationLabel, "Kossio et al");
+  });
+
   it("rejects non-standalone citation lines", function () {
     assert.isNull(
       extractStandalonePaperSourceLabel(
@@ -139,6 +152,33 @@ describe("assistantCitationLinks", function () {
 
     const matches = matchAssistantCitationCandidates(
       "(Smith et al., 2024) [smith2024b], page 1",
+      papers,
+    );
+
+    assert.lengthOf(matches, 1);
+    assert.equal(matches[0].contextItemId, 22);
+  });
+
+  it("matches author-only citations with cue text to the correct paper", function () {
+    const papers: PaperContextRef[] = [
+      {
+        itemId: 1,
+        contextItemId: 11,
+        title: "Paper Zhang",
+        firstCreator: "Zhang",
+        year: "2024",
+      },
+      {
+        itemId: 2,
+        contextItemId: 22,
+        title: "Paper Kossio",
+        firstCreator: "Kossio",
+        year: "2023",
+      },
+    ];
+
+    const matches = matchAssistantCitationCandidates(
+      "(as in Kossio et al)",
       papers,
     );
 

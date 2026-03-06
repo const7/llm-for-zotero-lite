@@ -83,7 +83,7 @@ type CitationMatchBuffer = {
 };
 
 const INLINE_CITATION_LEADING_CUE_PATTERN =
-  /^(?:e\.?\s*g\.?|i\.?\s*e\.?|see(?:\s+also)?|cf\.?|compare|for\s+example|for\s+instance|such\s+as|and\b|&)\s*[:,]?\s*/i;
+  /^(?:e\.?\s*g\.?|i\.?\s*e\.?|see(?:\s+also)?|cf\.?|compare|for\s+example|for\s+instance|such\s+as|as\s+in|and\b|&)\s*[:,]?\s*/i;
 
 function isCitationControlCharCode(code: number): boolean {
   return (
@@ -397,6 +397,7 @@ export function extractStandalonePaperSourceLabel(
     rawPage?: string,
   ) => {
     const citationWithoutKey = stripCitationKeyFromLabel(rawCitation);
+    const matchCitationLabel = stripLeadingCitationCueLabel(citationWithoutKey);
     const citationKeyFromLabelMatch = rawCitation.match(/\[([^\]]+)\]\s*$/);
     const parsedCitationKey = stripCitationControlChars(
       sanitizeText(rawKey || citationKeyFromLabelMatch?.[1] || ""),
@@ -408,8 +409,8 @@ export function extractStandalonePaperSourceLabel(
       ? `(${citationWithoutKey} [${parsedCitationKey}])`
       : `(${citationWithoutKey})`;
     const citationLabel = parsedCitationKey
-      ? `${citationWithoutKey} [${parsedCitationKey}]`
-      : citationWithoutKey;
+      ? `${matchCitationLabel} [${parsedCitationKey}]`
+      : matchCitationLabel;
     return {
       sourceLabel,
       citationLabel,
@@ -419,7 +420,7 @@ export function extractStandalonePaperSourceLabel(
       normalizedSourceLabel: normalizeCitationLabel(sourceLabel),
       normalizedCitationLabel: normalizeCitationLabel(citationLabel),
       normalizedDisplayCitationLabel:
-        normalizeCitationLabel(citationWithoutKey),
+        normalizeCitationLabel(matchCitationLabel),
       normalizedCitationKey:
         normalizeCitationKey(parsedCitationKey) || undefined,
     };
@@ -540,6 +541,12 @@ function stripLeadingInlineCitationCue(value: string): {
     stripped: remaining,
     consumed,
   };
+}
+
+function stripLeadingCitationCueLabel(value: string): string {
+  const { stripped } = stripLeadingInlineCitationCue(value);
+  const normalized = sanitizeText(stripped || value).trim();
+  return normalized || sanitizeText(value || "").trim();
 }
 
 function parseGroupedInlineCitationMatch(
@@ -777,24 +784,10 @@ export function matchAssistantCitationCandidates(
 ): AssistantCitationPaperCandidate[] {
   const extracted = extractStandalonePaperSourceLabel(citationLineText);
   if (!extracted) return [];
-  const candidates = buildCandidateListFromPaperContexts(paperContexts);
-  return candidates.filter((candidate) => {
-    const candidateCitationKey = normalizeCitationKey(
-      candidate.paperContext.citationKey || "",
-    );
-    if (extracted.normalizedCitationKey) {
-      return Boolean(
-        candidateCitationKey &&
-        extracted.normalizedCitationKey === candidateCitationKey,
-      );
-    }
-    return (
-      candidate.normalizedSourceLabel === extracted.normalizedSourceLabel ||
-      candidate.normalizedCitationLabel === extracted.normalizedCitationLabel ||
-      candidate.normalizedCitationLabel ===
-        extracted.normalizedDisplayCitationLabel
-    );
-  });
+  return resolveMatchingCandidatesForExtractedCitation(
+    extracted,
+    buildCandidateListFromPaperContexts(paperContexts),
+  );
 }
 
 async function waitForReaderForItem(targetItemId: number): Promise<any | null> {
@@ -1715,6 +1708,16 @@ function resolveMatchingCandidatesForExtractedCitation(
 ): AssistantCitationPaperCandidate[] {
   const isGroupedCitation =
     extractedCitation.normalizedCitationLabel.includes(";");
+  if (extractedCitation.normalizedCitationKey) {
+    const citationKeyMatches = candidates.filter(
+      (candidate) =>
+        normalizeCitationKey(candidate.paperContext.citationKey || "") ===
+        extractedCitation.normalizedCitationKey,
+    );
+    if (citationKeyMatches.length) {
+      return citationKeyMatches;
+    }
+  }
   const out: AssistantCitationPaperCandidate[] = candidates.filter(
     (candidate) =>
       candidate.normalizedSourceLabel ===
