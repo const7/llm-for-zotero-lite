@@ -146,7 +146,7 @@ const OPENAI_GPT5_PROFILE: ProviderProfile = {
   },
 };
 
-const OPENAI_GPT52_PROFILE: ProviderProfile = {
+const OPENAI_GPT5_XHIGH_PROFILE: ProviderProfile = {
   supportsReasoning: true,
   defaultLevel: "default",
   options: [
@@ -160,6 +160,56 @@ const OPENAI_GPT52_PROFILE: ProviderProfile = {
     defaultEffort: "default",
     levelToEffort: {
       default: null,
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    },
+  },
+};
+
+const OPENAI_GPT5_PRO_PROFILE: ProviderProfile = {
+  supportsReasoning: true,
+  defaultLevel: "high",
+  options: [option("high", "high")],
+  openai: {
+    defaultEffort: "high",
+    levelToEffort: {
+      high: "high",
+    },
+  },
+};
+
+const OPENAI_GPT5_XHIGH_PRO_PROFILE: ProviderProfile = {
+  supportsReasoning: true,
+  defaultLevel: "medium",
+  options: [
+    option("medium", "medium"),
+    option("high", "high"),
+    option("xhigh", "xhigh"),
+  ],
+  openai: {
+    defaultEffort: "medium",
+    levelToEffort: {
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    },
+  },
+};
+
+const OPENAI_GPT5_CODEX_PROFILE: ProviderProfile = {
+  supportsReasoning: true,
+  defaultLevel: "low",
+  options: [
+    option("low", "low"),
+    option("medium", "medium"),
+    option("high", "high"),
+    option("xhigh", "xhigh"),
+  ],
+  openai: {
+    defaultEffort: "low",
+    levelToEffort: {
       low: "low",
       medium: "medium",
       high: "high",
@@ -375,8 +425,24 @@ const PROFILE_RULES: Record<
   openai: {
     rules: [
       {
+        match: /^gpt-5\.(?:2|4)-pro(?:\b|[.-])/,
+        profile: OPENAI_GPT5_XHIGH_PRO_PROFILE,
+      },
+      {
+        match: /^gpt-5-pro(?:\b|[.-])/,
+        profile: OPENAI_GPT5_PRO_PROFILE,
+      },
+      {
+        match: /^gpt-5\.(?:2|3)-codex(?:\b|[.-])/,
+        profile: OPENAI_GPT5_CODEX_PROFILE,
+      },
+      {
+        match: /^gpt-5\.4(?:\b|[.-])/,
+        profile: OPENAI_GPT5_XHIGH_PROFILE,
+      },
+      {
         match: /^gpt-5\.2(?:\b|[.-])/,
-        profile: OPENAI_GPT52_PROFILE,
+        profile: OPENAI_GPT5_XHIGH_PROFILE,
       },
       {
         match: /^(gpt-5(?:\b|[.-])|o\d+(?:\b|[.-]))/,

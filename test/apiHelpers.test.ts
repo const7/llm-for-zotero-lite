@@ -65,6 +65,7 @@ describe("apiHelpers", function () {
 
   describe("usesMaxCompletionTokens", function () {
     it("should use max_completion_tokens for gpt-5/o-series/reasoning models", function () {
+      assert.isTrue(usesMaxCompletionTokens("gpt-5.4"));
       assert.isTrue(usesMaxCompletionTokens("gpt-5.2"));
       assert.isTrue(usesMaxCompletionTokens("o3-mini"));
       assert.isTrue(usesMaxCompletionTokens("my-reasoning-model"));

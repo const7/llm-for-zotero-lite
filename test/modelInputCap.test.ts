@@ -10,6 +10,8 @@ describe("modelInputCap", function () {
   describe("getModelInputTokenLimit", function () {
     it("should resolve model-specific input limits", function () {
       assert.equal(getModelInputTokenLimit("gpt-4o-mini"), 128000);
+      assert.equal(getModelInputTokenLimit("gpt-5.4"), 1050000);
+      assert.equal(getModelInputTokenLimit("gpt-5.4-pro"), 1050000);
       assert.equal(getModelInputTokenLimit("gpt-5.2"), 400000);
       assert.equal(getModelInputTokenLimit("gpt-4.1-mini"), 1047576);
       assert.equal(getModelInputTokenLimit("openai/gpt-4o-mini"), 128000);

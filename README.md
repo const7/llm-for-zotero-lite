@@ -115,7 +115,7 @@ You can set up multiple provider connections, and each provider can include mult
 
 Different models can also be used for the same task, and you can cross check their answers to get a more comprehensive understanding of the paper.
 
-If you want more customization, you can also set up different reasoning levels for the same model in the conversation panel, such as "default", "medium", "high" and "xhigh" for `gpt-5.2` series, "low" and "high" for `gemini-3-pro-preview`, "medium" for `gemini-2.5-flash`. You can always check the connections by clicking the "Test Connection" button in the settings.
+If you want more customization, you can also set up different reasoning levels for the same model in the conversation panel, such as "default", "low", "medium", "high" and "xhigh" for `gpt-5.4`, "medium", "high" and "xhigh" for `gpt-5.4-pro`, "low" and "high" for `gemini-3-pro-preview`, "medium" for `gemini-2.5-flash`. You can always check the connections by clicking the "Test Connection" button in the settings.
 
 If you are a pro player, you can also change some hyperparameters of the model, such as temperature, max_tokens_output, etc. to get more creative or more deterministic answers.
 
@@ -161,8 +161,9 @@ I will give some popular model as example:
 
 | API url                                                                  | Model Name           | Reasoning Level              |
 | ------------------------------------------------------------------------ | -------------------- | ---------------------------- |
-| https://api.openai.com/v1/chat/completions                               | gpt-5.2              | default, medium, high, xhigh |
-| https://api.openai.com/v1/responses                                      | gpt-5.2              | default, medium, high, xhigh |
+| https://api.openai.com/v1/chat/completions                               | gpt-5.4              | default, low, medium, high, xhigh |
+| https://api.openai.com/v1/responses                                      | gpt-5.4              | default, low, medium, high, xhigh |
+| https://api.openai.com/v1/responses                                      | gpt-5.4-pro          | medium, high, xhigh |
 | https://api.deepseek.com/v1/chat/completions                             | deepseek-chat        | default                      |
 | https://api.deepseek.com/v1/chat/completions                             | deepseek-reasoner    | default                      |
 | https://generativelanguage.googleapis.com/v1beta/openai/chat/completions | gemini-3-pro-preview | low, high                    |

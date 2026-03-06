@@ -60,6 +60,7 @@ const MODEL_INPUT_LIMIT_RULES: ModelInputLimitRule[] = [
 
   // OpenAI
   { pattern: /^gpt-4[.-]?1(?:[.-]|$)/, limit: 1_047_576 },
+  { pattern: /^gpt-5\.4(?:[.-]|$)/, limit: 1_050_000 },
   { pattern: /^gpt-5(?:[.-]|$)/, limit: 400_000 },
   { pattern: /^o(?:3|1(?:-pro)?)(?:[.-]|$)/, limit: 200_000 },
   { pattern: /^gpt-4o(?:[.-]|$)/, limit: 128_000 },
