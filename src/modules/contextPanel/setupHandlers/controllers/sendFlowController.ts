@@ -119,7 +119,7 @@ type SendFlowControllerDeps = {
     attachments?: ChatAttachment[],
   ) => Promise<void>;
   retainPinnedImageState: (itemId: number) => void;
-  retainPinnedPaperState: (itemId: number) => void;
+  retainPaperState: (itemId: number) => void;
   retainPinnedFileState: (itemId: number) => void;
   retainPinnedTextState: (conversationKey: number) => void;
   updatePaperPreviewPreservingScroll: () => void;
@@ -296,7 +296,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       deps.persistDraftInput();
       deps.retainPinnedImageState(item.id);
       if (selectedPaperContexts.length) {
-        deps.retainPinnedPaperState(item.id);
+        deps.retainPaperState(item.id);
         deps.updatePaperPreviewPreservingScroll();
       }
       if (selectedFiles.length) {
@@ -318,7 +318,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     deps.persistDraftInput();
     deps.retainPinnedImageState(item.id);
     if (selectedPaperContexts.length) {
-      deps.retainPinnedPaperState(item.id);
+      deps.retainPaperState(item.id);
       deps.updatePaperPreviewPreservingScroll();
     }
     if (selectedFiles.length) {

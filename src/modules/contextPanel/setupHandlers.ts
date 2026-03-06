@@ -254,7 +254,6 @@ import {
   removePinnedSelectedText,
   retainPinnedFiles,
   retainPinnedImages,
-  retainPinnedPapers,
   retainPinnedSelectedTextContexts,
   togglePinnedFile,
   togglePinnedImage,
@@ -1354,18 +1353,16 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     selectedFileAttachmentCache.delete(itemId);
     selectedFilePreviewExpandedCache.delete(itemId);
   };
-  const retainPinnedPaperState = (itemId: number) => {
-    const retained = retainPinnedPapers(
-      pinnedPaperKeys,
-      itemId,
-      normalizePaperContextEntries(selectedPaperContextCache.get(itemId) || []),
+  const retainPaperState = (itemId: number) => {
+    const retained = normalizePaperContextEntries(
+      selectedPaperContextCache.get(itemId) || [],
     );
     if (retained.length) {
+      prunePinnedPaperKeys(pinnedPaperKeys, itemId, retained);
       selectedPaperContextCache.set(itemId, retained);
       return;
     }
-    selectedPaperContextCache.delete(itemId);
-    selectedPaperPreviewExpandedCache.delete(itemId);
+    clearSelectedPaperState(itemId);
   };
   const retainPinnedTextState = (itemId: number) => {
     const retained = retainPinnedSelectedTextContexts(
@@ -6449,7 +6446,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     editLatestUserMessageAndRetry,
     sendQuestion,
     retainPinnedImageState,
-    retainPinnedPaperState,
+    retainPaperState,
     retainPinnedFileState,
     retainPinnedTextState,
     updatePaperPreviewPreservingScroll,

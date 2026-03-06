@@ -30,7 +30,7 @@ describe("sendFlowController", function () {
     let sendCalled = 0;
     let editCalled = 0;
     let retainImageCalled = 0;
-    let retainPaperCalled = 0;
+    let retainPaperStateCalled = 0;
     let retainFileCalled = 0;
     let retainTextCalled = 0;
     let persistDraftInputCalls = 0;
@@ -116,8 +116,8 @@ describe("sendFlowController", function () {
       retainPinnedImageState: () => {
         retainImageCalled += 1;
       },
-      retainPinnedPaperState: () => {
-        retainPaperCalled += 1;
+      retainPaperState: () => {
+        retainPaperStateCalled += 1;
       },
       retainPinnedFileState: () => {
         retainFileCalled += 1;
@@ -148,7 +148,7 @@ describe("sendFlowController", function () {
         sendCalled,
         editCalled,
         retainImageCalled,
-        retainPaperCalled,
+        retainPaperStateCalled,
         retainFileCalled,
         retainTextCalled,
         persistDraftInputCalls,
@@ -167,7 +167,7 @@ describe("sendFlowController", function () {
     assert.equal(counts.sendCalled, 1);
     assert.equal(counts.editCalled, 0);
     assert.equal(counts.retainImageCalled, 1);
-    assert.equal(counts.retainPaperCalled, 1);
+    assert.equal(counts.retainPaperStateCalled, 1);
     assert.equal(counts.retainFileCalled, 1);
     assert.equal(counts.retainTextCalled, 1);
   });
@@ -194,7 +194,7 @@ describe("sendFlowController", function () {
     assert.equal(counts.sendCalled, 0);
     assert.equal(counts.editCalled, 1);
     assert.equal(counts.retainImageCalled, 1);
-    assert.equal(counts.retainPaperCalled, 1);
+    assert.equal(counts.retainPaperStateCalled, 1);
     assert.equal(counts.retainFileCalled, 1);
     assert.equal(counts.retainTextCalled, 1);
     assert.isAtLeast(counts.setActiveEditSessionCalls, 1);

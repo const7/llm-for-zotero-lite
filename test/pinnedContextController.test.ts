@@ -5,8 +5,10 @@ import type {
   SelectedTextContext,
 } from "../src/modules/contextPanel/types";
 import {
+  isPinnedPaper,
   isPinnedSelectedText,
   prunePinnedSelectedTextKeys,
+  prunePinnedPaperKeys,
   retainPinnedFiles,
   retainPinnedImages,
   retainPinnedPapers,
@@ -140,5 +142,34 @@ describe("pinnedContextController", function () {
     assert.isTrue(togglePinnedPaper(pinned, ownerId, paperA));
     const retained = retainPinnedPapers(pinned, ownerId, [paperA, paperB]);
     assert.deepEqual(retained, [paperA]);
+  });
+
+  it("prunes stale paper pins without dropping remaining paper contexts", function () {
+    const pinned = new Map<number, Set<string>>();
+    const ownerId = 23;
+    const paperA: PaperContextRef = {
+      itemId: 1,
+      contextItemId: 2,
+      title: "Paper A",
+    };
+    const paperB: PaperContextRef = {
+      itemId: 3,
+      contextItemId: 4,
+      title: "Paper B",
+    };
+    const removedPaper: PaperContextRef = {
+      itemId: 5,
+      contextItemId: 6,
+      title: "Paper C",
+    };
+
+    assert.isTrue(togglePinnedPaper(pinned, ownerId, paperA));
+    assert.isTrue(togglePinnedPaper(pinned, ownerId, removedPaper));
+
+    prunePinnedPaperKeys(pinned, ownerId, [paperA, paperB]);
+
+    assert.isTrue(isPinnedPaper(pinned, ownerId, paperA));
+    assert.isFalse(isPinnedPaper(pinned, ownerId, removedPaper));
+    assert.isFalse(isPinnedPaper(pinned, ownerId, paperB));
   });
 });
