@@ -795,7 +795,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     const addProviderBtn = el(
       doc,
       "button",
-      PRIMARY_BTN_STYLE + " margin-top: 2px; font-size: 12.5px;",
+      PRIMARY_BTN_STYLE + " margin-top: 2px; font-size: 12.5px; text-align: center;",
       "+ Add Provider",
     ) as HTMLButtonElement;
     addProviderBtn.type = "button";
