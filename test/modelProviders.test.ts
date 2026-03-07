@@ -35,7 +35,8 @@ describe("modelProviders", function () {
       "OpenAI",
     );
     assert.equal(deriveProviderLabel("https://api.deepseek.com/v1"), "DeepSeek");
-    assert.equal(deriveProviderLabel("https://api.moonshot.ai/v1"), "Moonshot");
+    assert.equal(deriveProviderLabel("https://api.moonshot.ai/v1"), "Kimi");
+    assert.equal(deriveProviderLabel("https://api.x.ai/v1/responses"), "Grok");
     assert.equal(
       deriveProviderLabel(
         "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",

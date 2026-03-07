@@ -50,6 +50,7 @@ import {
   getDefaultProviderGroup,
   type ModelProviderAuthMode,
 } from "./modelProviders";
+import { isGrokApiBase, providerSupportsResponsesEndpoint } from "./providerPresets";
 import {
   applyModelInputTokenCap,
   estimateConversationTokens,
@@ -1445,11 +1446,13 @@ function stringifyContent(content: MessageContent): string {
 function buildResponsesInput(
   messages: ChatMessage[],
   responseFileIds?: string[],
+  options?: { preserveSystemMessages?: boolean },
 ) {
+  const preserveSystemMessages = options?.preserveSystemMessages === true;
   const instructionsParts: string[] = [];
   const input: Array<{
     type: "message";
-    role: "user" | "assistant";
+    role: "system" | "user" | "assistant";
     content:
       | string
       | Array<
@@ -1467,7 +1470,7 @@ function buildResponsesInput(
 
   for (let index = 0; index < messages.length; index++) {
     const message = messages[index];
-    if (message.role === "system") {
+    if (message.role === "system" && !preserveSystemMessages) {
       const text = stringifyContent(message.content);
       if (text) instructionsParts.push(text);
       continue;
@@ -1712,7 +1715,9 @@ function createChatPayloadBuilder(params: {
   return (reasoningOverride: ReasoningConfig | undefined) => {
     const isCodexAuth = authMode === "codex_auth";
     const responsesInput = useResponses
-      ? buildResponsesInput(messages, responseFileIds)
+      ? buildResponsesInput(messages, responseFileIds, {
+          preserveSystemMessages: isGrokApiBase(apiBase),
+        })
       : null;
     if (useResponses && isCodexAuth && responsesInput) {
       const codexReasoningEffort =
@@ -2157,7 +2162,9 @@ export async function callLLM(params: ChatParams): Promise<string> {
       effects: inputCap.effects,
     });
   }
-  const useResponses = isResponsesBase(apiBase);
+  // codex_auth is handled above via callLLMStream
+  const useResponses =
+    isResponsesBase(apiBase) || providerSupportsResponsesEndpoint(apiBase);
   const responseFileIds = useResponses
     ? await uploadFilesForResponses({
         apiBase,
@@ -2233,7 +2240,10 @@ export async function callLLMStream(
       effects: inputCap.effects,
     });
   }
-  const useResponses = authMode === "codex_auth" || isResponsesBase(apiBase);
+  const useResponses =
+    authMode === "codex_auth" ||
+    isResponsesBase(apiBase) ||
+    providerSupportsResponsesEndpoint(apiBase);
   if (authMode === "codex_auth" && Array.isArray(params.attachments) && params.attachments.length) {
     throw new Error(
       "codex auth currently does not support file attachments in this plugin v1.",

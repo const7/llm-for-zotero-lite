@@ -56,6 +56,54 @@ describe("llmClient prepareChatRequest", function () {
     );
   });
 
+  it("keeps system prompts inside input messages for Grok responses requests", async function () {
+    let capturedBody: Record<string, unknown> | null = null;
+    (
+      globalThis as typeof globalThis & {
+        ztoolkit: { getGlobal: (name: string) => unknown; log: () => void };
+      }
+    ).ztoolkit = {
+      getGlobal: (name: string) => {
+        if (name === "fetch") {
+          return async (_url: string, init?: RequestInit) => {
+            capturedBody = JSON.parse(String(init?.body || "{}")) as Record<
+              string,
+              unknown
+            >;
+            return {
+              ok: true,
+              status: 200,
+              statusText: "OK",
+              json: async () => ({ output_text: "OK" }),
+              text: async () => "",
+            };
+          };
+        }
+        return undefined;
+      },
+      log: () => undefined,
+    };
+
+    const output = await callLLM({
+      prompt: "Say hi.",
+      model: "grok-4",
+      apiBase: "https://api.x.ai/v1/responses",
+      apiKey: "xai-test",
+    });
+
+    assert.equal(output, "OK");
+    assert.isNotNull(capturedBody);
+    assert.notProperty(capturedBody as object, "instructions");
+    assert.isArray(capturedBody?.input);
+    const input = capturedBody?.input as Array<Record<string, unknown>>;
+    assert.equal(input[0]?.role, "system");
+    assert.include(
+      String(input[0]?.content || ""),
+      "You are an intelligent research assistant",
+    );
+    assert.equal(input[input.length - 1]?.role, "user");
+  });
+
   it("keeps explicit codex auth mode in prepared request", function () {
     const prepared = prepareChatRequest({
       prompt: "hello",

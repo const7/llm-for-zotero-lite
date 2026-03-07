@@ -8,6 +8,8 @@ import {
   normalizeOptionalInputTokenCap,
   normalizeTemperature,
 } from "./normalization";
+import { detectProviderPreset, getProviderPreset } from "./providerPresets";
+import type { ProviderPresetId } from "./providerPresets";
 
 export type LegacyModelSlotKey =
   | "primary"
@@ -34,6 +36,8 @@ export type ModelProviderGroup = {
   apiKey: string;
   authMode: ModelProviderAuthMode;
   models: ModelProviderModel[];
+  /** When "customized", UI shows Customized and allows editing URL; when undefined, preset is derived from apiBase. */
+  presetIdOverride?: ProviderPresetId;
 };
 
 export type RuntimeModelEntry = {
@@ -149,6 +153,10 @@ export function deriveProviderLabel(
   if (!host) {
     return `Provider ${providerIndex || 1}`;
   }
+  const presetId = detectProviderPreset(normalizedBase);
+  if (presetId !== "customized") {
+    return getProviderPreset(presetId).label;
+  }
   const lowerHost = host.toLowerCase();
 
   if (
@@ -163,12 +171,14 @@ export function deriveProviderLabel(
   }
   if (lowerHost.includes("anthropic.com")) return "Anthropic";
   if (lowerHost.includes("deepseek.com")) return "DeepSeek";
-  if (lowerHost.includes("moonshot.ai")) return "Moonshot";
+  if (lowerHost.includes("moonshot.ai") || lowerHost.includes("moonshot.cn")) {
+    return "Kimi";
+  }
   if (lowerHost.includes("together.ai") || lowerHost.includes("together.xyz")) {
     return "Together.ai";
   }
   if (lowerHost.includes("openrouter.ai")) return "OpenRouter";
-  if (lowerHost === "x.ai" || lowerHost.endsWith(".x.ai")) return "xAI";
+  if (lowerHost === "x.ai" || lowerHost.endsWith(".x.ai")) return "Grok";
   if (lowerHost.includes("groq.com")) return "Groq";
   if (lowerHost.includes("dashscope") || lowerHost.includes("aliyuncs.com")) {
     return "Qwen";
@@ -203,6 +213,7 @@ function normalizeGroup(
     apiKey?: unknown;
     authMode?: unknown;
     models?: unknown;
+    presetIdOverride?: unknown;
   };
 
   const models = Array.isArray(rawGroup.models)
@@ -220,7 +231,12 @@ function normalizeGroup(
     apiKey: normalizeString(rawGroup.apiKey),
     authMode: normalizeProviderAuthMode(rawGroup.authMode),
     models,
+    presetIdOverride: normalizePresetIdOverride(rawGroup.presetIdOverride),
   };
+}
+function normalizePresetIdOverride(value: unknown): ProviderPresetId | undefined {
+  if (value !== "customized") return undefined;
+  return "customized";
 }
 
 function normalizeGroupModel(model: unknown): ModelProviderModel | null {

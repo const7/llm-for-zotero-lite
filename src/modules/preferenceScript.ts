@@ -24,6 +24,12 @@ import {
   type ModelProviderGroup,
   type ModelProviderModel,
 } from "../utils/modelProviders";
+import {
+  PROVIDER_PRESETS,
+  detectProviderPreset,
+  getProviderPreset,
+  type ProviderPresetId,
+} from "../utils/providerPresets";
 
 type PrefKey = "systemPrompt";
 
@@ -37,9 +43,8 @@ const getPref = (key: PrefKey): string => {
 const setPref = (key: PrefKey, value: string) =>
   Zotero.Prefs.set(pref(key), value, true);
 
-const API_HELPER_TEXT =
-  "Base URL or full endpoint. " +
-  "E.g. https://api.openai.com  |  Gemini: https://generativelanguage.googleapis.com  |  Gemini + PDF: …/v1beta/openai/responses";
+const CUSTOMIZED_API_HELPER_TEXT =
+  "Choose a preset above, or switch to Customized to enter a full base URL or endpoint manually.";
 const CODEX_API_HELPER_TEXT =
   "codex auth usually uses https://chatgpt.com/backend-api/codex/responses";
 const MAX_PROVIDER_COUNT = 10;
@@ -63,6 +68,20 @@ function getProviderProfile(index: number): ProviderProfile {
   if (index < PROVIDER_PROFILES.length) return PROVIDER_PROFILES[index];
   const letter = String.fromCharCode("A".charCodeAt(0) + index);
   return { label: `Provider ${letter}`, modelPlaceholder: "", defaultModel: "" };
+}
+
+function normalizeProviderPresetId(value: unknown): ProviderPresetId {
+  if (typeof value !== "string") return "customized";
+  return value === "customized" || PROVIDER_PRESETS.some((preset) => preset.id === value)
+    ? (value as ProviderPresetId)
+    : "customized";
+}
+
+function getPresetSelectHelperText(presetId: ProviderPresetId): string {
+  if (presetId === "customized") {
+    return CUSTOMIZED_API_HELPER_TEXT;
+  }
+  return `${getProviderPreset(presetId).helperText} Switch to Customized to edit the URL manually.`;
 }
 
 // ── DOM helpers ────────────────────────────────────────────────────
@@ -434,7 +453,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           group.apiBase = DEFAULT_CODEX_API_BASE;
         }
         persistGroups(groups);
-        rerender();
+        setTimeout(() => rerender(), 0);
       });
       authModeWrap.append(
         authModeLabel,
@@ -447,6 +466,63 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         ),
       );
 
+      const selectedPresetId: ProviderPresetId =
+        group.authMode === "codex_auth"
+          ? "customized"
+          : (group.presetIdOverride ?? detectProviderPreset(group.apiBase));
+      const selectedPreset =
+        selectedPresetId === "customized"
+          ? null
+          : getProviderPreset(selectedPresetId);
+      const isCustomizedPreset =
+        group.authMode !== "codex_auth" && selectedPresetId === "customized";
+
+      // ── Provider preset ─────────────────────────────────────────
+      const providerPresetWrap = el(
+        doc,
+        "div",
+        "display: flex; flex-direction: column;",
+      );
+      if (group.authMode !== "codex_auth") {
+        const providerPresetLabel = el(doc, "label", LABEL_STYLE, "Provider");
+        const providerPresetSelect = el(
+          doc,
+          "select",
+          INPUT_STYLE,
+        ) as HTMLSelectElement;
+        providerPresetSelect.id = `${config.addonRef}-provider-preset-${group.id}`;
+        providerPresetLabel.setAttribute("for", providerPresetSelect.id);
+
+        for (const preset of PROVIDER_PRESETS) {
+          const option = el(doc, "option") as HTMLOptionElement;
+          option.value = preset.id;
+          option.textContent = preset.label;
+          providerPresetSelect.appendChild(option);
+        }
+        const customizedOption = el(doc, "option") as HTMLOptionElement;
+        customizedOption.value = "customized";
+        customizedOption.textContent = "Customized";
+        providerPresetSelect.appendChild(customizedOption);
+
+        providerPresetSelect.value = selectedPresetId;
+        providerPresetSelect.addEventListener("change", () => {
+          const nextPresetId = normalizeProviderPresetId(providerPresetSelect.value);
+          if (nextPresetId === "customized") {
+            group.presetIdOverride = "customized";
+            // Keep existing apiBase so user can edit it
+          } else {
+            group.presetIdOverride = undefined;
+            group.apiBase = getProviderPreset(nextPresetId).defaultApiBase;
+          }
+          persistGroups(groups);
+          // Defer rerender so the browser can close the dropdown before we replace the DOM
+          // (avoids "this.element is null" in Firefox's SelectChild.sys.mjs)
+          setTimeout(() => rerender(), 0);
+        });
+
+        providerPresetWrap.append(providerPresetLabel, providerPresetSelect);
+      }
+
       // ── API URL ──────────────────────────────────────────────────
       const apiUrlWrap = el(doc, "div", "display: flex; flex-direction: column;");
       const apiUrlLabel = el(doc, "label", LABEL_STYLE, "API URL");
@@ -457,8 +533,15 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       apiUrlInput.placeholder =
         group.authMode === "codex_auth"
           ? DEFAULT_CODEX_API_BASE
-          : "https://api.openai.com";
+          : selectedPreset?.defaultApiBase || "https://api.openai.com/v1/responses";
       apiUrlInput.value = group.apiBase;
+      apiUrlInput.readOnly = group.authMode !== "codex_auth" && !isCustomizedPreset;
+      apiUrlInput.style.opacity = apiUrlInput.readOnly ? "0.85" : "1";
+      apiUrlInput.style.cursor = apiUrlInput.readOnly ? "default" : "text";
+      apiUrlInput.style.pointerEvents = apiUrlInput.readOnly ? "none" : "auto";
+      apiUrlInput.title = apiUrlInput.readOnly
+        ? "Switch Provider to Customized to edit this URL manually."
+        : "";
       apiUrlInput.addEventListener("input", () => {
         group.apiBase = apiUrlInput.value;
         persistGroups(groups);
@@ -468,7 +551,9 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         doc,
         "span",
         HELPER_STYLE,
-        group.authMode === "codex_auth" ? CODEX_API_HELPER_TEXT : API_HELPER_TEXT,
+        group.authMode === "codex_auth"
+          ? CODEX_API_HELPER_TEXT
+          : getPresetSelectHelperText(selectedPresetId),
       );
       apiUrlWrap.append(
         apiUrlLabel,
@@ -786,7 +871,18 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         "hr",
         "border: none; border-top: 1px solid var(--stroke-secondary, #c8c8c8); margin: 0;",
       );
-      cardBody.append(authModeWrap, apiUrlWrap, apiKeyWrap, divider, modelsWrap);
+      if (group.authMode === "codex_auth") {
+        cardBody.append(authModeWrap, apiUrlWrap, apiKeyWrap, divider, modelsWrap);
+      } else {
+        cardBody.append(
+          authModeWrap,
+          providerPresetWrap,
+          apiUrlWrap,
+          apiKeyWrap,
+          divider,
+          modelsWrap,
+        );
+      }
       card.append(cardHeader, cardBody);
       wrap.appendChild(card);
     });
