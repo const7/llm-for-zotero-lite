@@ -18,6 +18,13 @@ export function createGetActiveContextTool(
       mutability: "read",
       requiresConfirmation: false,
     },
+    presentation: {
+      label: "Inspect Context",
+      summaries: {
+        onCall: "Checking the current Zotero context",
+        onSuccess: "Confirmed the paper and attached context in scope",
+      },
+    },
     validate: () => ok({}),
     execute: async (_input, context) => {
       const activeItem =

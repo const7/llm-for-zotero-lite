@@ -69,6 +69,7 @@ export function getAgentApi() {
       onEvent?: (event: AgentEvent) => void | Promise<void>,
     ) => getAgentRuntime().runTurn({ request, onEvent }),
     listTools: () => getAgentRuntime().listTools(),
+    getToolDefinition: (name: string) => getAgentRuntime().getToolDefinition(name),
     getCapabilities: (request: AgentRuntimeRequest) =>
       getAgentRuntime().getCapabilities(request),
     getRunTrace: (runId: string) => getAgentRunTrace(runId),

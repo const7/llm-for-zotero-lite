@@ -38,6 +38,25 @@ export function createRetrievePaperEvidenceTool(
       mutability: "read",
       requiresConfirmation: false,
     },
+    presentation: {
+      label: "Retrieve Evidence",
+      summaries: {
+        onCall: "Pulling the most relevant evidence from the paper",
+        onSuccess: ({ content }) => {
+          const evidence =
+            content &&
+            typeof content === "object" &&
+            Array.isArray((content as { evidence?: unknown }).evidence)
+              ? (content as { evidence: unknown[] }).evidence
+              : [];
+          return evidence.length > 0
+            ? `Found ${evidence.length} relevant snippet${
+                evidence.length === 1 ? "" : "s"
+              }`
+            : "No relevant snippets found";
+        },
+      },
+    },
     validate: (args) => {
       if (args === undefined) return ok<Record<string, unknown>>({});
       if (!validateObject<Record<string, unknown>>(args)) {

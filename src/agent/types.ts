@@ -24,37 +24,64 @@ export type AgentRequest = {
   advanced?: AdvancedModelParams;
 };
 
-export type PendingWriteAction = {
+export type AgentPendingField =
+  | {
+      type: "textarea";
+      id: string;
+      label: string;
+      value?: string;
+      placeholder?: string;
+      editorMode?: "plain" | "json";
+      spellcheck?: boolean;
+    }
+  | {
+      type: "text";
+      id: string;
+      label: string;
+      value?: string;
+      placeholder?: string;
+    }
+  | {
+      type: "select";
+      id: string;
+      label: string;
+      value?: string;
+      options: Array<{
+        id: string;
+        label: string;
+      }>;
+    }
+  | {
+      type: "review_table";
+      id: string;
+      label?: string;
+      rows: Array<{
+        key: string;
+        label: string;
+        before?: string;
+        after: string;
+        multiline?: boolean;
+      }>;
+    }
+  | {
+      type: "image_gallery";
+      id: string;
+      label?: string;
+      items: Array<{
+        label: string;
+        storedPath: string;
+        mimeType?: string;
+        title?: string;
+      }>;
+    };
+
+export type AgentPendingAction = {
   toolName: string;
-  args: unknown;
   title: string;
   confirmLabel: string;
   cancelLabel: string;
-  approvalKind?: "write" | "pdf_send";
   description?: string;
-  editableContent?: string;
-  contentLabel?: string;
-  editorMode?: "plain" | "json";
-  pageSelectionValue?: string;
-  pageSelectionLabel?: string;
-  reviewItems?: Array<{
-    key: string;
-    label: string;
-    before?: string;
-    after: string;
-    multiline?: boolean;
-  }>;
-  previewImages?: Array<{
-    label: string;
-    storedPath: string;
-    mimeType?: string;
-    title?: string;
-  }>;
-  saveTargets?: Array<{
-    id: string;
-    label: string;
-  }>;
-  defaultTargetId?: string;
+  fields: AgentPendingField[];
 };
 
 export type AgentConfirmationResolution = {
@@ -97,7 +124,7 @@ export type AgentEvent =
       content: unknown;
       artifacts?: AgentToolArtifact[];
     }
-  | { type: "confirmation_required"; requestId: string; action: PendingWriteAction }
+  | { type: "confirmation_required"; requestId: string; action: AgentPendingAction }
   | {
       type: "confirmation_resolved";
       requestId: string;
@@ -133,6 +160,19 @@ export type AgentToolCall = {
   id: string;
   name: string;
   arguments: unknown;
+};
+
+export type AgentTraceChip = {
+  icon: string;
+  label: string;
+  title?: string;
+};
+
+export type AgentTraceRequestSummary = {
+  selectedTexts: string[];
+  paperTitles: string[];
+  fileNames: string[];
+  screenshotCount: number;
 };
 
 export type AgentModelCapabilities = {
@@ -266,8 +306,43 @@ export type AgentToolInputValidation<T> =
   | { ok: true; value: T }
   | { ok: false; error: string };
 
+export type AgentToolGuidance = {
+  matches: (request: AgentRuntimeRequest) => boolean;
+  instruction: string;
+};
+
+export type AgentToolPresentationSummaryInput = {
+  label: string;
+  args?: unknown;
+  content?: unknown;
+  request?: AgentTraceRequestSummary;
+};
+
+export type AgentToolPresentationSummary =
+  | string
+  | ((input: AgentToolPresentationSummaryInput) => string | null);
+
+export type AgentToolPresentation = {
+  label?: string;
+  summaries?: {
+    onCall?: AgentToolPresentationSummary;
+    onPending?: AgentToolPresentationSummary;
+    onApproved?: AgentToolPresentationSummary;
+    onDenied?: AgentToolPresentationSummary;
+    onSuccess?: AgentToolPresentationSummary;
+    onEmpty?: AgentToolPresentationSummary;
+    onError?: AgentToolPresentationSummary;
+  };
+  buildChips?: (params: {
+    args: unknown;
+    request?: AgentTraceRequestSummary;
+  }) => AgentTraceChip[];
+};
+
 export type AgentToolDefinition<TInput = unknown, TResult = unknown> = {
   spec: ToolSpec;
+  guidance?: AgentToolGuidance;
+  presentation?: AgentToolPresentation;
   validate: (args: unknown) => AgentToolInputValidation<TInput>;
   execute: (
     input: TInput,
@@ -280,16 +355,16 @@ export type AgentToolDefinition<TInput = unknown, TResult = unknown> = {
   createPendingAction?: (
     input: TInput,
     context: AgentToolContext,
-  ) => PendingWriteAction | Promise<PendingWriteAction>;
-  createPendingWriteAction?: (
-    input: TInput,
-    context: AgentToolContext,
-  ) => PendingWriteAction | Promise<PendingWriteAction>;
+  ) => AgentPendingAction | Promise<AgentPendingAction>;
   applyConfirmation?: (
     input: TInput,
     resolutionData: unknown,
     context: AgentToolContext,
   ) => AgentToolInputValidation<TInput>;
+  buildFollowupMessage?: (
+    result: AgentToolResult,
+    context: AgentToolContext,
+  ) => Promise<AgentModelMessage | null>;
 };
 
 export type AgentResourceDefinition<TValue = unknown> = {
@@ -310,7 +385,7 @@ export type PreparedToolExecution =
   | {
       kind: "confirmation";
       requestId: string;
-      action: PendingWriteAction;
+      action: AgentPendingAction;
       execute: (resolutionData?: unknown) => Promise<AgentToolResult>;
       deny: (resolutionData?: unknown) => AgentToolResult;
     };

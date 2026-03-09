@@ -36,6 +36,29 @@ export function createPreparePdfPagesForModelTool(
       mutability: "read",
       requiresConfirmation: true,
     },
+    presentation: {
+      label: "Prepare PDF Pages",
+      summaries: {
+        onCall: "Preparing PDF pages for visual inspection",
+        onPending:
+          "Waiting for your approval before sending the selected PDF pages",
+        onApproved: "Approval received - sending the selected PDF pages",
+        onDenied: "PDF page send cancelled",
+        onSuccess: ({ content }) => {
+          const pages =
+            content &&
+            typeof content === "object" &&
+            Array.isArray((content as { pages?: unknown }).pages)
+              ? (content as { pages: unknown[] }).pages
+              : [];
+          return pages.length > 0
+            ? `Prepared ${pages.length} PDF page image${
+                pages.length === 1 ? "" : "s"
+              } for inspection`
+            : "Could not prepare PDF page images";
+        },
+      },
+    },
     validate: (args) => {
       const parsed = parsePdfTargetArgs(args);
       if (!parsed.ok) return parsed;
@@ -61,31 +84,44 @@ export function createPreparePdfPagesForModelTool(
       });
       return {
         toolName: "prepare_pdf_pages_for_model",
-        args: input,
-        approvalKind: "pdf_send",
         title: `Review PDF pages for ${preview.target.title}`,
         description:
           "These pages will be sent to the model as images for visual inspection.",
         confirmLabel: "Apply",
         cancelLabel: "Cancel",
-        pageSelectionLabel: "Pages to send",
-        pageSelectionValue: getUserEditablePageSelection(input.pages),
-        previewImages: preview.pages.map((page) => ({
-          label: `Page ${page.pageLabel}`,
-          storedPath: page.imagePath,
-          mimeType: "image/png",
-          title: `${preview.target.title} — page ${page.pageLabel}`,
-        })),
-        reviewItems: [
+        fields: [
           {
-            key: "pdf",
-            label: "PDF",
-            after: preview.target.title,
+            type: "text",
+            id: "pageSelection",
+            label: "Pages to send",
+            value: getUserEditablePageSelection(input.pages),
+            placeholder: "e.g. p3 or p3-5",
           },
           {
-            key: "pages",
-            label: "Pages",
-            after: formatPageSelectionValue(input.pages || []),
+            type: "image_gallery",
+            id: "previewImages",
+            items: preview.pages.map((page) => ({
+              label: `Page ${page.pageLabel}`,
+              storedPath: page.imagePath,
+              mimeType: "image/png",
+              title: `${preview.target.title} - page ${page.pageLabel}`,
+            })),
+          },
+          {
+            type: "review_table",
+            id: "review",
+            rows: [
+              {
+                key: "pdf",
+                label: "PDF",
+                after: preview.target.title,
+              },
+              {
+                key: "pages",
+                label: "Pages",
+                after: formatPageSelectionValue(input.pages || []),
+              },
+            ],
           },
         ],
       };

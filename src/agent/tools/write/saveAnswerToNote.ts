@@ -38,6 +38,28 @@ export function createSaveAnswerToNoteTool(
       mutability: "write",
       requiresConfirmation: true,
     },
+    presentation: {
+      label: "Save to Note",
+      summaries: {
+        onCall: "Preparing a note draft",
+        onPending: "Waiting for your approval before saving the note",
+        onApproved: "Approval received - saving the note",
+        onDenied: "Note save cancelled",
+        onSuccess: ({ content }) => {
+          const status =
+            content && typeof content === "object"
+              ? (content as { status?: unknown }).status
+              : undefined;
+          if (status === "appended") {
+            return "Saved the note to the current item";
+          }
+          if (status === "standalone_created") {
+            return "Saved the note as a standalone note";
+          }
+          return "Saved the note";
+        },
+      },
+    },
     validate: (args) => {
       if (!validateObject<Record<string, unknown>>(args)) {
         return fail("Expected an object");
@@ -57,7 +79,7 @@ export function createSaveAnswerToNoteTool(
             : undefined,
       });
     },
-    createPendingWriteAction: (input, context) => {
+    createPendingAction: (input, context) => {
       const isPaperChat = Boolean(
         context.item && !isGlobalPortalItem(context.item),
       );
@@ -69,14 +91,29 @@ export function createSaveAnswerToNoteTool(
         : [{ id: "standalone", label: "Save as standalone note" }];
       return {
         toolName: "save_answer_to_note",
-        args: input,
         title: "Review note content",
-        confirmLabel: saveTargets[0]?.label || "Save note",
+        confirmLabel: "Save note",
         cancelLabel: "Cancel",
-        editableContent: input.content,
-        contentLabel: "Note content",
-        saveTargets,
-        defaultTargetId: input.target || (isPaperChat ? "item" : "standalone"),
+        fields: [
+          {
+            type: "textarea",
+            id: "content",
+            label: "Note content",
+            value: input.content,
+          },
+          ...(saveTargets.length > 1
+            ? [
+                {
+                  type: "select" as const,
+                  id: "target",
+                  label: "Save target",
+                  value:
+                    input.target || (isPaperChat ? "item" : "standalone"),
+                  options: saveTargets,
+                },
+              ]
+            : []),
+        ],
       };
     },
     applyConfirmation: (input, resolutionData) => {

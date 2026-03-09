@@ -16,6 +16,5 @@ export type AgentStepParams = {
 export interface AgentModelAdapter {
   getCapabilities(request: AgentRuntimeRequest): AgentModelCapabilities;
   supportsTools(request: AgentRuntimeRequest): boolean;
-  buildInitialMessages?(request: AgentRuntimeRequest): AgentModelMessage[];
   runStep(params: AgentStepParams): Promise<AgentModelStep>;
 }

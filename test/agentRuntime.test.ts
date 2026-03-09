@@ -146,12 +146,29 @@ describe("AgentRuntime", function () {
           requiresConfirmation: true,
         },
         validate: () => ({ ok: true, value: { content: "hello" } }),
-        createPendingWriteAction: () => ({
+        createPendingAction: () => ({
           toolName: "save_answer_to_note",
-          args: { content: "hello" },
           title: "Save hello",
           confirmLabel: "Approve",
           cancelLabel: "Cancel",
+          fields: [
+            {
+              type: "textarea",
+              id: "content",
+              label: "Note content",
+              value: "hello",
+            },
+            {
+              type: "select",
+              id: "target",
+              label: "Save target",
+              value: "item",
+              options: [
+                { id: "item", label: "Save as item note" },
+                { id: "standalone", label: "Save as standalone note" },
+              ],
+            },
+          ],
         }),
         applyConfirmation: (input, resolutionData) => {
           if (!resolutionData || typeof resolutionData !== "object") {

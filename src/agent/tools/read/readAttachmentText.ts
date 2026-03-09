@@ -31,6 +31,13 @@ export function createReadAttachmentTextTool(): AgentToolDefinition<
       mutability: "read",
       requiresConfirmation: false,
     },
+    presentation: {
+      label: "Read Attachment",
+      summaries: {
+        onCall: "Reading the attached file",
+        onSuccess: "Read the attached file",
+      },
+    },
     validate: (args) => {
       if (!validateObject<Record<string, unknown>>(args)) {
         return fail<ReadAttachmentTextInput>("Expected an object");

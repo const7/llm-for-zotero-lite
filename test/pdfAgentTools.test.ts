@@ -113,9 +113,15 @@ describe("PDF agent tools", function () {
 
     assert.equal(execution.kind, "confirmation");
     if (execution.kind !== "confirmation") return;
-    assert.equal(execution.action.pageSelectionValue, "p4");
+    const pageField = execution.action.fields.find(
+      (field) => field.id === "pageSelection",
+    );
+    assert.equal(
+      pageField && pageField.type === "text" ? pageField.value : "",
+      "p4",
+    );
     const approved = await execution.execute({
-      pages: "p4-5",
+      pageSelection: "p4-5",
     });
     assert.equal(approved.ok, true);
     assert.deepEqual(

@@ -18,6 +18,25 @@ export function createListPaperContextsTool(
       mutability: "read",
       requiresConfirmation: false,
     },
+    presentation: {
+      label: "List Papers",
+      summaries: {
+        onCall: "Reviewing the papers currently in scope",
+        onSuccess: ({ content }) => {
+          const papers =
+            content &&
+            typeof content === "object" &&
+            Array.isArray((content as { papers?: unknown }).papers)
+              ? (content as { papers: unknown[] }).papers
+              : [];
+          return papers.length > 0
+            ? `Confirmed ${papers.length} paper${
+                papers.length === 1 ? "" : "s"
+              } in scope`
+            : "No paper context is currently in scope";
+        },
+      },
+    },
     validate: () => ok({}),
     execute: async (_input, context) => ({
       papers: zoteroGateway.listPaperContexts(context.request),

@@ -65,6 +65,13 @@ export function createReadPaperFrontMatterTool(
       mutability: "read",
       requiresConfirmation: false,
     },
+    presentation: {
+      label: "Read Front Matter",
+      summaries: {
+        onCall: "Inspecting the paper front matter for metadata",
+        onSuccess: "Checked the opening paper metadata text",
+      },
+    },
     validate: (args) => {
       if (!validateObject<Record<string, unknown>>(args)) {
         return fail("Expected an object");

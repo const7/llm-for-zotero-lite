@@ -1,7 +1,11 @@
 import { getAgentRuntime } from "../../../agent";
 import type {
+  AgentPendingAction,
+  AgentPendingField,
   AgentRunEventRecord,
-  PendingWriteAction,
+  AgentTraceChip,
+  AgentTraceRequestSummary,
+  AgentToolPresentationSummary,
 } from "../../../agent/types";
 import type { Message, PaperContextRef } from "../types";
 import { sanitizeText, getSelectedTextSourceIcon } from "../textUtils";
@@ -17,12 +21,6 @@ type AgentTraceSummaryRow = {
   kind: AgentTraceSummaryKind;
   icon: string;
   text: string;
-};
-
-type AgentTraceChip = {
-  icon: string;
-  label: string;
-  title?: string;
 };
 
 type AgentTraceDisplayItem =
@@ -43,22 +41,6 @@ type RenderAgentTraceParams = {
   userMessage?: Message | null;
   events: AgentRunEventRecord[];
   onTraceMissing?: () => void;
-};
-
-const AGENT_TRACE_TOOL_LABELS: Record<string, string> = {
-  get_active_context: "Inspect Context",
-  list_paper_contexts: "List Papers",
-  retrieve_paper_evidence: "Retrieve Evidence",
-  read_paper_excerpt: "Read Excerpt",
-  read_paper_front_matter: "Read Front Matter",
-  search_library_items: "Search Library",
-  audit_article_metadata: "Audit Metadata",
-  search_pdf_pages: "Search PDF Pages",
-  prepare_pdf_pages_for_model: "Prepare PDF Pages",
-  prepare_pdf_file_for_model: "Prepare PDF File",
-  read_attachment_text: "Read Attachment",
-  save_answer_to_note: "Save to Note",
-  edit_article_metadata: "Edit Metadata",
 };
 
 type AgentRunEventPayload = AgentRunEventRecord["payload"];
@@ -88,8 +70,8 @@ function normalizePaperContexts(paperContexts: unknown): PaperContextRef[] {
 
 function getPendingWriteConfirmation(
   events: AgentRunEventRecord[],
-): { requestId: string; action: PendingWriteAction } | null {
-  const pending = new Map<string, PendingWriteAction>();
+): { requestId: string; action: AgentPendingAction } | null {
+  const pending = new Map<string, AgentPendingAction>();
   for (const entry of events) {
     if (entry.payload.type === "confirmation_required") {
       pending.set(entry.payload.requestId, entry.payload.action);
@@ -122,66 +104,14 @@ function truncateAgentTraceText(value: unknown, max = 88): string {
   return `${normalized.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
 }
 
-function formatAgentTraceToolName(name: string): string {
-  const mapped = AGENT_TRACE_TOOL_LABELS[name];
-  if (mapped) return mapped;
-  return name
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function getPendingWriteEditableContent(action: PendingWriteAction): string {
-  if (typeof action.editableContent === "string") {
-    return action.editableContent;
-  }
-  const args = isAgentTraceRecord(action.args) ? action.args : null;
-  return typeof args?.content === "string" ? args.content : "";
-}
-
-function getPendingWriteTargets(
-  action: PendingWriteAction,
-): Array<{ id: string; label: string }> {
-  if (Array.isArray(action.saveTargets) && action.saveTargets.length) {
-    return action.saveTargets
-      .filter(
-        (
-          entry,
-        ): entry is {
-          id: string;
-          label: string;
-        } =>
-          Boolean(entry) &&
-          typeof entry.id === "string" &&
-          entry.id.trim().length > 0 &&
-          typeof entry.label === "string" &&
-          entry.label.trim().length > 0,
-      )
-      .map((entry) => ({
-        id: entry.id.trim(),
-        label: entry.label.trim(),
-      }));
-  }
-  return [
-    {
-      id: "default",
-      label: action.confirmLabel || "Approve",
-    },
-  ];
-}
-
-function renderPendingWriteReviewItems(
+function renderReviewTableField(
   doc: Document,
-  action: PendingWriteAction,
-): HTMLDivElement | null {
-  if (!Array.isArray(action.reviewItems) || !action.reviewItems.length) {
-    return null;
-  }
+  field: Extract<AgentPendingField, { type: "review_table" }>,
+): HTMLDivElement {
   const list = doc.createElement("div");
   list.className = "llm-agent-hitl-review-list";
 
-  for (const item of action.reviewItems) {
+  for (const item of field.rows) {
     const row = doc.createElement("div");
     row.className = "llm-agent-hitl-review-item";
 
@@ -225,9 +155,35 @@ function renderPendingWriteReviewItems(
   return list;
 }
 
+function renderImageGalleryField(
+  doc: Document,
+  field: Extract<AgentPendingField, { type: "image_gallery" }>,
+): HTMLDivElement {
+  const previewGrid = doc.createElement("div");
+  previewGrid.className = "llm-agent-hitl-preview-grid";
+  for (const image of field.items) {
+    const previewCard = doc.createElement("div");
+    previewCard.className = "llm-agent-hitl-preview-card";
+    const previewImg = doc.createElement("img");
+    previewImg.className = "llm-agent-hitl-preview-image";
+    previewImg.loading = "lazy";
+    previewImg.alt = image.title || image.label;
+    const previewUrl = toFileUrl(image.storedPath);
+    if (previewUrl) {
+      previewImg.src = previewUrl;
+    }
+    const previewLabel = doc.createElement("div");
+    previewLabel.className = "llm-agent-hitl-preview-label";
+    previewLabel.textContent = image.label;
+    previewCard.append(previewImg, previewLabel);
+    previewGrid.appendChild(previewCard);
+  }
+  return previewGrid;
+}
+
 function renderPendingWriteActionCard(
   doc: Document,
-  pending: { requestId: string; action: PendingWriteAction },
+  pending: { requestId: string; action: AgentPendingAction },
 ): HTMLDivElement {
   const card = doc.createElement("div");
   card.className = "llm-agent-hitl-card";
@@ -249,136 +205,167 @@ function renderPendingWriteActionCard(
     card.appendChild(description);
   }
 
-  const reviewItems = renderPendingWriteReviewItems(doc, pending.action);
-  let editor: HTMLTextAreaElement | null = null;
-  let pageSelectionInput: HTMLInputElement | null = null;
+  const fieldAccessors: Array<{
+    id: string;
+    getValue: () => unknown;
+    setDisabled: (disabled: boolean) => void;
+    isValid: () => boolean;
+    bindValidity?: (callback: () => void) => void;
+  }> = [];
 
-  if (pending.action.pageSelectionLabel) {
-    const pageLabel = doc.createElement("label");
-    pageLabel.className = "llm-agent-hitl-label";
-    pageLabel.textContent = pending.action.pageSelectionLabel;
-    card.appendChild(pageLabel);
-    pageSelectionInput = doc.createElement("input");
-    pageSelectionInput.type = "text";
-    pageSelectionInput.className = "llm-agent-hitl-page-input";
-    pageSelectionInput.value = pending.action.pageSelectionValue || "";
-    pageSelectionInput.placeholder = "e.g. p3 or p3-5";
-    card.appendChild(pageSelectionInput);
-  }
+  for (const field of pending.action.fields) {
+    if (field.type === "textarea") {
+      const label = doc.createElement("label");
+      label.className = "llm-agent-hitl-label";
+      label.textContent = field.label;
+      card.appendChild(label);
 
-  if (pending.action.contentLabel && (!reviewItems || pending.action.editableContent)) {
-    const contentLabel = doc.createElement("label");
-    contentLabel.className = "llm-agent-hitl-label";
-    contentLabel.textContent = pending.action.contentLabel;
-    card.appendChild(contentLabel);
-  }
-
-  if (
-    Array.isArray(pending.action.previewImages) &&
-    pending.action.previewImages.length
-  ) {
-    const previewGrid = doc.createElement("div");
-    previewGrid.className = "llm-agent-hitl-preview-grid";
-    for (const image of pending.action.previewImages) {
-      const previewCard = doc.createElement("div");
-      previewCard.className = "llm-agent-hitl-preview-card";
-      const previewImg = doc.createElement("img");
-      previewImg.className = "llm-agent-hitl-preview-image";
-      previewImg.loading = "lazy";
-      previewImg.alt = image.title || image.label;
-      const previewUrl = toFileUrl(image.storedPath);
-      if (previewUrl) {
-        previewImg.src = previewUrl;
-      }
-      const previewLabel = doc.createElement("div");
-      previewLabel.className = "llm-agent-hitl-preview-label";
-      previewLabel.textContent = image.label;
-      previewCard.append(previewImg, previewLabel);
-      previewGrid.appendChild(previewCard);
+      const textarea = doc.createElement("textarea");
+      textarea.className =
+        field.editorMode === "json"
+          ? "llm-agent-hitl-input llm-agent-hitl-input-code"
+          : "llm-agent-hitl-input";
+      textarea.value = field.value || "";
+      textarea.placeholder = field.placeholder || "";
+      textarea.spellcheck = field.spellcheck ?? field.editorMode !== "json";
+      const resizeTextarea = () => {
+        textarea.style.height = "auto";
+        textarea.style.height = `${Math.min(textarea.scrollHeight, 260)}px`;
+      };
+      resizeTextarea();
+      textarea.addEventListener("input", resizeTextarea);
+      card.appendChild(textarea);
+      fieldAccessors.push({
+        id: field.id,
+        getValue: () => textarea.value,
+        setDisabled: (disabled) => {
+          textarea.disabled = disabled;
+        },
+        isValid: () => textarea.value.trim().length > 0,
+        bindValidity: (callback) => {
+          textarea.addEventListener("input", callback);
+        },
+      });
+      continue;
     }
-    card.appendChild(previewGrid);
-  }
 
-  if (reviewItems) {
-    card.appendChild(reviewItems);
-  } else {
-    editor = doc.createElement("textarea");
-    editor.className =
-      pending.action.editorMode === "json"
-        ? "llm-agent-hitl-input llm-agent-hitl-input-code"
-        : "llm-agent-hitl-input";
-    editor.value = getPendingWriteEditableContent(pending.action);
-    editor.spellcheck = pending.action.editorMode !== "json";
-    const resizeEditor = () => {
-      if (!editor) return;
-      editor.style.height = "auto";
-      editor.style.height = `${Math.min(editor.scrollHeight, 260)}px`;
-    };
-    resizeEditor();
-    editor.addEventListener("input", resizeEditor);
-    card.appendChild(editor);
+    if (field.type === "text") {
+      const label = doc.createElement("label");
+      label.className = "llm-agent-hitl-label";
+      label.textContent = field.label;
+      card.appendChild(label);
+
+      const input = doc.createElement("input");
+      input.type = "text";
+      input.className = "llm-agent-hitl-page-input";
+      input.value = field.value || "";
+      input.placeholder = field.placeholder || "";
+      card.appendChild(input);
+      fieldAccessors.push({
+        id: field.id,
+        getValue: () => input.value,
+        setDisabled: (disabled) => {
+          input.disabled = disabled;
+        },
+        isValid: () => input.value.trim().length > 0,
+        bindValidity: (callback) => {
+          input.addEventListener("input", callback);
+        },
+      });
+      continue;
+    }
+
+    if (field.type === "select") {
+      const label = doc.createElement("label");
+      label.className = "llm-agent-hitl-label";
+      label.textContent = field.label;
+      card.appendChild(label);
+
+      const select = doc.createElement("select");
+      select.className = "llm-agent-hitl-page-input";
+      for (const option of field.options) {
+        const optionEl = doc.createElement("option");
+        optionEl.value = option.id;
+        optionEl.textContent = option.label;
+        select.appendChild(optionEl);
+      }
+      select.value = field.value || field.options[0]?.id || "";
+      card.appendChild(select);
+      fieldAccessors.push({
+        id: field.id,
+        getValue: () => select.value,
+        setDisabled: (disabled) => {
+          select.disabled = disabled;
+        },
+        isValid: () => Boolean(select.value.trim()),
+        bindValidity: (callback) => {
+          select.addEventListener("change", callback);
+        },
+      });
+      continue;
+    }
+
+    if (field.type === "review_table") {
+      if (field.label) {
+        const label = doc.createElement("label");
+        label.className = "llm-agent-hitl-label";
+        label.textContent = field.label;
+        card.appendChild(label);
+      }
+      card.appendChild(renderReviewTableField(doc, field));
+      continue;
+    }
+
+    if (field.type === "image_gallery") {
+      if (field.label) {
+        const label = doc.createElement("label");
+        label.className = "llm-agent-hitl-label";
+        label.textContent = field.label;
+        card.appendChild(label);
+      }
+      card.appendChild(renderImageGalleryField(doc, field));
+    }
   }
 
   const actionRow = doc.createElement("div");
   actionRow.className = "llm-agent-hitl-actions";
-  const saveTargets = getPendingWriteTargets(pending.action);
-  const defaultTargetId =
-    saveTargets.find((entry) => entry.id === pending.action.defaultTargetId)
-      ?.id ||
-    saveTargets[0]?.id ||
-    "default";
   const buttons: HTMLButtonElement[] = [];
   const setButtonsDisabled = (disabled: boolean) => {
-    if (editor) {
-      editor.disabled = disabled;
-    }
-    if (pageSelectionInput) {
-      pageSelectionInput.disabled = disabled;
+    for (const accessor of fieldAccessors) {
+      accessor.setDisabled(disabled);
     }
     for (const button of buttons) {
-      button.disabled = disabled;
-    }
-  };
-  const syncSaveButtons = () => {
-    const hasContent = editor ? editor.value.trim().length > 0 : true;
-    const hasPages = pageSelectionInput
-      ? pageSelectionInput.value.trim().length > 0
-      : true;
-    for (const button of buttons) {
-      if (button.dataset.kind === "save") {
-        button.disabled = !(hasContent && hasPages);
+      if (disabled) {
+        button.disabled = true;
       }
     }
   };
-  const handleSave = (targetId: string) => {
+  const syncConfirmButton = () => {
+    const isValid = fieldAccessors.every((accessor) => accessor.isValid());
+    for (const button of buttons) {
+      if (button.dataset.kind === "save") {
+        button.disabled = !isValid;
+      }
+    }
+  };
+  const handleSave = () => {
     setButtonsDisabled(true);
-    getAgentRuntime().resolveConfirmation(pending.requestId, true, {
-      ...(editor ? { content: editor.value } : {}),
-      ...(pageSelectionInput
-        ? {
-            pageSelection: pageSelectionInput.value,
-            pages: pageSelectionInput.value,
-          }
-        : {}),
-      target: targetId === "default" ? undefined : targetId,
-    });
+    const payload = Object.fromEntries(
+      fieldAccessors.map((accessor) => [accessor.id, accessor.getValue()]),
+    );
+    getAgentRuntime().resolveConfirmation(pending.requestId, true, payload);
   };
 
-  for (const target of saveTargets) {
-    const saveButton = doc.createElement("button");
-    saveButton.type = "button";
-    saveButton.dataset.kind = "save";
-    saveButton.className =
-      target.id === defaultTargetId
-        ? "llm-agent-hitl-btn"
-        : "llm-agent-hitl-btn llm-agent-hitl-btn-alt";
-    saveButton.textContent = target.label;
-    saveButton.addEventListener("click", () => {
-      handleSave(target.id);
-    });
-    buttons.push(saveButton);
-    actionRow.appendChild(saveButton);
-  }
+  const saveButton = doc.createElement("button");
+  saveButton.type = "button";
+  saveButton.dataset.kind = "save";
+  saveButton.className = "llm-agent-hitl-btn";
+  saveButton.textContent = pending.action.confirmLabel || "Apply";
+  saveButton.addEventListener("click", () => {
+    handleSave();
+  });
+  buttons.push(saveButton);
+  actionRow.appendChild(saveButton);
 
   const cancelButton = doc.createElement("button");
   cancelButton.type = "button";
@@ -392,9 +379,10 @@ function renderPendingWriteActionCard(
   buttons.push(cancelButton);
   actionRow.appendChild(cancelButton);
   card.appendChild(actionRow);
-  syncSaveButtons();
-  editor?.addEventListener("input", syncSaveButtons);
-  pageSelectionInput?.addEventListener("input", syncSaveButtons);
+  syncConfirmButton();
+  for (const accessor of fieldAccessors) {
+    accessor.bindValidity?.(syncConfirmButton);
+  }
 
   return card;
 }
@@ -468,11 +456,74 @@ function buildAgentTraceRequestChips(
   return chips;
 }
 
+function buildAgentTraceRequestSummary(
+  userMessage: Message | null | undefined,
+): AgentTraceRequestSummary {
+  const selectedTexts = userMessage ? getMessageSelectedTexts(userMessage) : [];
+  const paperTitles = userMessage
+    ? normalizePaperContexts(userMessage.paperContexts).map((entry) => entry.title)
+    : [];
+  const fileNames = Array.isArray(userMessage?.attachments)
+    ? userMessage.attachments
+        .filter((entry) => entry && entry.category !== "image")
+        .map((entry) => entry.name)
+    : [];
+  const screenshotCount = Array.isArray(userMessage?.screenshotImages)
+    ? userMessage.screenshotImages.filter(Boolean).length
+    : 0;
+  return {
+    selectedTexts,
+    paperTitles,
+    fileNames,
+    screenshotCount,
+  };
+}
+
+function getToolDefinition(name: string) {
+  return getAgentRuntime().getToolDefinition(name);
+}
+
+function resolveToolPresentationSummary(
+  summary: AgentToolPresentationSummary | undefined,
+  input: {
+    label: string;
+    args?: unknown;
+    content?: unknown;
+    request?: AgentTraceRequestSummary;
+  },
+): string | null {
+  if (!summary) return null;
+  if (typeof summary === "function") {
+    return summary(input);
+  }
+  const normalized = summary.trim();
+  return normalized || null;
+}
+
+function toolLabelFromName(name: string): string {
+  const explicitLabel = getToolDefinition(name)?.presentation?.label?.trim();
+  if (explicitLabel) return explicitLabel;
+  return name
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function buildAgentTraceToolChips(
   toolName: string,
   args: unknown,
   userMessage: Message | null | undefined,
 ): AgentTraceChip[] {
+  const requestSummary = buildAgentTraceRequestSummary(userMessage);
+  const customChips = getToolDefinition(toolName)?.presentation?.buildChips?.({
+    args,
+    request: requestSummary,
+  });
+  if (Array.isArray(customChips) && customChips.length) {
+    return customChips;
+  }
+
   const record = isAgentTraceRecord(args) ? args : null;
   const chips: AgentTraceChip[] = [];
   const paperContext = isAgentTraceRecord(record?.paperContext)
@@ -489,408 +540,172 @@ function buildAgentTraceToolChips(
     });
   }
 
-  if (toolName === "search_library_items") {
-    const query = readAgentTraceText(record?.query);
-    if (query) {
+  const query = readAgentTraceText(record?.query);
+  if (query) {
+    chips.push({
+      icon: "⌕",
+      label: truncateAgentTraceText(query, 36),
+      title: query,
+    });
+  }
+
+  const attachmentName = readAgentTraceText(record?.name);
+  if (attachmentName) {
+    chips.push({
+      icon: /\.pdf$/i.test(attachmentName) ? "📄" : "📎",
+      label: truncateAgentTraceText(attachmentName, 36),
+      title: attachmentName,
+    });
+  }
+
+  const pages =
+    Array.isArray(record?.pages) && record?.pages.length
+      ? record.pages
+      : readAgentTraceText(record?.pages)
+        ? [record?.pages]
+        : [];
+  if (pages.length) {
+    const labels = pages
+      .map((entry) =>
+        typeof entry === "number"
+          ? `p${Math.max(1, Math.floor(entry) + 1)}`
+          : truncateAgentTraceText(entry, 16),
+      )
+      .join(", ");
+    if (labels) {
       chips.push({
-        icon: "⌕",
-        label: truncateAgentTraceText(query, 36),
-        title: query,
+        icon: "§",
+        label: truncateAgentTraceText(labels, 24),
+        title: labels,
       });
     }
   }
 
-  if (toolName === "read_attachment_text") {
-    const attachmentName = readAgentTraceText(record?.name);
-    if (attachmentName) {
-      chips.push({
-        icon: "📎",
-        label: truncateAgentTraceText(attachmentName, 32),
-        title: attachmentName,
-      });
-    }
-  }
-
-  if (
-    toolName === "search_pdf_pages" ||
-    toolName === "prepare_pdf_pages_for_model" ||
-    toolName === "prepare_pdf_file_for_model"
-  ) {
-    const attachmentName = readAgentTraceText(record?.name);
-    if (attachmentName && !chips.length) {
-      chips.push({
-        icon: "📄",
-        label: truncateAgentTraceText(attachmentName, 36),
-        title: attachmentName,
-      });
-    }
-    const pages =
-      Array.isArray(record?.pages) && record?.pages.length
-        ? record.pages
-        : readAgentTraceText(record?.pages)
-          ? [record?.pages]
-          : [];
-    if (pages.length) {
-      const labels = Array.isArray(pages)
-        ? pages
-            .map((entry) =>
-              typeof entry === "number"
-                ? `p${Math.max(1, Math.floor(entry) + 1)}`
-                : truncateAgentTraceText(entry, 16),
-            )
-            .join(", ")
-        : "";
-      if (labels) {
-        chips.push({
-          icon: "§",
-          label: truncateAgentTraceText(labels, 24),
-          title: labels,
-        });
-      }
-    }
-  }
-
-  if (toolName === "get_active_context" && !chips.length) {
+  if (!chips.length && toolName === "get_active_context") {
     return buildAgentTraceRequestChips(userMessage);
   }
 
   return chips;
 }
 
-function summarizeAgentTraceToolCall(name: string): AgentTraceSummaryRow {
-  switch (name) {
-    case "get_active_context":
-      return {
-        kind: "tool",
-        icon: "◎",
-        text: "Checking the current Zotero context",
-      };
-    case "list_paper_contexts":
-      return {
-        kind: "tool",
-        icon: "▤",
-        text: "Reviewing the papers currently in scope",
-      };
-    case "retrieve_paper_evidence":
-      return {
-        kind: "tool",
-        icon: "↓",
-        text: "Pulling the most relevant evidence from the paper",
-      };
-    case "read_paper_excerpt":
-      return {
-        kind: "tool",
-        icon: "¶",
-        text: "Opening the exact passage behind that evidence",
-      };
-    case "read_paper_front_matter":
-      return {
-        kind: "tool",
-        icon: "¶",
-        text: "Inspecting the paper front matter for metadata",
-      };
-    case "search_library_items":
-      return {
-        kind: "tool",
-        icon: "⌕",
-        text: "Searching your library for matching papers",
-      };
-    case "audit_article_metadata":
-      return {
-        kind: "tool",
-        icon: "≡",
-        text: "Auditing the article metadata field by field",
-      };
-    case "search_pdf_pages":
-      return {
-        kind: "tool",
-        icon: "⌕",
-        text: "Locating the most relevant PDF pages",
-      };
-    case "prepare_pdf_pages_for_model":
-      return {
-        kind: "tool",
-        icon: "↓",
-        text: "Preparing PDF pages for visual inspection",
-      };
-    case "prepare_pdf_file_for_model":
-      return {
-        kind: "tool",
-        icon: "⇣",
-        text: "Preparing the full PDF for direct model reading",
-      };
-    case "read_attachment_text":
-      return {
-        kind: "tool",
-        icon: "≣",
-        text: "Reading the attached file",
-      };
-    case "save_answer_to_note":
-      return {
-        kind: "tool",
-        icon: "✎",
-        text: "Preparing a note draft",
-      };
-    case "edit_article_metadata":
-      return {
-        kind: "tool",
-        icon: "✎",
-        text: "Preparing metadata updates for the article",
-      };
-    default:
-      return {
-        kind: "tool",
-        icon: "→",
-        text: `Using ${formatAgentTraceToolName(name)}`,
-      };
-  }
+function summarizeAgentTraceToolCall(
+  name: string,
+  args: unknown,
+  request?: AgentTraceRequestSummary,
+): AgentTraceSummaryRow {
+  const label = toolLabelFromName(name);
+  const text =
+    resolveToolPresentationSummary(
+      getToolDefinition(name)?.presentation?.summaries?.onCall,
+      { label, args, request },
+    ) || `Using ${label}`;
+  return {
+    kind: "tool",
+    icon: "→",
+    text,
+  };
 }
 
 function summarizeAgentTraceConfirmationRequest(
   toolName: string,
+  request?: AgentTraceRequestSummary,
 ): AgentTraceSummaryRow {
-  if (toolName === "save_answer_to_note") {
-    return {
-      kind: "plan",
-      icon: "…",
-      text: "Waiting for your approval before saving the note",
-    };
-  }
-  if (toolName === "edit_article_metadata") {
-    return {
-      kind: "plan",
-      icon: "…",
-      text: "Waiting for your approval before applying the metadata changes",
-    };
-  }
-  if (toolName === "prepare_pdf_pages_for_model") {
-    return {
-      kind: "plan",
-      icon: "…",
-      text: "Waiting for your approval before sending the selected PDF pages",
-    };
-  }
-  if (toolName === "prepare_pdf_file_for_model") {
-    return {
-      kind: "plan",
-      icon: "…",
-      text: "Waiting for your approval before sending the whole PDF",
-    };
-  }
+  const label = toolLabelFromName(toolName);
+  const text =
+    resolveToolPresentationSummary(
+      getToolDefinition(toolName)?.presentation?.summaries?.onPending,
+      { label, request },
+    ) || `Waiting for your approval to continue with ${label}`;
   return {
     kind: "plan",
-    icon: "…",
-    text: `Waiting for your approval to continue with ${formatAgentTraceToolName(
-      toolName,
-    )}`,
+    icon: "...",
+    text,
   };
 }
 
 function summarizeAgentTraceConfirmationResolved(
   toolName: string,
   approved: boolean,
+  request?: AgentTraceRequestSummary,
 ): AgentTraceSummaryRow {
-  if (approved) {
-    return {
-      kind: "ok",
-      icon: "✓",
-      text:
-        toolName === "save_answer_to_note"
-          ? "Approval received — saving the note"
-          : toolName === "edit_article_metadata"
-            ? "Approval received — applying the metadata changes"
-            : toolName === "prepare_pdf_pages_for_model"
-              ? "Approval received — sending the selected PDF pages"
-              : toolName === "prepare_pdf_file_for_model"
-                ? "Approval received — sending the whole PDF"
-          : "Approval received — continuing",
-    };
-  }
+  const label = toolLabelFromName(toolName);
+  const text =
+    resolveToolPresentationSummary(
+      approved
+        ? getToolDefinition(toolName)?.presentation?.summaries?.onApproved
+        : getToolDefinition(toolName)?.presentation?.summaries?.onDenied,
+      { label, request },
+    ) ||
+    (approved
+      ? `Approval received - continuing with ${label}`
+      : `Cancelled ${label}`);
   return {
-    kind: "skip",
-    icon: "−",
-    text:
-      toolName === "save_answer_to_note"
-        ? "Note save cancelled"
-        : toolName === "edit_article_metadata"
-          ? "Metadata changes cancelled"
-          : toolName === "prepare_pdf_pages_for_model"
-            ? "PDF page send cancelled"
-            : toolName === "prepare_pdf_file_for_model"
-              ? "Whole-PDF send cancelled"
-        : "Action cancelled",
+    kind: approved ? "ok" : "skip",
+    icon: approved ? "✓" : "-",
+    text,
   };
+}
+
+function toolContentLooksEmpty(content: unknown): boolean {
+  if (!content || typeof content !== "object" || Array.isArray(content)) {
+    return false;
+  }
+  const record = content as Record<string, unknown>;
+  for (const key of ["papers", "evidence", "results", "suggestions", "pages"]) {
+    if (Array.isArray(record[key])) {
+      return record[key].length === 0;
+    }
+  }
+  return false;
 }
 
 function summarizeAgentTraceToolResult(
   name: string,
   ok: boolean,
   content: unknown,
+  request?: AgentTraceRequestSummary,
 ): AgentTraceSummaryRow | null {
+  const label = toolLabelFromName(name);
   const normalized = isAgentTraceRecord(content) ? content : null;
   if (!ok) {
     const rawError = readAgentTraceText(normalized?.error);
     if (rawError?.toLowerCase() === "user denied action") {
       return null;
     }
-    const errorText =
-      rawError || `Tool failed: ${formatAgentTraceToolName(name)}`;
+    const text =
+      resolveToolPresentationSummary(
+        getToolDefinition(name)?.presentation?.summaries?.onError,
+        { label, content, request },
+      ) ||
+      truncateAgentTraceText(
+        `Could not complete ${label}: ${rawError || "Tool failed"}`,
+        92,
+      );
     return {
       kind: "skip",
       icon: "!",
-      text: truncateAgentTraceText(
-        `Could not complete ${formatAgentTraceToolName(name)}: ${errorText}`,
-        92,
-      ),
+      text,
     };
   }
 
-  switch (name) {
-    case "get_active_context":
-      return {
-        kind: "ok",
-        icon: "✓",
-        text: "Confirmed the paper and attached context in scope",
-      };
-    case "list_paper_contexts": {
-      const papers = Array.isArray(normalized?.papers) ? normalized.papers : [];
-      return {
-        kind: papers.length > 0 ? "ok" : "skip",
-        icon: papers.length > 0 ? "✓" : "−",
-        text:
-          papers.length > 0
-            ? `Confirmed ${papers.length} paper${papers.length === 1 ? "" : "s"} in scope`
-            : "No paper context is currently in scope",
-      };
-    }
-    case "retrieve_paper_evidence": {
-      const evidence = Array.isArray(normalized?.evidence)
-        ? normalized.evidence
-        : [];
-      return {
-        kind: evidence.length > 0 ? "ok" : "skip",
-        icon: evidence.length > 0 ? "✓" : "−",
-        text:
-          evidence.length > 0
-            ? `Found ${evidence.length} relevant snippet${
-                evidence.length === 1 ? "" : "s"
-              }`
-            : "No relevant snippets found",
-      };
-    }
-    case "search_library_items": {
-      const count = Array.isArray(normalized?.results)
-        ? normalized.results.length
-        : 0;
-      return {
-        kind: count > 0 ? "ok" : "skip",
-        icon: count > 0 ? "✓" : "−",
-        text:
-          count > 0
-            ? `Found ${count} matching paper${count === 1 ? "" : "s"} in your library`
-            : "No matching papers found in the library",
-      };
-    }
-    case "audit_article_metadata": {
-      const suggestions = Array.isArray(normalized?.suggestions)
-        ? normalized.suggestions
-        : [];
-      const includesCreators = suggestions.some(
-        (entry) =>
-          isAgentTraceRecord(entry) && readAgentTraceText(entry.field) === "creators",
-      );
-      return {
-        kind: suggestions.length > 0 ? "ok" : "skip",
-        icon: suggestions.length > 0 ? "✓" : "−",
-        text:
-          suggestions.length > 0
-            ? includesCreators
-              ? `Identified ${suggestions.length} metadata update${
-                  suggestions.length === 1 ? "" : "s"
-                }, including the author list`
-              : `Identified ${suggestions.length} metadata update${
-                  suggestions.length === 1 ? "" : "s"
-                }`
-            : "The metadata already looks complete from the available evidence",
-      };
-    }
-    case "search_pdf_pages": {
-      const count = Array.isArray(normalized?.pages) ? normalized.pages.length : 0;
-      return {
-        kind: count > 0 ? "ok" : "skip",
-        icon: count > 0 ? "✓" : "−",
-        text:
-          count > 0
-            ? `Located ${count} relevant PDF page${count === 1 ? "" : "s"}`
-            : "Could not find relevant PDF pages",
-      };
-    }
-    case "prepare_pdf_pages_for_model": {
-      const count = Array.isArray(normalized?.pages) ? normalized.pages.length : 0;
-      return {
-        kind: count > 0 ? "ok" : "skip",
-        icon: count > 0 ? "✓" : "−",
-        text:
-          count > 0
-            ? `Prepared ${count} PDF page image${count === 1 ? "" : "s"} for inspection`
-            : "Could not prepare PDF page images",
-      };
-    }
-    case "prepare_pdf_file_for_model":
-      return {
-        kind: "ok",
-        icon: "✓",
-        text: "Prepared the whole PDF for direct model reading",
-      };
-    case "read_paper_excerpt":
-      return {
-        kind: "ok",
-        icon: "✓",
-        text: "Opened the strongest supporting passage",
-      };
-    case "read_attachment_text":
-      return {
-        kind: "ok",
-        icon: "✓",
-        text: "Read the attached file",
-      };
-    case "read_paper_front_matter":
-      return {
-        kind: "ok",
-        icon: "✓",
-        text: "Checked the opening paper metadata text",
-      };
-    case "save_answer_to_note": {
-      const status = readAgentTraceText(normalized?.status);
-      return {
-        kind: "ok",
-        icon: "✓",
-        text:
-          status === "appended"
-            ? "Saved the note to the current item"
-            : status === "standalone_created"
-              ? "Saved the note as a standalone note"
-            : "Saved the note",
-      };
-    }
-    case "edit_article_metadata": {
-      const changedFields = Array.isArray(normalized?.changedFields)
-        ? normalized.changedFields
-        : [];
-      return {
-        kind: "ok",
-        icon: "✓",
-        text:
-          changedFields.length > 0
-            ? `Applied ${changedFields.length} metadata change${
-                changedFields.length === 1 ? "" : "s"
-              }`
-            : "Applied the metadata changes",
-      };
-    }
-    default:
-      return null;
-  }
+  const isEmpty = toolContentLooksEmpty(content);
+  const text =
+    resolveToolPresentationSummary(
+      isEmpty
+        ? getToolDefinition(name)?.presentation?.summaries?.onEmpty
+        : getToolDefinition(name)?.presentation?.summaries?.onSuccess,
+      { label, content, request },
+    ) ||
+    resolveToolPresentationSummary(
+      getToolDefinition(name)?.presentation?.summaries?.onSuccess,
+      { label, content, request },
+    ) ||
+    `${isEmpty ? "No results from" : "Completed"} ${label}`;
+  return {
+    kind: isEmpty ? "skip" : "ok",
+    icon: isEmpty ? "-" : "✓",
+    text,
+  };
 }
 
 function getNextMeaningfulPayload(
@@ -905,97 +720,27 @@ function getNextMeaningfulPayload(
   return null;
 }
 
-function getFirstToolName(events: AgentRunEventRecord[]): string | null {
-  const toolCall = events.find((entry) => entry.payload.type === "tool_call");
-  return toolCall?.payload.type === "tool_call" ? toolCall.payload.name : null;
-}
-
-function buildInitialAgentMessage(
-  requestChips: AgentTraceChip[],
-  firstToolName: string | null,
-): string {
-  if (firstToolName === "save_answer_to_note") {
-    return requestChips.length
-      ? "I’ve got your request and the attached context. I’ll draft the note first, then show it to you before I save anything."
-      : "I’ve got your request. I’ll draft the note first, then show it to you before I save anything.";
-  }
-  if (firstToolName === "edit_article_metadata") {
-    return requestChips.length
-      ? "I’ve got your request and the attached context. I’ll review the article metadata first, then show you the proposed changes before I apply them."
-      : "I’ve got your request. I’ll review the article metadata first, then show you the proposed changes before I apply them.";
-  }
-  if (firstToolName === "audit_article_metadata") {
-    return requestChips.length
-      ? "I’ve got your request and the attached context. I’ll audit the article metadata first, then show you the proposed changes before I apply them."
-      : "I’ve got your request. I’ll audit the article metadata first, then show you the proposed changes before I apply them.";
-  }
-  if (firstToolName === "search_pdf_pages") {
-    return requestChips.length
-      ? "I’ve got your question and the attached context. I’ll identify the relevant PDF pages first, then inspect them directly before I answer."
-      : "I’ve got your question. I’ll identify the relevant PDF pages first, then inspect them directly before I answer.";
-  }
-  if (firstToolName === "prepare_pdf_pages_for_model") {
-    return "I’ve got your question. I’m preparing the requested PDF pages so I can inspect them visually before I answer.";
-  }
-  if (firstToolName === "prepare_pdf_file_for_model") {
-    return "I’ve got your request. I’ll prepare the full PDF for direct inspection, then continue once you approve it.";
-  }
+function buildInitialAgentMessage(requestChips: AgentTraceChip[]): string {
   return requestChips.length
-    ? "I’ve got your question and the attached context. I’m checking that first so I can ground the answer properly."
-    : "I’ve got your question. I’m checking the current context first.";
+    ? "I've got your question and the attached context. I'm checking that first so I can ground the answer properly."
+    : "I've got your question. I'm checking the current context first.";
 }
 
 function buildToolFollowUpMessage(
-  toolName: string,
+  _toolName: string,
   nextPayload: AgentRunEventPayload | null,
 ): string | null {
   if (!nextPayload) return null;
   if (nextPayload.type === "tool_call") {
-    switch (nextPayload.name) {
-      case "retrieve_paper_evidence":
-        return toolName === "get_active_context" ||
-          toolName === "list_paper_contexts"
-          ? "I know which sources are in scope now, so I’m pulling the strongest evidence next."
-          : "I have the right lead, so I’m pulling the strongest evidence next.";
-      case "read_paper_excerpt":
-        return "I found a useful lead, and I want to inspect the exact passage next.";
-      case "read_paper_front_matter":
-        return "I need to verify the paper header next so I can check the metadata directly.";
-      case "search_library_items":
-        return "I know what I need now, so I’m searching your library next.";
-      case "audit_article_metadata":
-        return "I know which article is in scope now, so I’m auditing the metadata field by field next.";
-      case "search_pdf_pages":
-        return "I know which PDF is in scope now, so I’m locating the most relevant pages next.";
-      case "prepare_pdf_pages_for_model":
-        return "I found the right pages, so I’m preparing them for visual inspection next.";
-      case "prepare_pdf_file_for_model":
-        return "This looks like a full-document request, so I’m preparing the whole PDF next.";
-      case "read_attachment_text":
-        return "I’ve narrowed it down, so I’m opening the attached file next.";
-      case "save_answer_to_note":
-        return "I have what I need, so I’m turning it into a note draft next.";
-      case "edit_article_metadata":
-        return "I know what should change now, so I’m preparing the metadata updates next.";
-      default:
-        return `I’m ready for the next step, so I’m using ${formatAgentTraceToolName(
-          nextPayload.name,
-        )} next.`;
-    }
+    return `I'm ready for the next step, so I'm using ${toolLabelFromName(
+      nextPayload.name,
+    )} next.`;
   }
   if (nextPayload.type === "confirmation_required") {
-    return nextPayload.action.toolName === "save_answer_to_note"
-      ? "I’ve prepared the draft. Review or edit it below, then choose where you want me to save it."
-      : nextPayload.action.toolName === "edit_article_metadata"
-        ? "I’ve prepared the metadata updates. Review or edit them below, then apply them if they look right."
-        : nextPayload.action.toolName === "prepare_pdf_pages_for_model"
-          ? "I’ve prepared the PDF pages. Review them below, adjust the page list if needed, then apply when you want me to send them."
-          : nextPayload.action.toolName === "prepare_pdf_file_for_model"
-            ? "I’ve prepared the whole PDF for model input. Review the action below, then apply if you want me to continue."
-      : "I’m ready for the next action. Review it below and approve if you want me to continue.";
+    return "I'm ready for the next action. Review it below and approve if you want me to continue.";
   }
   if (nextPayload.type === "message_delta") {
-    return "I have enough grounded information now, so I’m drafting the answer next.";
+    return "I have enough grounded information now, so I'm drafting the answer next.";
   }
   if (nextPayload.type === "final") {
     return "I have what I need now, so I can answer directly.";
@@ -1021,22 +766,22 @@ function compactAgentTraceEvents(
   return compact;
 }
 
-function buildAgentTraceDisplayItems(
+export function buildAgentTraceDisplayItems(
   events: AgentRunEventRecord[],
   userMessage: Message | null | undefined,
 ): AgentTraceDisplayItem[] {
   const items: AgentTraceDisplayItem[] = [];
   const compactedEvents = compactAgentTraceEvents(events);
   const requestChips = buildAgentTraceRequestChips(userMessage);
+  const requestSummary = buildAgentTraceRequestSummary(userMessage);
   const confirmationToolNames = new Map<string, string>();
-  const firstToolName = getFirstToolName(compactedEvents);
   let announcedReadyToAnswer = false;
   let announcedWriting = false;
 
   items.push({
     type: "message",
     tone: "neutral",
-    text: buildInitialAgentMessage(requestChips, firstToolName),
+    text: buildInitialAgentMessage(requestChips),
   });
   items.push({
     type: "action",
@@ -1059,7 +804,11 @@ function buildAgentTraceDisplayItems(
       case "tool_call":
         items.push({
           type: "action",
-          row: summarizeAgentTraceToolCall(entry.payload.name),
+          row: summarizeAgentTraceToolCall(
+            entry.payload.name,
+            entry.payload.args,
+            requestSummary,
+          ),
           chips: buildAgentTraceToolChips(
             entry.payload.name,
             entry.payload.args,
@@ -1072,6 +821,7 @@ function buildAgentTraceDisplayItems(
           entry.payload.name,
           entry.payload.ok,
           entry.payload.content,
+          requestSummary,
         );
         if (row) {
           items.push({
@@ -1100,71 +850,43 @@ function buildAgentTraceDisplayItems(
         items.push({
           type: "message",
           tone: "warning",
-          text:
-            entry.payload.action.toolName === "save_answer_to_note"
-              ? "I drafted the note. Review or edit it below, then tell me where you want me to save it."
-              : entry.payload.action.toolName === "edit_article_metadata"
-                ? "I drafted the metadata updates. Review or edit them below, then apply them if they look right."
-                : entry.payload.action.toolName === "prepare_pdf_pages_for_model"
-                  ? "I picked the PDF pages I need. Review them below, edit the page list if needed, then apply when you want me to continue."
-                  : entry.payload.action.toolName === "prepare_pdf_file_for_model"
-                    ? "I’m ready to send the whole PDF. Review the action below, then apply if you want me to continue."
-              : "I’m ready for the next action, but I need your approval before I continue.",
+          text: "I'm ready for the next action, but I need your approval before I continue.",
         });
         items.push({
           type: "action",
           row: summarizeAgentTraceConfirmationRequest(
             entry.payload.action.toolName,
+            requestSummary,
           ),
         });
         break;
-      case "confirmation_resolved":
+      case "confirmation_resolved": {
+        const toolName =
+          confirmationToolNames.get(entry.payload.requestId) || "action";
         items.push({
           type: "action",
           row: summarizeAgentTraceConfirmationResolved(
-            confirmationToolNames.get(entry.payload.requestId) || "",
+            toolName,
             entry.payload.approved,
+            requestSummary,
           ),
         });
         items.push({
           type: "message",
           tone: entry.payload.approved ? "neutral" : "warning",
           text: entry.payload.approved
-            ? confirmationToolNames.get(entry.payload.requestId) ===
-              "save_answer_to_note"
-              ? "Thanks — I’m saving the edited draft now."
-              : confirmationToolNames.get(entry.payload.requestId) ===
-                  "edit_article_metadata"
-                ? "Thanks — I’m applying those metadata changes now."
-                : confirmationToolNames.get(entry.payload.requestId) ===
-                    "prepare_pdf_pages_for_model"
-                  ? "Thanks — I’m sending those PDF pages to the model now."
-                  : confirmationToolNames.get(entry.payload.requestId) ===
-                      "prepare_pdf_file_for_model"
-                    ? "Thanks — I’m sending the whole PDF to the model now."
-              : "Thanks — I’m continuing with that action now."
-            : confirmationToolNames.get(entry.payload.requestId) ===
-                "save_answer_to_note"
-              ? "No problem — I left the note unchanged."
-              : confirmationToolNames.get(entry.payload.requestId) ===
-                  "edit_article_metadata"
-                ? "No problem — I left the metadata unchanged."
-                : confirmationToolNames.get(entry.payload.requestId) ===
-                    "prepare_pdf_pages_for_model"
-                  ? "No problem — I did not send those PDF pages."
-                  : confirmationToolNames.get(entry.payload.requestId) ===
-                      "prepare_pdf_file_for_model"
-                    ? "No problem — I did not send the whole PDF."
-              : "No problem — I stopped there.",
+            ? "Thanks - I'm continuing with that action now."
+            : "No problem - I stopped there.",
         });
         break;
+      }
       case "message_delta":
         if (!announcedReadyToAnswer) {
           announcedReadyToAnswer = true;
           items.push({
             type: "message",
             tone: "neutral",
-            text: "I have what I need now, so I’m turning it into a direct answer.",
+            text: "I have enough grounded information now, so I'm turning it into a direct answer.",
           });
         }
         if (!announcedWriting) {
@@ -1193,7 +915,7 @@ function buildAgentTraceDisplayItems(
         items.push({
           type: "message",
           tone: "warning",
-          text: "Tool use isn’t available for this model here, so I’m answering directly instead.",
+          text: entry.payload.reason,
         });
         break;
     }
