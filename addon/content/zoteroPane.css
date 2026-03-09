@@ -1871,7 +1871,8 @@
 }
 
 .llm-agent-trace-card,
-.llm-agent-trace-code {
+.llm-agent-trace-code,
+.llm-agent-hitl-card {
   margin: 6px 0 0;
   padding: 8px;
   border-radius: 6px;
@@ -1991,27 +1992,32 @@
   color: var(--fill-secondary);
 }
 
-.llm-agent-confirm {
+.llm-agent-hitl-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid color-mix(in srgb, var(--stroke-secondary) 70%, transparent);
 }
 
-.llm-agent-confirm-title {
+.llm-agent-hitl-header {
+  font-size: var(--llm-fs-10);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fill-tertiary);
+}
+
+.llm-agent-hitl-title {
   font-size: var(--llm-fs-11);
   font-weight: 600;
   color: var(--fill-primary);
 }
 
-.llm-agent-confirm-label {
+.llm-agent-hitl-label {
   font-size: var(--llm-fs-10);
   color: var(--fill-tertiary);
 }
 
-.llm-agent-confirm-input {
+.llm-agent-hitl-input {
   width: 100%;
   min-height: 108px;
   max-height: 260px;
@@ -2027,22 +2033,22 @@
   color: var(--fill-primary);
 }
 
-.llm-agent-confirm-input:focus {
+.llm-agent-hitl-input:focus {
   outline: none;
   border-color: var(--color-accent);
 }
 
-.llm-agent-confirm-input:disabled {
+.llm-agent-hitl-input:disabled {
   opacity: 0.7;
 }
 
-.llm-agent-confirm-actions {
+.llm-agent-hitl-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.llm-agent-confirm-btn {
+.llm-agent-hitl-btn {
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
@@ -2052,21 +2058,21 @@
   color: #fff;
 }
 
-.llm-agent-confirm-btn-alt {
+.llm-agent-hitl-btn-alt {
   border-color: color-mix(in srgb, var(--color-accent) 70%, white 30%);
   background: color-mix(in srgb, var(--color-accent) 18%, transparent);
   color: var(--fill-primary);
 }
 
-.llm-agent-confirm-btn-secondary {
+.llm-agent-hitl-btn-secondary {
   border-color: var(--stroke-secondary);
   background: transparent;
   color: var(--fill-secondary);
 }
 
-.llm-agent-confirm-btn:disabled,
-.llm-agent-confirm-btn-alt:disabled,
-.llm-agent-confirm-btn-secondary:disabled {
+.llm-agent-hitl-btn:disabled,
+.llm-agent-hitl-btn-alt:disabled,
+.llm-agent-hitl-btn-secondary:disabled {
   opacity: 0.6;
 }
 

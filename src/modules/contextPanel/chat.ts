@@ -836,6 +836,104 @@ function getPendingWriteTargets(
   ];
 }
 
+function renderPendingWriteActionCard(
+  doc: Document,
+  pending: { requestId: string; action: PendingWriteAction },
+): HTMLDivElement {
+  const card = doc.createElement("div");
+  card.className = "llm-agent-hitl-card";
+
+  const header = doc.createElement("div");
+  header.className = "llm-agent-hitl-header";
+  header.textContent = "Action required";
+  card.appendChild(header);
+
+  const title = doc.createElement("div");
+  title.className = "llm-agent-hitl-title";
+  title.textContent = pending.action.title;
+  card.appendChild(title);
+
+  const contentLabel = doc.createElement("label");
+  contentLabel.className = "llm-agent-hitl-label";
+  contentLabel.textContent = pending.action.contentLabel || "Content";
+  card.appendChild(contentLabel);
+
+  const editor = doc.createElement("textarea");
+  editor.className = "llm-agent-hitl-input";
+  editor.value = getPendingWriteEditableContent(pending.action);
+  editor.spellcheck = true;
+  const resizeEditor = () => {
+    editor.style.height = "auto";
+    editor.style.height = `${Math.min(editor.scrollHeight, 260)}px`;
+  };
+  resizeEditor();
+  editor.addEventListener("input", resizeEditor);
+  card.appendChild(editor);
+
+  const actionRow = doc.createElement("div");
+  actionRow.className = "llm-agent-hitl-actions";
+  const saveTargets = getPendingWriteTargets(pending.action);
+  const defaultTargetId =
+    saveTargets.find((entry) => entry.id === pending.action.defaultTargetId)?.id ||
+    saveTargets[0]?.id ||
+    "default";
+  const buttons: HTMLButtonElement[] = [];
+  const setButtonsDisabled = (disabled: boolean) => {
+    editor.disabled = disabled;
+    for (const button of buttons) {
+      button.disabled = disabled;
+    }
+  };
+  const syncSaveButtons = () => {
+    const hasContent = editor.value.trim().length > 0;
+    for (const button of buttons) {
+      if (button.dataset.kind === "save") {
+        button.disabled = !hasContent;
+      }
+    }
+  };
+  const handleSave = (targetId: string) => {
+    setButtonsDisabled(true);
+    getAgentRuntime().resolveConfirmation(pending.requestId, true, {
+      content: editor.value,
+      target: targetId === "default" ? undefined : targetId,
+    });
+  };
+
+  for (const target of saveTargets) {
+    const saveButton = doc.createElement("button");
+    saveButton.type = "button";
+    saveButton.dataset.kind = "save";
+    saveButton.className =
+      target.id === defaultTargetId
+        ? "llm-agent-hitl-btn"
+        : "llm-agent-hitl-btn llm-agent-hitl-btn-alt";
+    saveButton.textContent = target.label;
+    saveButton.addEventListener("click", () => {
+      handleSave(target.id);
+    });
+    buttons.push(saveButton);
+    actionRow.appendChild(saveButton);
+  }
+
+  const cancelButton = doc.createElement("button");
+  cancelButton.type = "button";
+  cancelButton.dataset.kind = "cancel";
+  cancelButton.className = "llm-agent-hitl-btn llm-agent-hitl-btn-secondary";
+  cancelButton.textContent = pending.action.cancelLabel || "Cancel";
+  cancelButton.addEventListener("click", () => {
+    setButtonsDisabled(true);
+    getAgentRuntime().resolveConfirmation(pending.requestId, false);
+  });
+  buttons.push(cancelButton);
+  actionRow.appendChild(cancelButton);
+  card.appendChild(actionRow);
+  syncSaveButtons();
+  editor.addEventListener("input", syncSaveButtons);
+
+  return card;
+}
+
 const AGENT_TRACE_TOOL_LABELS: Record<string, string> = {
   get_active_context: "Inspect Context",
   list_paper_contexts: "List Papers",
@@ -1121,6 +1219,7 @@ function renderAgentTrace(
     summaryRows.length === 1 ? "" : "s"
   })`;
   processDetails.appendChild(processSummary);
+  const pending = getPendingWriteConfirmation(events);
   const card = doc.createElement("div");
   card.className = "llm-agent-trace-card";
   const list = doc.createElement("div");
@@ -1138,98 +1237,12 @@ function renderAgentTrace(
     list.appendChild(row);
   }
   card.appendChild(list);
-  const pending = getPendingWriteConfirmation(events);
-  if (pending) {
-    const confirm = doc.createElement("div");
-    confirm.className = "llm-agent-confirm";
-
-    const title = doc.createElement("div");
-    title.className = "llm-agent-confirm-title";
-    title.textContent = pending.action.title;
-    confirm.appendChild(title);
-
-    const contentLabel = doc.createElement("label");
-    contentLabel.className = "llm-agent-confirm-label";
-    contentLabel.textContent = pending.action.contentLabel || "Content";
-    confirm.appendChild(contentLabel);
-
-    const editor = doc.createElement("textarea");
-    editor.className = "llm-agent-confirm-input";
-    editor.value = getPendingWriteEditableContent(pending.action);
-    editor.spellcheck = true;
-    const resizeEditor = () => {
-      editor.style.height = "auto";
-      editor.style.height = `${Math.min(editor.scrollHeight, 260)}px`;
-    };
-    resizeEditor();
-    editor.addEventListener("input", resizeEditor);
-    confirm.appendChild(editor);
-
-    const actionRow = doc.createElement("div");
-    actionRow.className = "llm-agent-confirm-actions";
-    const saveTargets = getPendingWriteTargets(pending.action);
-    const defaultTargetId =
-      saveTargets.find((entry) => entry.id === pending.action.defaultTargetId)?.id ||
-      saveTargets[0]?.id ||
-      "default";
-    const buttons: HTMLButtonElement[] = [];
-    const setButtonsDisabled = (disabled: boolean) => {
-      editor.disabled = disabled;
-      for (const button of buttons) {
-        button.disabled = disabled;
-      }
-    };
-    const syncSaveButtons = () => {
-      const hasContent = editor.value.trim().length > 0;
-      for (const button of buttons) {
-        if (button.dataset.kind === "save") {
-          button.disabled = !hasContent;
-        }
-      }
-    };
-    const handleSave = (targetId: string) => {
-      setButtonsDisabled(true);
-      getAgentRuntime().resolveConfirmation(pending.requestId, true, {
-        content: editor.value,
-        target: targetId === "default" ? undefined : targetId,
-      });
-    };
-
-    for (const target of saveTargets) {
-      const saveButton = doc.createElement("button");
-      saveButton.type = "button";
-      saveButton.dataset.kind = "save";
-      saveButton.className =
-        target.id === defaultTargetId
-          ? "llm-agent-confirm-btn"
-          : "llm-agent-confirm-btn llm-agent-confirm-btn-alt";
-      saveButton.textContent = target.label;
-      saveButton.addEventListener("click", () => {
-        handleSave(target.id);
-      });
-      buttons.push(saveButton);
-      actionRow.appendChild(saveButton);
-    }
-
-    const cancelButton = doc.createElement("button");
-    cancelButton.type = "button";
-    cancelButton.dataset.kind = "cancel";
-    cancelButton.className =
-      "llm-agent-confirm-btn llm-agent-confirm-btn-secondary";
-    cancelButton.textContent = pending.action.cancelLabel || "Cancel";
-    cancelButton.addEventListener("click", () => {
-      setButtonsDisabled(true);
-      getAgentRuntime().resolveConfirmation(pending.requestId, false);
-    });
-    buttons.push(cancelButton);
-    actionRow.appendChild(cancelButton);
-    confirm.appendChild(actionRow);
-    syncSaveButtons();
-    editor.addEventListener("input", syncSaveButtons);
-    card.appendChild(confirm);
-  }
   processDetails.appendChild(card);
   wrap.appendChild(processDetails);
+
+  if (pending) {
+    wrap.appendChild(renderPendingWriteActionCard(doc, pending));
+  }
 
   const details = doc.createElement("details");
   details.className = "llm-agent-trace-details";
