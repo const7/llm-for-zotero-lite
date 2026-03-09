@@ -117,6 +117,7 @@ import { buildChatHistoryNotePayload } from "./notes";
 import { extractManagedBlobHash } from "./attachmentStorage";
 import { buildContextPlanSystemMessages } from "./requestSystemMessages";
 import { canEditUserPromptTurn } from "./editability";
+import { renderAgentTrace } from "./agentTrace/render";
 import { toFileUrl } from "../../utils/pathFileUrl";
 import { replaceOwnerAttachmentRefs } from "../../utils/attachmentRefStore";
 import { decorateAssistantCitationLinks } from "./assistantCitationLinks";
@@ -126,7 +127,6 @@ import type {
   AgentEvent,
   AgentRunEventRecord,
   AgentRuntimeRequest,
-  PendingWriteAction,
 } from "../../agent/types";
 
 /** Get AbortController constructor from global scope */
@@ -776,630 +776,6 @@ function getCachedAgentRunEvents(runId: string | undefined): AgentRunEventRecord
   return agentRunTraceCache.get(normalizedRunId) || [];
 }
 
-function getPendingWriteConfirmation(
-  events: AgentRunEventRecord[],
-): { requestId: string; action: PendingWriteAction } | null {
-  const pending = new Map<string, PendingWriteAction>();
-  for (const entry of events) {
-    if (entry.payload.type === "confirmation_required") {
-      pending.set(entry.payload.requestId, entry.payload.action);
-      continue;
-    }
-    if (entry.payload.type === "confirmation_resolved") {
-      pending.delete(entry.payload.requestId);
-    }
-  }
-  const last = Array.from(pending.entries()).pop();
-  if (!last) return null;
-  return {
-    requestId: last[0],
-    action: last[1],
-  };
-}
-
-function getPendingWriteEditableContent(action: PendingWriteAction): string {
-  if (typeof action.editableContent === "string") {
-    return action.editableContent;
-  }
-  const args = isAgentTraceRecord(action.args) ? action.args : null;
-  return typeof args?.content === "string" ? args.content : "";
-}
-
-function getPendingWriteTargets(
-  action: PendingWriteAction,
-): Array<{ id: string; label: string }> {
-  if (Array.isArray(action.saveTargets) && action.saveTargets.length) {
-    return action.saveTargets
-      .filter(
-        (
-          entry,
-        ): entry is {
-          id: string;
-          label: string;
-        } =>
-          Boolean(entry) &&
-          typeof entry.id === "string" &&
-          entry.id.trim().length > 0 &&
-          typeof entry.label === "string" &&
-          entry.label.trim().length > 0,
-      )
-      .map((entry) => ({
-        id: entry.id.trim(),
-        label: entry.label.trim(),
-      }));
-  }
-  return [
-    {
-      id: "default",
-      label: action.confirmLabel || "Approve",
-    },
-  ];
-}
-
-function renderPendingWriteActionCard(
-  doc: Document,
-  pending: { requestId: string; action: PendingWriteAction },
-): HTMLDivElement {
-  const card = doc.createElement("div");
-  card.className = "llm-agent-hitl-card";
-
-  const header = doc.createElement("div");
-  header.className = "llm-agent-hitl-header";
-  header.textContent = "Action required";
-  card.appendChild(header);
-
-  const title = doc.createElement("div");
-  title.className = "llm-agent-hitl-title";
-  title.textContent = pending.action.title;
-  card.appendChild(title);
-
-  const contentLabel = doc.createElement("label");
-  contentLabel.className = "llm-agent-hitl-label";
-  contentLabel.textContent = pending.action.contentLabel || "Content";
-  card.appendChild(contentLabel);
-
-  const editor = doc.createElement("textarea");
-  editor.className = "llm-agent-hitl-input";
-  editor.value = getPendingWriteEditableContent(pending.action);
-  editor.spellcheck = true;
-  const resizeEditor = () => {
-    editor.style.height = "auto";
-    editor.style.height = `${Math.min(editor.scrollHeight, 260)}px`;
-  };
-  resizeEditor();
-  editor.addEventListener("input", resizeEditor);
-  card.appendChild(editor);
-
-  const actionRow = doc.createElement("div");
-  actionRow.className = "llm-agent-hitl-actions";
-  const saveTargets = getPendingWriteTargets(pending.action);
-  const defaultTargetId =
-    saveTargets.find((entry) => entry.id === pending.action.defaultTargetId)?.id ||
-    saveTargets[0]?.id ||
-    "default";
-  const buttons: HTMLButtonElement[] = [];
-  const setButtonsDisabled = (disabled: boolean) => {
-    editor.disabled = disabled;
-    for (const button of buttons) {
-      button.disabled = disabled;
-    }
-  };
-  const syncSaveButtons = () => {
-    const hasContent = editor.value.trim().length > 0;
-    for (const button of buttons) {
-      if (button.dataset.kind === "save") {
-        button.disabled = !hasContent;
-      }
-    }
-  };
-  const handleSave = (targetId: string) => {
-    setButtonsDisabled(true);
-    getAgentRuntime().resolveConfirmation(pending.requestId, true, {
-      content: editor.value,
-      target: targetId === "default" ? undefined : targetId,
-    });
-  };
-
-  for (const target of saveTargets) {
-    const saveButton = doc.createElement("button");
-    saveButton.type = "button";
-    saveButton.dataset.kind = "save";
-    saveButton.className =
-      target.id === defaultTargetId
-        ? "llm-agent-hitl-btn"
-        : "llm-agent-hitl-btn llm-agent-hitl-btn-alt";
-    saveButton.textContent = target.label;
-    saveButton.addEventListener("click", () => {
-      handleSave(target.id);
-    });
-    buttons.push(saveButton);
-    actionRow.appendChild(saveButton);
-  }
-
-  const cancelButton = doc.createElement("button");
-  cancelButton.type = "button";
-  cancelButton.dataset.kind = "cancel";
-  cancelButton.className = "llm-agent-hitl-btn llm-agent-hitl-btn-secondary";
-  cancelButton.textContent = pending.action.cancelLabel || "Cancel";
-  cancelButton.addEventListener("click", () => {
-    setButtonsDisabled(true);
-    getAgentRuntime().resolveConfirmation(pending.requestId, false);
-  });
-  buttons.push(cancelButton);
-  actionRow.appendChild(cancelButton);
-  card.appendChild(actionRow);
-  syncSaveButtons();
-  editor.addEventListener("input", syncSaveButtons);
-
-  return card;
-}
-
-const AGENT_TRACE_TOOL_LABELS: Record<string, string> = {
-  get_active_context: "Inspect Context",
-  list_paper_contexts: "List Papers",
-  retrieve_paper_evidence: "Retrieve Evidence",
-  read_paper_excerpt: "Read Excerpt",
-  search_library_items: "Search Library",
-  read_attachment_text: "Read Attachment",
-  save_answer_to_note: "Save to Note",
-};
-
-function isAgentTraceRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function readAgentTraceText(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function truncateAgentTraceText(value: unknown, max = 88): string {
-  const raw = readAgentTraceText(value) || `${value ?? ""}`;
-  const normalized = sanitizeText(raw).replace(/\s+/g, " ").trim();
-  if (normalized.length <= max) return normalized;
-  return `${normalized.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
-}
-
-function formatAgentTraceToolName(name: string): string {
-  const mapped = AGENT_TRACE_TOOL_LABELS[name];
-  if (mapped) return mapped;
-  return name
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-type AgentTraceSummaryKind = "plan" | "tool" | "ok" | "skip" | "done";
-
-type AgentTraceSummaryRow = {
-  kind: AgentTraceSummaryKind;
-  icon: string;
-  text: string;
-};
-
-function summarizeAgentTraceStatus(text: string | undefined): AgentTraceSummaryRow {
-  const raw = readAgentTraceText(text)?.toLowerCase() || "";
-  if (raw.includes("continuing")) {
-    return {
-      kind: "plan",
-      icon: "↻",
-      text: "Working through the next step",
-    };
-  }
-  return {
-    kind: "plan",
-    icon: "↻",
-    text: "Reviewing your request",
-  };
-}
-
-function summarizeAgentTraceToolCall(name: string): AgentTraceSummaryRow {
-  switch (name) {
-    case "get_active_context":
-      return {
-        kind: "tool",
-        icon: "◎",
-        text: "Checking the current Zotero context",
-      };
-    case "list_paper_contexts":
-      return {
-        kind: "tool",
-        icon: "▣",
-        text: "Reviewing the papers in scope",
-      };
-    case "retrieve_paper_evidence":
-      return {
-        kind: "tool",
-        icon: "⌕",
-        text: "Searching the paper for relevant evidence",
-      };
-    case "read_paper_excerpt":
-      return {
-        kind: "tool",
-        icon: "¶",
-        text: "Opening the most relevant passage",
-      };
-    case "search_library_items":
-      return {
-        kind: "tool",
-        icon: "⌕",
-        text: "Searching your library",
-      };
-    case "read_attachment_text":
-      return {
-        kind: "tool",
-        icon: "≣",
-        text: "Reading the attached file",
-      };
-    case "save_answer_to_note":
-      return {
-        kind: "tool",
-        icon: "✎",
-        text: "Preparing a note draft",
-      };
-    default:
-      return {
-        kind: "tool",
-        icon: "✦",
-        text: `Using ${formatAgentTraceToolName(name)}`,
-      };
-  }
-}
-
-function summarizeAgentTraceConfirmationRequest(
-  toolName: string,
-): AgentTraceSummaryRow {
-  if (toolName === "save_answer_to_note") {
-    return {
-      kind: "plan",
-      icon: "⌛",
-      text: "Waiting for your approval to save the note",
-    };
-  }
-  return {
-    kind: "plan",
-    icon: "⌛",
-    text: `Waiting for your approval to continue with ${formatAgentTraceToolName(
-      toolName,
-    )}`,
-  };
-}
-
-function summarizeAgentTraceConfirmationResolved(
-  toolName: string,
-  approved: boolean,
-): AgentTraceSummaryRow {
-  if (approved) {
-    return {
-      kind: "ok",
-      icon: "✓",
-      text:
-        toolName === "save_answer_to_note"
-          ? "Approval received; saving the note"
-          : "Approval received; continuing",
-    };
-  }
-  return {
-    kind: "skip",
-    icon: "✕",
-    text:
-      toolName === "save_answer_to_note"
-        ? "Note save cancelled"
-        : "Action cancelled",
-  };
-}
-
-function summarizeAgentTraceToolResult(
-  name: string,
-  ok: boolean,
-  content: unknown,
-): AgentTraceSummaryRow | null {
-  const normalized = isAgentTraceRecord(content) ? content : null;
-  if (!ok) {
-    const rawError = readAgentTraceText(normalized?.error);
-    if (rawError?.toLowerCase() === "user denied action") {
-      return null;
-    }
-    const errorText =
-      rawError || `Tool failed: ${formatAgentTraceToolName(name)}`;
-    return {
-      kind: "skip",
-      icon: "!",
-      text: truncateAgentTraceText(
-        `Could not complete ${formatAgentTraceToolName(name)}: ${errorText}`,
-        92,
-      ),
-    };
-  }
-
-  switch (name) {
-    case "retrieve_paper_evidence": {
-      const evidence = Array.isArray(normalized?.evidence) ? normalized.evidence : [];
-      return {
-        kind: evidence.length > 0 ? "ok" : "skip",
-        icon: evidence.length > 0 ? "✓" : "!",
-        text:
-          evidence.length > 0
-            ? `Collected ${evidence.length} relevant snippet${
-                evidence.length === 1 ? "" : "s"
-              }`
-            : "No relevant snippets found",
-      };
-    }
-    case "search_library_items": {
-      const count = Array.isArray(normalized?.results)
-        ? normalized.results.length
-        : 0;
-      return {
-        kind: count > 0 ? "ok" : "skip",
-        icon: count > 0 ? "✓" : "!",
-        text:
-          count > 0
-            ? `Found ${count} matching paper${count === 1 ? "" : "s"} in your library`
-            : "No matching papers found in the library",
-      };
-    }
-    case "save_answer_to_note": {
-      const status = readAgentTraceText(normalized?.status);
-      return {
-        kind: "ok",
-        icon: "✓",
-        text:
-          status === "appended"
-            ? "Saved the note to the current item"
-            : status === "standalone_created"
-              ? "Saved the note as a standalone note"
-              : "Saved the note",
-      };
-    }
-    default:
-      return null;
-  }
-}
-
-function compactAgentTraceEvents(
-  events: AgentRunEventRecord[],
-): AgentRunEventRecord[] {
-  const compact: AgentRunEventRecord[] = [];
-  for (const entry of events) {
-    const previous = compact[compact.length - 1];
-    if (
-      entry.payload.type === "message_delta" &&
-      previous?.payload.type === "message_delta"
-    ) {
-      compact[compact.length - 1] = entry;
-      continue;
-    }
-    compact.push(entry);
-  }
-  return compact;
-}
-
-function pushAgentTraceSummaryRow(
-  rows: AgentTraceSummaryRow[],
-  next: AgentTraceSummaryRow | null,
-): void {
-  if (!next) return;
-  const previous = rows[rows.length - 1];
-  if (
-    previous &&
-    previous.kind === next.kind &&
-    previous.text === next.text &&
-    previous.icon === next.icon
-  ) {
-    return;
-  }
-  rows.push(next);
-}
-
-function buildAgentTraceSummaryRows(
-  events: AgentRunEventRecord[],
-): AgentTraceSummaryRow[] {
-  const rows: AgentTraceSummaryRow[] = [];
-  const confirmationToolNames = new Map<string, string>();
-  let sawRunning = false;
-  let sawTool = false;
-  let sawPreparationComplete = false;
-  let sawDrafting = false;
-
-  for (const entry of compactAgentTraceEvents(events)) {
-    switch (entry.payload.type) {
-      case "status":
-        if (!sawRunning) {
-          sawRunning = true;
-          pushAgentTraceSummaryRow(
-            rows,
-            summarizeAgentTraceStatus(entry.payload.text),
-          );
-        }
-        break;
-      case "tool_call":
-        sawTool = true;
-        pushAgentTraceSummaryRow(
-          rows,
-          summarizeAgentTraceToolCall(entry.payload.name),
-        );
-        break;
-      case "tool_result":
-        pushAgentTraceSummaryRow(
-          rows,
-          summarizeAgentTraceToolResult(
-            entry.payload.name,
-            entry.payload.ok,
-            entry.payload.content,
-          ),
-        );
-        break;
-      case "confirmation_required":
-        confirmationToolNames.set(
-          entry.payload.requestId,
-          entry.payload.action.toolName,
-        );
-        pushAgentTraceSummaryRow(
-          rows,
-          summarizeAgentTraceConfirmationRequest(
-            entry.payload.action.toolName,
-          ),
-        );
-        break;
-      case "confirmation_resolved":
-        pushAgentTraceSummaryRow(
-          rows,
-          summarizeAgentTraceConfirmationResolved(
-            confirmationToolNames.get(entry.payload.requestId) || "",
-            entry.payload.approved,
-          ),
-        );
-        break;
-      case "message_delta":
-        if (sawTool && !sawPreparationComplete) {
-          sawPreparationComplete = true;
-          pushAgentTraceSummaryRow(rows, {
-            kind: "ok",
-            icon: "✓",
-            text: "Preparation finished",
-          });
-        }
-        if (!sawDrafting) {
-          sawDrafting = true;
-          pushAgentTraceSummaryRow(rows, {
-            kind: "plan",
-            icon: "✎",
-            text: "Writing the response",
-          });
-        }
-        break;
-      case "final":
-        pushAgentTraceSummaryRow(rows, {
-          kind: "done",
-          icon: "✓",
-          text: "Response ready",
-        });
-        break;
-      case "fallback":
-        pushAgentTraceSummaryRow(rows, {
-          kind: "skip",
-          icon: "!",
-          text: "Tool use is unavailable for this model, so I answered directly",
-        });
-        break;
-    }
-  }
-
-  if (!rows.length) {
-    rows.push({
-      kind: "plan",
-      icon: "↻",
-      text: "Reviewing your request",
-    });
-  }
-
-  return rows;
-}
-
-function renderAgentTrace(
-  doc: Document,
-  body: Element,
-  item: Zotero.Item,
-  message: Message,
-): HTMLElement | null {
-  const runId = message.agentRunId?.trim();
-  if (!runId) return null;
-  const events = getCachedAgentRunEvents(runId);
-  if (!events.length) {
-    void ensureAgentRunTraceLoaded(runId, body, item);
-    const loading = doc.createElement("div");
-    loading.className = "llm-agent-trace";
-    const processDetails = doc.createElement("details");
-    processDetails.className = "llm-agent-trace-details";
-    processDetails.open = true;
-    const processSummary = doc.createElement("summary");
-    processSummary.textContent = "Process";
-    processDetails.appendChild(processSummary);
-    const loadingCard = doc.createElement("div");
-    loadingCard.className = "llm-agent-trace-card";
-    const loadingRow = doc.createElement("div");
-    loadingRow.className = "llm-at-row llm-at-row-plan";
-    const loadingIcon = doc.createElement("span");
-    loadingIcon.className = "llm-at-icon";
-    loadingIcon.textContent = "...";
-    const loadingText = doc.createElement("span");
-    loadingText.className = "llm-at-text llm-at-plan-text";
-    loadingText.textContent = "Loading agent trace...";
-    loadingRow.append(loadingIcon, loadingText);
-    loadingCard.appendChild(loadingRow);
-    processDetails.appendChild(loadingCard);
-    loading.appendChild(processDetails);
-    return loading;
-  }
-
-  const wrap = doc.createElement("div");
-  wrap.className = "llm-agent-trace";
-  const header = doc.createElement("div");
-  header.className = "llm-agent-trace-header";
-  header.textContent = "Agent trace";
-  wrap.appendChild(header);
-
-  const processDetails = doc.createElement("details");
-  processDetails.className = "llm-agent-trace-details";
-  processDetails.open = true;
-  const processSummary = doc.createElement("summary");
-  const summaryRows = buildAgentTraceSummaryRows(events);
-  processSummary.textContent = `Process (${summaryRows.length} step${
-    summaryRows.length === 1 ? "" : "s"
-  })`;
-  processDetails.appendChild(processSummary);
-  const pending = getPendingWriteConfirmation(events);
-  const card = doc.createElement("div");
-  card.className = "llm-agent-trace-card";
-  const list = doc.createElement("div");
-  list.className = "llm-agent-trace-list";
-  for (const summaryRow of summaryRows) {
-    const row = doc.createElement("div");
-    row.className = `llm-at-row llm-at-row-${summaryRow.kind}`;
-    const icon = doc.createElement("span");
-    icon.className = "llm-at-icon";
-    icon.textContent = summaryRow.icon;
-    const text = doc.createElement("span");
-    text.className = `llm-at-text llm-at-${summaryRow.kind}-text`;
-    text.textContent = summaryRow.text;
-    row.append(icon, text);
-    list.appendChild(row);
-  }
-  card.appendChild(list);
-  processDetails.appendChild(card);
-  wrap.appendChild(processDetails);
-
-  if (pending) {
-    wrap.appendChild(renderPendingWriteActionCard(doc, pending));
-  }
-
-  const details = doc.createElement("details");
-  details.className = "llm-agent-trace-details";
-  const summary = doc.createElement("summary");
-  summary.textContent = `Details (${events.length} event${events.length === 1 ? "" : "s"})`;
-  details.appendChild(summary);
-  const pre = doc.createElement("pre");
-  pre.className = "llm-agent-trace-code";
-  pre.textContent = events
-    .map((entry) =>
-      JSON.stringify(
-        {
-          seq: entry.seq,
-          type: entry.payload.type,
-          payload: entry.payload,
-        },
-        null,
-        2,
-      ),
-    )
-    .join("\n\n");
-  details.appendChild(pre);
-  wrap.appendChild(details);
-
-  return wrap;
-}
-
 export function detectReasoningProvider(
   modelName: string,
 ): ReasoningProviderKind {
@@ -1806,6 +1182,12 @@ function createQueuedRefresh(refresh: () => void): () => void {
       refresh();
     }, 50);
   };
+}
+
+function waitForUiStep(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
 export type LatestRetryPair = {
@@ -3029,6 +2411,7 @@ async function sendAgentQuestion(
         assistantMessage.agentRunId = runId;
         userMessage.agentRunId = runId;
         agentRunTraceCache.set(runId, []);
+        refreshChatSafely();
         await updateStoredLatestUserMessage(conversationKey, {
           text: userMessage.text,
           timestamp: userMessage.timestamp,
@@ -3066,7 +2449,12 @@ async function sendAgentQuestion(
           default:
             break;
         }
-        queueRefresh();
+        if (event.type === "message_delta") {
+          queueRefresh();
+          return;
+        }
+        refreshChatSafely();
+        await waitForUiStep();
       },
     });
 
@@ -4243,8 +3631,25 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
     } else {
       const hasModelName = Boolean(msg.modelName?.trim());
       const hasAnswerText = Boolean(msg.text);
+      const previousUserMessage =
+        index > 0 && history[index - 1]?.role === "user"
+          ? history[index - 1]
+          : null;
+      const agentRunId = msg.agentRunId?.trim();
       const agentTraceEl =
-        msg.runMode === "agent" ? renderAgentTrace(doc, body, item, msg) : null;
+        msg.runMode === "agent"
+          ? renderAgentTrace({
+              doc,
+              message: msg,
+              userMessage: previousUserMessage,
+              events: getCachedAgentRunEvents(agentRunId),
+              onTraceMissing: agentRunId
+                ? () => {
+                    void ensureAgentRunTraceLoaded(agentRunId, body, item);
+                  }
+                : undefined,
+            })
+          : null;
       if (hasAnswerText) {
         const safeText = sanitizeText(msg.text);
         if (msg.streaming) bubble.classList.add("streaming");
