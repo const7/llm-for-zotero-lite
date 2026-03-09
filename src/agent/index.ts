@@ -16,6 +16,7 @@ import type {
   AgentToolDefinition,
 } from "./types";
 import type { PaperContextRef, ChatAttachment } from "../modules/contextPanel/types";
+import { isGlobalPortalItem } from "../modules/contextPanel/portalScope";
 
 let runtime: AgentRuntime | null = null;
 
@@ -86,6 +87,8 @@ function findAttachment(
   }
   return null;
 }
+
+type NoteSaveTarget = "item" | "standalone";
 
 function createToolRegistry(): AgentToolRegistry {
   const registry = new AgentToolRegistry();
@@ -403,6 +406,10 @@ function createToolRegistry(): AgentToolRegistry {
         properties: {
           content: { type: "string" },
           modelName: { type: "string" },
+          target: {
+            type: "string",
+            enum: ["item", "standalone"],
+          },
         },
       },
       mutability: "write",
@@ -421,22 +428,73 @@ function createToolRegistry(): AgentToolRegistry {
           typeof args.modelName === "string" && args.modelName.trim()
             ? args.modelName.trim()
             : undefined,
+        target:
+          args.target === "standalone" || args.target === "item"
+            ? (args.target as NoteSaveTarget)
+            : undefined,
       });
     },
     createPendingWriteAction: (input: {
       content: string;
       modelName?: string;
-    }) => ({
-      toolName: "save_answer_to_note",
-      args: input,
-      title: `Save to note: ${input.content.slice(0, 72)}${input.content.length > 72 ? "..." : ""}`,
-      confirmLabel: "Approve",
-      cancelLabel: "Cancel",
-    }),
+      target?: NoteSaveTarget;
+    }, context) => {
+      const isPaperChat = Boolean(context.item && !isGlobalPortalItem(context.item));
+      const saveTargets = isPaperChat
+        ? [
+            { id: "item", label: "Save as item note" },
+            { id: "standalone", label: "Save as standalone note" },
+          ]
+        : [{ id: "standalone", label: "Save as standalone note" }];
+      return {
+        toolName: "save_answer_to_note",
+        args: input,
+        title: "Review note content",
+        confirmLabel: saveTargets[0]?.label || "Save note",
+        cancelLabel: "Cancel",
+        editableContent: input.content,
+        contentLabel: "Note content",
+        saveTargets,
+        defaultTargetId:
+          input.target ||
+          (isPaperChat ? "item" : "standalone"),
+      };
+    },
+    applyConfirmation: (
+      input: {
+        content: string;
+        modelName?: string;
+        target?: NoteSaveTarget;
+      },
+      resolutionData: unknown,
+    ) => {
+      if (!validateObject<Record<string, unknown>>(resolutionData)) {
+        return ok(input);
+      }
+      const content =
+        typeof resolutionData.content === "string" &&
+        resolutionData.content.trim()
+          ? resolutionData.content.trim()
+          : input.content;
+      const target =
+        resolutionData.target === "standalone" ||
+        resolutionData.target === "item"
+          ? (resolutionData.target as NoteSaveTarget)
+          : input.target;
+      if (!content) {
+        return fail("content is required");
+      }
+      return ok({
+        ...input,
+        content,
+        target,
+      });
+    },
     execute: async (
       input: {
         content: string;
         modelName?: string;
+        target?: NoteSaveTarget;
       },
       context,
     ) => {
@@ -444,8 +502,10 @@ function createToolRegistry(): AgentToolRegistry {
         zoteroGateway.getItem(context.request.activeItemId) || context.item;
       const result = await zoteroGateway.saveAnswerToNote({
         item,
+        libraryID: context.request.libraryID,
         content: input.content,
         modelName: input.modelName || context.modelName,
+        target: input.target,
       });
       return {
         status: result,
@@ -486,7 +546,10 @@ export function getAgentApi() {
     getCapabilities: (request: AgentRuntimeRequest) =>
       getAgentRuntime().getCapabilities(request),
     getRunTrace: (runId: string) => getAgentRunTrace(runId),
-    resolveConfirmation: (requestId: string, approved: boolean) =>
-      getAgentRuntime().resolveConfirmation(requestId, approved),
+    resolveConfirmation: (
+      requestId: string,
+      approved: boolean,
+      data?: unknown,
+    ) => getAgentRuntime().resolveConfirmation(requestId, approved, data),
   };
 }

@@ -1870,12 +1870,17 @@
   gap: 6px;
 }
 
-.llm-agent-trace-card {
+.llm-agent-trace-card,
+.llm-agent-trace-code {
   margin: 6px 0 0;
   padding: 8px;
   border-radius: 6px;
   background: color-mix(in srgb, var(--material-background) 84%, black 16%);
   color: var(--fill-secondary);
+}
+
+.llm-agent-trace-card {
+  white-space: normal;
 }
 
 .llm-agent-trace-header {
@@ -1977,14 +1982,10 @@
 }
 
 .llm-agent-trace-code {
-  margin: 6px 0 0;
-  padding: 8px;
   max-height: 180px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--material-background) 84%, black 16%);
   font-size: var(--llm-fs-10);
   line-height: 1.35;
   color: var(--fill-secondary);
@@ -1992,16 +1993,53 @@
 
 .llm-agent-confirm {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--stroke-secondary) 70%, transparent);
 }
 
 .llm-agent-confirm-title {
-  flex: 1 1 100%;
   font-size: var(--llm-fs-11);
-  color: var(--fill-secondary);
+  font-weight: 600;
+  color: var(--fill-primary);
+}
+
+.llm-agent-confirm-label {
+  font-size: var(--llm-fs-10);
+  color: var(--fill-tertiary);
+}
+
+.llm-agent-confirm-input {
+  width: 100%;
+  min-height: 108px;
+  max-height: 260px;
+  resize: vertical;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--llm-fs-11);
+  line-height: 1.45;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--stroke-secondary);
+  background: var(--fill-quaternary);
+  color: var(--fill-primary);
+}
+
+.llm-agent-confirm-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.llm-agent-confirm-input:disabled {
+  opacity: 0.7;
+}
+
+.llm-agent-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .llm-agent-confirm-btn {
@@ -2014,10 +2052,22 @@
   color: #fff;
 }
 
+.llm-agent-confirm-btn-alt {
+  border-color: color-mix(in srgb, var(--color-accent) 70%, white 30%);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--fill-primary);
+}
+
 .llm-agent-confirm-btn-secondary {
   border-color: var(--stroke-secondary);
   background: transparent;
   color: var(--fill-secondary);
+}
+
+.llm-agent-confirm-btn:disabled,
+.llm-agent-confirm-btn-alt:disabled,
+.llm-agent-confirm-btn-secondary:disabled {
+  opacity: 0.6;
 }
 
 /* Typing Indicator */

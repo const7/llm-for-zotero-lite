@@ -1,5 +1,6 @@
 import { AgentToolRegistry } from "./tools/registry";
 import type {
+  AgentConfirmationResolution,
   AgentEvent,
   AgentModelMessage,
   AgentRuntimeOutcome,
@@ -22,7 +23,7 @@ type AgentRuntimeDeps = {
 };
 
 type PendingConfirmation = {
-  resolve: (approved: boolean) => void;
+  resolve: (resolution: AgentConfirmationResolution) => void;
 };
 
 function createRunId(): string {
@@ -53,11 +54,25 @@ export class AgentRuntime {
     return this.adapterFactory(request).getCapabilities(request);
   }
 
-  resolveConfirmation(requestId: string, approved: boolean): boolean {
+  resolveConfirmation(
+    requestId: string,
+    approvedOrResolution: boolean | AgentConfirmationResolution,
+    data?: unknown,
+  ): boolean {
     const pending = this.pendingConfirmations.get(requestId);
     if (!pending) return false;
     this.pendingConfirmations.delete(requestId);
-    pending.resolve(Boolean(approved));
+    const resolution =
+      typeof approvedOrResolution === "boolean"
+        ? {
+            approved: approvedOrResolution,
+            data,
+          }
+        : {
+            approved: Boolean(approvedOrResolution.approved),
+            data: approvedOrResolution.data,
+          };
+    pending.resolve(resolution);
     return true;
   }
 
@@ -175,7 +190,7 @@ export class AgentRuntime {
         });
         let toolResult: AgentToolResult;
         if (execution.kind === "confirmation") {
-          const approval = new Promise<boolean>((resolve) => {
+          const approval = new Promise<AgentConfirmationResolution>((resolve) => {
             this.pendingConfirmations.set(execution.requestId, { resolve });
           });
           await emit({
@@ -183,13 +198,16 @@ export class AgentRuntime {
             requestId: execution.requestId,
             action: execution.action,
           });
-          const approved = await approval;
+          const resolution = await approval;
           await emit({
             type: "confirmation_resolved",
             requestId: execution.requestId,
-            approved,
+            approved: resolution.approved,
+            data: resolution.data,
           });
-          toolResult = approved ? await execution.execute() : execution.deny();
+          toolResult = resolution.approved
+            ? await execution.execute(resolution.data)
+            : execution.deny(resolution.data);
         } else {
           toolResult = execution.result;
         }

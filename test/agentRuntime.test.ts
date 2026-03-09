@@ -150,7 +150,33 @@ describe("AgentRuntime", function () {
           confirmLabel: "Approve",
           cancelLabel: "Cancel",
         }),
-        execute: async () => ({ status: "created" }),
+        applyConfirmation: (input, resolutionData) => {
+          if (!resolutionData || typeof resolutionData !== "object") {
+            return { ok: true, value: input };
+          }
+          const data = resolutionData as {
+            content?: unknown;
+            target?: unknown;
+          };
+          return {
+            ok: true,
+            value: {
+              content:
+                typeof data.content === "string" && data.content.trim()
+                  ? data.content.trim()
+                  : input.content,
+              target:
+                data.target === "item" || data.target === "standalone"
+                  ? data.target
+                  : "item",
+            },
+          };
+        },
+        execute: async (input) => ({
+          status: "created",
+          saved: input.content,
+          target: input.target,
+        }),
       });
 
       const runtime = new AgentRuntime({
@@ -209,7 +235,10 @@ describe("AgentRuntime", function () {
         onEvent: async (event) => {
           events.push(event);
           if (event.type === "confirmation_required") {
-            runtime.resolveConfirmation(event.requestId, true);
+            runtime.resolveConfirmation(event.requestId, true, {
+              content: "edited hello",
+              target: "standalone",
+            });
           }
         },
       });
@@ -220,6 +249,19 @@ describe("AgentRuntime", function () {
       assert.equal(outcome.text, "Saved.");
       assert.isTrue(events.some((event) => event.type === "tool_call"));
       assert.isTrue(events.some((event) => event.type === "tool_result"));
+      const toolResultEvent = events.find(
+        (event) => event.type === "tool_result",
+      );
+      assert.deepEqual(
+        toolResultEvent && toolResultEvent.type === "tool_result"
+          ? toolResultEvent.content
+          : null,
+        {
+          status: "created",
+          saved: "edited hello",
+          target: "standalone",
+        },
+      );
       assert.isTrue(
         events.some(
           (event) =>
@@ -231,4 +273,3 @@ describe("AgentRuntime", function () {
     }
   });
 });
-

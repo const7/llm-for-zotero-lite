@@ -2,7 +2,10 @@ import {
   searchPaperCandidates,
   type PaperSearchGroupCandidate,
 } from "../../modules/contextPanel/paperSearch";
-import { createNoteFromAssistantText } from "../../modules/contextPanel/notes";
+import {
+  createNoteFromAssistantText,
+  createStandaloneNoteFromAssistantText,
+} from "../../modules/contextPanel/notes";
 import {
   getActiveContextAttachmentFromTabs,
   resolveContextSourceItem,
@@ -90,11 +93,25 @@ export class ZoteroGateway {
 
   async saveAnswerToNote(params: {
     item: Zotero.Item | null;
+    libraryID?: number;
     content: string;
     modelName: string;
-  }): Promise<"created" | "appended"> {
+    target?: "item" | "standalone";
+  }): Promise<"created" | "appended" | "standalone_created"> {
+    if (params.target === "standalone") {
+      const libraryID =
+        Number.isFinite(params.libraryID) && (params.libraryID as number) > 0
+          ? Math.floor(params.libraryID as number)
+          : params.item?.libraryID || 0;
+      await createStandaloneNoteFromAssistantText(
+        libraryID,
+        params.content,
+        params.modelName,
+      );
+      return "standalone_created";
+    }
     if (!params.item) {
-      throw new Error("No Zotero item is active for note creation");
+      throw new Error("No Zotero item is active for item-note creation");
     }
     return createNoteFromAssistantText(
       params.item,
@@ -103,4 +120,3 @@ export class ZoteroGateway {
     );
   }
 }
-

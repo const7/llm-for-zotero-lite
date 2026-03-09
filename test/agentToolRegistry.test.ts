@@ -51,8 +51,36 @@ describe("AgentToolRegistry", function () {
         title: "Save note?",
         confirmLabel: "Approve",
         cancelLabel: "Cancel",
+        editableContent: input.content,
+        saveTargets: [
+          { id: "item", label: "Save as item note" },
+          { id: "standalone", label: "Save as standalone note" },
+        ],
+        defaultTargetId: "item",
       }),
-      execute: async (input) => ({ saved: input.content }),
+      applyConfirmation: (input, resolutionData) => {
+        if (!resolutionData || typeof resolutionData !== "object") {
+          return { ok: true, value: input };
+        }
+        const data = resolutionData as {
+          content?: unknown;
+          target?: unknown;
+        };
+        return {
+          ok: true,
+          value: {
+            content:
+              typeof data.content === "string" && data.content.trim()
+                ? data.content.trim()
+                : input.content,
+            target:
+              data.target === "item" || data.target === "standalone"
+                ? data.target
+                : "item",
+          },
+        };
+      },
+      execute: async (input) => ({ saved: input.content, target: input.target }),
     });
 
     const result = await registry.prepareExecution(
@@ -68,9 +96,15 @@ describe("AgentToolRegistry", function () {
     if (result.kind !== "confirmation") return;
     assert.equal(result.action.toolName, "save_answer_to_note");
     assert.equal(result.deny().ok, false);
-    const approved = await result.execute();
+    const approved = await result.execute({
+      content: "edited hello",
+      target: "standalone",
+    });
     assert.equal(approved.ok, true);
-    assert.deepEqual(approved.content, { saved: "hello" });
+    assert.deepEqual(approved.content, {
+      saved: "edited hello",
+      target: "standalone",
+    });
   });
 
   it("tracks MCP-style resources and prompts separately from tools", function () {

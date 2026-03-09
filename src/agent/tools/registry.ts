@@ -87,6 +87,65 @@ export class AgentToolRegistry {
     }
 
     const runExecution = async () => {
+      const runWithInput = async (resolvedInput: typeof validation.value) => {
+        try {
+          const content = await tool.execute(resolvedInput, context);
+          return {
+            callId: call.id,
+            name: call.name,
+            ok: true,
+            content,
+          };
+        } catch (error) {
+          return {
+            callId: call.id,
+            name: call.name,
+            ok: false,
+            content: {
+              error: error instanceof Error ? error.message : String(error),
+            },
+          };
+        }
+      };
+      return runWithInput(validation.value);
+    };
+
+    const runConfirmedExecution = async (resolutionData?: unknown) => {
+      if (resolutionData !== undefined && tool.applyConfirmation) {
+        const resolved = tool.applyConfirmation(
+          validation.value,
+          resolutionData,
+          context,
+        );
+        if (!resolved.ok) {
+          return {
+            callId: call.id,
+            name: call.name,
+            ok: false,
+            content: {
+              error: `Invalid confirmation input for ${call.name}: ${resolved.error}`,
+            },
+          };
+        }
+        try {
+          const content = await tool.execute(resolved.value, context);
+          return {
+            callId: call.id,
+            name: call.name,
+            ok: true,
+            content,
+          };
+        } catch (error) {
+          return {
+            callId: call.id,
+            name: call.name,
+            ok: false,
+            content: {
+              error: error instanceof Error ? error.message : String(error),
+            },
+          };
+        }
+      }
       try {
         const content = await tool.execute(validation.value, context);
         return {
@@ -113,7 +172,7 @@ export class AgentToolRegistry {
         kind: "confirmation",
         requestId,
         action: tool.createPendingWriteAction(validation.value, context),
-        execute: runExecution,
+        execute: runConfirmedExecution,
         deny: () => ({
           callId: call.id,
           name: call.name,

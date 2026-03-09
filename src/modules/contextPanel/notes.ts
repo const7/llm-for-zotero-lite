@@ -449,6 +449,25 @@ export async function createNoteFromAssistantText(
   return "created";
 }
 
+export async function createStandaloneNoteFromAssistantText(
+  libraryID: number,
+  contentText: string,
+  modelName: string,
+): Promise<"created"> {
+  const normalizedLibraryID = Number.isFinite(libraryID)
+    ? Math.floor(libraryID)
+    : 0;
+  if (normalizedLibraryID <= 0) {
+    throw new Error("Invalid library ID for standalone note creation");
+  }
+  const html = buildAssistantNoteHtml(contentText, modelName);
+  const note = new Zotero.Item("note");
+  note.libraryID = normalizedLibraryID;
+  note.setNote(html);
+  await note.saveTx();
+  return "created";
+}
+
 export async function createNoteFromChatHistory(
   item: Zotero.Item,
   history: Message[],

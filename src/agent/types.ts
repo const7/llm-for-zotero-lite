@@ -30,6 +30,18 @@ export type PendingWriteAction = {
   title: string;
   confirmLabel: string;
   cancelLabel: string;
+  editableContent?: string;
+  contentLabel?: string;
+  saveTargets?: Array<{
+    id: string;
+    label: string;
+  }>;
+  defaultTargetId?: string;
+};
+
+export type AgentConfirmationResolution = {
+  approved: boolean;
+  data?: unknown;
 };
 
 export type ToolSpec = {
@@ -61,7 +73,12 @@ export type AgentEvent =
   | { type: "tool_call"; callId: string; name: string; args: unknown }
   | { type: "tool_result"; callId: string; name: string; ok: boolean; content: unknown }
   | { type: "confirmation_required"; requestId: string; action: PendingWriteAction }
-  | { type: "confirmation_resolved"; requestId: string; approved: boolean }
+  | {
+      type: "confirmation_resolved";
+      requestId: string;
+      approved: boolean;
+      data?: unknown;
+    }
   | { type: "message_delta"; text: string }
   | { type: "fallback"; reason: string }
   | { type: "final"; text: string };
@@ -194,6 +211,11 @@ export type AgentToolDefinition<TInput = unknown, TResult = unknown> = {
     input: TInput,
     context: AgentToolContext,
   ) => PendingWriteAction;
+  applyConfirmation?: (
+    input: TInput,
+    resolutionData: unknown,
+    context: AgentToolContext,
+  ) => AgentToolInputValidation<TInput>;
 };
 
 export type AgentResourceDefinition<TValue = unknown> = {
@@ -215,6 +237,6 @@ export type PreparedToolExecution =
       kind: "confirmation";
       requestId: string;
       action: PendingWriteAction;
-      execute: () => Promise<AgentToolResult>;
-      deny: () => AgentToolResult;
+      execute: (resolutionData?: unknown) => Promise<AgentToolResult>;
+      deny: (resolutionData?: unknown) => AgentToolResult;
     };
