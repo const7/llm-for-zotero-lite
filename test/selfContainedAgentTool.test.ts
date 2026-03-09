@@ -174,7 +174,15 @@ describe("self-contained agent tool", function () {
     assert.exists(pending);
     assert.deepEqual(
       pending?.fields.map((field) => field.type),
-      ["textarea", "text", "select", "review_table", "image_gallery"],
+      [
+        "textarea",
+        "text",
+        "select",
+        "checklist",
+        "assignment_table",
+        "review_table",
+        "image_gallery",
+      ],
     );
   });
 
@@ -197,12 +205,25 @@ describe("self-contained agent tool", function () {
           if (event.type === "confirmation_required") {
             assert.deepEqual(
               event.action.fields.map((field) => field.type),
-              ["textarea", "text", "select", "review_table", "image_gallery"],
+              [
+                "textarea",
+                "text",
+                "select",
+                "checklist",
+                "assignment_table",
+                "review_table",
+                "image_gallery",
+              ],
             );
             runtime.resolveConfirmation(event.requestId, true, {
               content: "approved demo",
               note: "kept",
               target: "secondary",
+              selectedItemIds: ["demo-1"],
+              assignments: [
+                { id: "demo-1", value: "secondary", checked: true },
+                { id: "demo-2", value: "__skip__", checked: false },
+              ],
             });
           }
         },

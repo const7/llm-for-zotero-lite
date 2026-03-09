@@ -73,6 +73,33 @@ export type AgentPendingField =
         mimeType?: string;
         title?: string;
       }>;
+    }
+  | {
+      type: "checklist";
+      id: string;
+      label: string;
+      items: Array<{
+        id: string;
+        label: string;
+        description?: string;
+        checked?: boolean;
+      }>;
+    }
+  | {
+      type: "assignment_table";
+      id: string;
+      label: string;
+      options: Array<{
+        id: string;
+        label: string;
+      }>;
+      rows: Array<{
+        id: string;
+        label: string;
+        description?: string;
+        value?: string;
+        checked?: boolean;
+      }>;
     };
 
 export type AgentPendingAction = {

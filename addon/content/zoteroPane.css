@@ -2203,6 +2203,113 @@
   color: var(--fill-primary);
 }
 
+.llm-agent-hitl-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.llm-agent-hitl-checklist-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.llm-agent-hitl-checklist-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.llm-agent-hitl-checklist-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: var(--fill-quaternary);
+  border: 1px solid var(--stroke-secondary);
+}
+
+.llm-agent-hitl-checklist-checkbox {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.llm-agent-hitl-checklist-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.llm-agent-hitl-checklist-title {
+  font-size: var(--llm-fs-10);
+  font-weight: 600;
+  color: var(--fill-primary);
+}
+
+.llm-agent-hitl-checklist-description {
+  font-size: var(--llm-fs-10);
+  line-height: 1.4;
+  color: var(--fill-secondary);
+  white-space: pre-wrap;
+}
+
+.llm-agent-hitl-assignment-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.llm-agent-hitl-assignment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(132px, 42%);
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: var(--fill-quaternary);
+  border: 1px solid var(--stroke-secondary);
+}
+
+.llm-agent-hitl-assignment-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.llm-agent-hitl-assignment-title {
+  font-size: var(--llm-fs-10);
+  font-weight: 600;
+  color: var(--fill-primary);
+}
+
+.llm-agent-hitl-assignment-description {
+  font-size: var(--llm-fs-10);
+  line-height: 1.4;
+  color: var(--fill-secondary);
+  white-space: pre-wrap;
+}
+
+.llm-agent-hitl-assignment-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.llm-agent-hitl-assignment-select-label {
+  font-size: var(--llm-fs-10);
+  color: var(--fill-secondary);
+}
+
+.llm-agent-hitl-assignment-select {
+  width: 100%;
+  min-width: 0;
+}
+
 .llm-agent-hitl-actions {
   display: flex;
   flex-wrap: wrap;

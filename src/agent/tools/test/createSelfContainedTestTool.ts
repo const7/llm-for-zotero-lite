@@ -96,6 +96,49 @@ export function createSelfContainedTestTool(): AgentToolDefinition<
           ],
         },
         {
+          type: "checklist",
+          id: "selectedItemIds",
+          label: "Demo checklist",
+          items: [
+            {
+              id: "demo-1",
+              label: "Demo item 1",
+              description: "Checklist example item",
+              checked: true,
+            },
+            {
+              id: "demo-2",
+              label: "Demo item 2",
+              checked: false,
+            },
+          ],
+        },
+        {
+          type: "assignment_table",
+          id: "assignments",
+          label: "Demo assignment table",
+          options: [
+            { id: "__skip__", label: "Skip for now" },
+            { id: "primary", label: "Primary" },
+            { id: "secondary", label: "Secondary" },
+          ],
+          rows: [
+            {
+              id: "demo-1",
+              label: "Demo paper 1",
+              description: "Suggested destination is Primary",
+              value: "primary",
+              checked: true,
+            },
+            {
+              id: "demo-2",
+              label: "Demo paper 2",
+              value: "__skip__",
+              checked: false,
+            },
+          ],
+        },
+        {
           type: "review_table",
           id: "review",
           rows: [

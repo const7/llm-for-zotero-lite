@@ -1,5 +1,9 @@
 import {
+  browsePaperCollectionCandidates,
+  invalidatePaperSearchCache,
+  listLibraryPaperCandidates,
   searchPaperCandidates,
+  type PaperBrowseCollectionCandidate,
   type PaperSearchGroupCandidate,
 } from "../../modules/contextPanel/paperSearch";
 import {
@@ -65,8 +69,65 @@ export type EditableArticleMetadataSnapshot = {
   creators: EditableArticleCreator[];
 };
 
+export type LibraryPaperTargetAttachment = {
+  contextItemId: number;
+  title: string;
+};
+
+export type LibraryPaperTarget = {
+  itemId: number;
+  title: string;
+  firstCreator?: string;
+  year?: string;
+  attachments: LibraryPaperTargetAttachment[];
+  tags: string[];
+  collectionIds: number[];
+};
+
+export type CollectionBrowseNode = {
+  collectionId: number;
+  name: string;
+  paperCount: number;
+  descendantPaperCount: number;
+  childCollections: CollectionBrowseNode[];
+};
+
+export type CollectionSummary = {
+  collectionId: number;
+  name: string;
+  libraryID: number;
+  path?: string;
+};
+
+export type BatchTagItemResult = {
+  itemId: number;
+  title: string;
+  status: "updated" | "skipped" | "missing";
+  addedTags: string[];
+  skippedTags: string[];
+  reason?: string;
+};
+
+export type BatchMoveItemResult = {
+  itemId: number;
+  title: string;
+  status: "moved" | "skipped" | "missing";
+  targetCollectionId?: number;
+  targetCollectionName?: string;
+  reason?: string;
+};
+
+export type BatchMoveAssignment = {
+  itemId: number;
+  targetCollectionId: number;
+};
+
 function normalizeMetadataValue(value: unknown): string {
   return `${value ?? ""}`.trim();
+}
+
+function normalizeText(value: unknown): string {
+  return `${value ?? ""}`.replace(/\s+/g, " ").trim();
 }
 
 function resolveRegularItem(item: Zotero.Item | null | undefined): Zotero.Item | null {
@@ -177,10 +238,262 @@ function normalizePaperContexts(
   return out;
 }
 
+function getCollectionIDs(item: Zotero.Item | null | undefined): number[] {
+  if (!item) return [];
+  try {
+    return item
+      .getCollections()
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0)
+      .map((id) => Math.floor(id));
+  } catch (_error) {
+    void _error;
+    return [];
+  }
+}
+
+function resolveLibraryDisplayName(libraryID: number): string {
+  try {
+    const libraries = (Zotero as unknown as {
+      Libraries?: {
+        getName?: (targetLibraryID: number) => unknown;
+        get?: (targetLibraryID: number) => { name?: unknown } | null | undefined;
+      };
+    }).Libraries;
+    const directName = normalizeText(libraries?.getName?.(libraryID));
+    if (directName) return directName;
+    const library = libraries?.get?.(libraryID);
+    const objectName = normalizeText(library?.name);
+    if (objectName) return objectName;
+  } catch (_error) {
+    void _error;
+  }
+  return "My Library";
+}
+
+function getPdfChildAttachments(item: Zotero.Item): Zotero.Item[] {
+  const out: Zotero.Item[] = [];
+  if (!item?.isRegularItem?.()) return out;
+  for (const attachmentId of item.getAttachments()) {
+    const attachment = Zotero.Items.get(attachmentId) || null;
+    if (
+      attachment &&
+      attachment.isAttachment?.() &&
+      attachment.attachmentContentType === "application/pdf"
+    ) {
+      out.push(attachment);
+    }
+  }
+  return out;
+}
+
+function resolveAttachmentTitle(
+  attachment: Zotero.Item,
+  index: number,
+  total: number,
+): string {
+  const title = normalizeText(attachment.getField?.("title"));
+  if (title) return title;
+  const filename = normalizeText(
+    (attachment as unknown as { attachmentFilename?: string }).attachmentFilename,
+  );
+  if (filename) return filename;
+  return total > 1 ? `PDF ${index + 1}` : "PDF";
+}
+
+function getItemTags(item: Zotero.Item | null | undefined): string[] {
+  if (!item) return [];
+  try {
+    const out = (item.getTags?.() || [])
+      .map((entry) => normalizeText(entry?.tag))
+      .filter(Boolean);
+    return Array.from(new Set(out)).sort((left, right) =>
+      left.localeCompare(right, undefined, { sensitivity: "base" }),
+    );
+  } catch (_error) {
+    void _error;
+    return [];
+  }
+}
+
+function buildPaperTargetFromItem(item: Zotero.Item): LibraryPaperTarget | null {
+  const target = resolveRegularItem(item);
+  if (!target) return null;
+  const attachments = getPdfChildAttachments(target).map((attachment, index, list) => ({
+    contextItemId: attachment.id,
+    title: resolveAttachmentTitle(attachment, index, list.length),
+  }));
+  if (!attachments.length) return null;
+  return {
+    itemId: target.id,
+    title:
+      normalizeText(target.getField?.("title")) ||
+      normalizeText(target.getDisplayTitle?.()) ||
+      `Item ${target.id}`,
+    firstCreator:
+      normalizeText(target.firstCreator) ||
+      normalizeText(target.getField?.("firstCreator")) ||
+      undefined,
+    year:
+      normalizeText(target.getField?.("date")).match(/\b(19|20)\d{2}\b/)?.[0] ||
+      undefined,
+    attachments,
+    tags: getItemTags(target),
+    collectionIds: getCollectionIDs(target),
+  };
+}
+
+function summarizeCollectionNode(
+  candidate: PaperBrowseCollectionCandidate,
+): CollectionBrowseNode {
+  const childCollections = candidate.childCollections.map((entry) =>
+    summarizeCollectionNode(entry),
+  );
+  const paperCount = candidate.papers.length;
+  const descendantPaperCount =
+    paperCount +
+    childCollections.reduce((sum, entry) => sum + entry.descendantPaperCount, 0);
+  return {
+    collectionId: candidate.collectionId,
+    name: normalizeText(candidate.name) || `Collection ${candidate.collectionId}`,
+    paperCount,
+    descendantPaperCount,
+    childCollections,
+  };
+}
+
+function listLibraryCollections(libraryID: number): Zotero.Collection[] {
+  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
+  try {
+    return Zotero.Collections.getByLibrary(Math.floor(libraryID), true) || [];
+  } catch (_error) {
+    void _error;
+    return [];
+  }
+}
+
+function buildCollectionPathMap(
+  collections: Zotero.Collection[],
+): Map<number, string> {
+  const byId = new Map<number, Zotero.Collection>();
+  const pathById = new Map<number, string>();
+  for (const collection of collections) {
+    byId.set(collection.id, collection);
+  }
+  const resolvePath = (collectionId: number): string => {
+    const cached = pathById.get(collectionId);
+    if (cached) return cached;
+    const collection = byId.get(collectionId);
+    if (!collection) return "";
+    const name = normalizeText(collection.name) || `Collection ${collection.id}`;
+    const parentId = Number(collection.parentID);
+    if (!Number.isFinite(parentId) || parentId <= 0 || !byId.has(parentId)) {
+      pathById.set(collectionId, name);
+      return name;
+    }
+    const path = `${resolvePath(Math.floor(parentId))} / ${name}`;
+    pathById.set(collectionId, path);
+    return path;
+  };
+  for (const collection of collections) {
+    resolvePath(collection.id);
+  }
+  return pathById;
+}
+
 export class ZoteroGateway {
   getItem(itemId: number | undefined): Zotero.Item | null {
     if (!Number.isFinite(itemId) || !itemId || itemId <= 0) return null;
     return Zotero.Items.get(Math.floor(itemId)) || null;
+  }
+
+  getCollection(collectionId: number | undefined): Zotero.Collection | null {
+    if (!Number.isFinite(collectionId) || !collectionId || collectionId <= 0) {
+      return null;
+    }
+    return Zotero.Collections.get(Math.floor(collectionId)) || null;
+  }
+
+  resolveLibraryID(params: {
+    request?: AgentRuntimeRequest;
+    item?: Zotero.Item | null;
+    libraryID?: number;
+  }): number {
+    const explicitLibraryID = Number(params.libraryID);
+    if (Number.isFinite(explicitLibraryID) && explicitLibraryID > 0) {
+      return Math.floor(explicitLibraryID);
+    }
+    const itemLibraryID = Number(params.item?.libraryID);
+    if (Number.isFinite(itemLibraryID) && itemLibraryID > 0) {
+      return Math.floor(itemLibraryID);
+    }
+    const requestLibraryID = Number(params.request?.libraryID);
+    if (Number.isFinite(requestLibraryID) && requestLibraryID > 0) {
+      return Math.floor(requestLibraryID);
+    }
+    const activeItemLibraryID = Number(
+      this.getItem(params.request?.activeItemId)?.libraryID,
+    );
+    if (Number.isFinite(activeItemLibraryID) && activeItemLibraryID > 0) {
+      return Math.floor(activeItemLibraryID);
+    }
+    return 0;
+  }
+
+  getCollectionSummary(collectionId: number | undefined): CollectionSummary | null {
+    const collection = this.getCollection(collectionId);
+    if (!collection) return null;
+    const pathMap = buildCollectionPathMap(
+      listLibraryCollections(Number(collection.libraryID) || 0),
+    );
+    return {
+      collectionId: collection.id,
+      name: normalizeText(collection.name) || `Collection ${collection.id}`,
+      libraryID: Number(collection.libraryID) || 0,
+      path:
+        pathMap.get(collection.id) ||
+        normalizeText(collection.name) ||
+        `Collection ${collection.id}`,
+    };
+  }
+
+  listCollectionSummaries(libraryID: number): CollectionSummary[] {
+    const normalizedLibraryID = Number.isFinite(libraryID)
+      ? Math.floor(libraryID)
+      : 0;
+    if (!normalizedLibraryID) return [];
+    const collections = listLibraryCollections(normalizedLibraryID);
+    const pathMap = buildCollectionPathMap(collections);
+    return collections
+      .map((collection) => ({
+        collectionId: collection.id,
+        name: normalizeText(collection.name) || `Collection ${collection.id}`,
+        libraryID: Number(collection.libraryID) || normalizedLibraryID,
+        path:
+          pathMap.get(collection.id) ||
+          normalizeText(collection.name) ||
+          `Collection ${collection.id}`,
+      }))
+      .sort((left, right) =>
+        (left.path || left.name).localeCompare(right.path || right.name, undefined, {
+          sensitivity: "base",
+        }),
+      );
+  }
+
+  getPaperTargetsByItemIds(itemIds: number[]): LibraryPaperTarget[] {
+    const out: LibraryPaperTarget[] = [];
+    const seen = new Set<number>();
+    for (const rawItemId of itemIds) {
+      const item = this.resolveBibliographicItem(this.getItem(rawItemId));
+      if (!item || seen.has(item.id)) continue;
+      seen.add(item.id);
+      const target = buildPaperTargetFromItem(item);
+      if (target) {
+        out.push(target);
+      }
+    }
+    return out;
   }
 
   resolveBibliographicItem(
@@ -271,6 +584,120 @@ export class ZoteroGateway {
     return out;
   }
 
+  async browseCollections(params: {
+    libraryID: number;
+  }): Promise<{
+    libraryID: number;
+    libraryName: string;
+    collections: CollectionBrowseNode[];
+    unfiled: {
+      name: string;
+      paperCount: number;
+    };
+  }> {
+    const libraryID = Number.isFinite(params.libraryID)
+      ? Math.floor(params.libraryID)
+      : 0;
+    if (!libraryID) {
+      throw new Error("No active library available for browsing collections");
+    }
+    const candidates = await browsePaperCollectionCandidates(libraryID);
+    const collections = candidates
+      .filter((entry) => entry.collectionId > 0)
+      .map((entry) => summarizeCollectionNode(entry));
+    const unfiledNode =
+      candidates.find((entry) => entry.collectionId === 0) || null;
+    return {
+      libraryID,
+      libraryName: resolveLibraryDisplayName(libraryID),
+      collections,
+      unfiled: {
+        name: "Unfiled",
+        paperCount: unfiledNode?.papers.length || 0,
+      },
+    };
+  }
+
+  async listCollectionPaperTargets(params: {
+    libraryID: number;
+    collectionId: number;
+    limit?: number;
+  }): Promise<{
+    collection: CollectionSummary;
+    papers: LibraryPaperTarget[];
+    totalCount: number;
+  }> {
+    const collection = this.getCollectionSummary(params.collectionId);
+    if (!collection) {
+      throw new Error("Collection not found");
+    }
+    const libraryID = Number.isFinite(params.libraryID)
+      ? Math.floor(params.libraryID)
+      : 0;
+    if (!libraryID) {
+      throw new Error("No active library available for listing collection papers");
+    }
+    if (collection.libraryID && collection.libraryID !== libraryID) {
+      throw new Error("Collection does not belong to the active library");
+    }
+    const candidates = await listLibraryPaperCandidates(libraryID);
+    const papers: LibraryPaperTarget[] = [];
+    for (const candidate of candidates) {
+      const item = this.resolveBibliographicItem(this.getItem(candidate.itemId));
+      if (!item?.inCollection?.(collection.collectionId)) continue;
+      const target = buildPaperTargetFromItem(item);
+      if (target) {
+        papers.push(target);
+      }
+    }
+    const normalizedLimit = Number.isFinite(params.limit)
+      ? Math.max(1, Math.floor(params.limit as number))
+      : undefined;
+    return {
+      collection,
+      papers:
+        normalizedLimit && papers.length > normalizedLimit
+          ? papers.slice(0, normalizedLimit)
+          : papers,
+      totalCount: papers.length,
+    };
+  }
+
+  async listUnfiledPaperTargets(params: {
+    libraryID: number;
+    limit?: number;
+  }): Promise<{
+    papers: LibraryPaperTarget[];
+    totalCount: number;
+  }> {
+    const libraryID = Number.isFinite(params.libraryID)
+      ? Math.floor(params.libraryID)
+      : 0;
+    if (!libraryID) {
+      throw new Error("No active library available for listing unfiled papers");
+    }
+    const candidates = await listLibraryPaperCandidates(libraryID);
+    const papers: LibraryPaperTarget[] = [];
+    for (const candidate of candidates) {
+      const item = this.resolveBibliographicItem(this.getItem(candidate.itemId));
+      if (!item) continue;
+      const target = buildPaperTargetFromItem(item);
+      if (target && target.collectionIds.length === 0) {
+        papers.push(target);
+      }
+    }
+    const normalizedLimit = Number.isFinite(params.limit)
+      ? Math.max(1, Math.floor(params.limit as number))
+      : undefined;
+    return {
+      papers:
+        normalizedLimit && papers.length > normalizedLimit
+          ? papers.slice(0, normalizedLimit)
+          : papers,
+      totalCount: papers.length,
+    };
+  }
+
   async searchLibraryItems(params: {
     libraryID: number;
     query: string;
@@ -283,6 +710,199 @@ export class ZoteroGateway {
       params.excludeContextItemId,
       params.limit,
     );
+  }
+
+  async applyTagsToItems(params: {
+    itemIds: number[];
+    tags: string[];
+  }): Promise<{
+    selectedCount: number;
+    updatedCount: number;
+    skippedCount: number;
+    items: BatchTagItemResult[];
+  }> {
+    const normalizedTags = Array.from(
+      new Set(params.tags.map((entry) => normalizeText(entry)).filter(Boolean)),
+    );
+    const items = this.getPaperTargetsByItemIds(params.itemIds);
+    const results: BatchTagItemResult[] = [];
+    for (const target of items) {
+      const item = this.resolveBibliographicItem(this.getItem(target.itemId));
+      if (!item) {
+        results.push({
+          itemId: target.itemId,
+          title: target.title,
+          status: "missing",
+          addedTags: [],
+          skippedTags: normalizedTags,
+          reason: "Item not found",
+        });
+        continue;
+      }
+      const addedTags: string[] = [];
+      const skippedTags: string[] = [];
+      for (const tag of normalizedTags) {
+        if (!tag) continue;
+        if (item.hasTag?.(tag)) {
+          skippedTags.push(tag);
+          continue;
+        }
+        item.addTag?.(tag, 0);
+        addedTags.push(tag);
+      }
+      if (addedTags.length) {
+        await item.saveTx();
+      }
+      results.push({
+        itemId: item.id,
+        title: target.title,
+        status: addedTags.length ? "updated" : "skipped",
+        addedTags,
+        skippedTags,
+        reason: addedTags.length ? undefined : "All tags already existed",
+      });
+    }
+    const updatedCount = results.filter((entry) => entry.status === "updated").length;
+    return {
+      selectedCount: items.length,
+      updatedCount,
+      skippedCount: results.length - updatedCount,
+      items: results,
+    };
+  }
+
+  async moveUnfiledItemsToCollections(params: {
+    assignments: BatchMoveAssignment[];
+  }): Promise<{
+    selectedCount: number;
+    movedCount: number;
+    skippedCount: number;
+    collections: CollectionSummary[];
+    items: BatchMoveItemResult[];
+  }> {
+    const normalizedAssignments: BatchMoveAssignment[] = [];
+    const seen = new Set<number>();
+    for (const entry of params.assignments) {
+      const itemId = Number.isFinite(entry.itemId) ? Math.floor(entry.itemId) : 0;
+      const targetCollectionId = Number.isFinite(entry.targetCollectionId)
+        ? Math.floor(entry.targetCollectionId)
+        : 0;
+      if (!itemId || !targetCollectionId || seen.has(itemId)) continue;
+      seen.add(itemId);
+      normalizedAssignments.push({
+        itemId,
+        targetCollectionId,
+      });
+    }
+    if (!normalizedAssignments.length) {
+      throw new Error("No valid collection assignments were provided");
+    }
+    const collectionMap = new Map<number, CollectionSummary>();
+    for (const assignment of normalizedAssignments) {
+      if (collectionMap.has(assignment.targetCollectionId)) continue;
+      const collection = this.getCollectionSummary(assignment.targetCollectionId);
+      if (!collection) {
+        throw new Error("Collection not found");
+      }
+      collectionMap.set(assignment.targetCollectionId, collection);
+    }
+    const results: BatchMoveItemResult[] = [];
+    let movedCount = 0;
+    for (const assignment of normalizedAssignments) {
+      const collection = collectionMap.get(assignment.targetCollectionId);
+      if (!collection) {
+        results.push({
+          itemId: assignment.itemId,
+          title: `Item ${assignment.itemId}`,
+          status: "missing",
+          targetCollectionId: assignment.targetCollectionId,
+          reason: "Collection not found",
+        });
+        continue;
+      }
+      const item = this.resolveBibliographicItem(this.getItem(assignment.itemId));
+      if (!item) {
+        results.push({
+          itemId: assignment.itemId,
+          title: `Item ${assignment.itemId}`,
+          status: "missing",
+          targetCollectionId: collection.collectionId,
+          targetCollectionName: collection.path || collection.name,
+          reason: "Item not found",
+        });
+        continue;
+      }
+      const target = buildPaperTargetFromItem(item);
+      const title = target?.title || normalizeText(item.getDisplayTitle?.()) || `Item ${item.id}`;
+      if (getCollectionIDs(item).length > 0) {
+        results.push({
+          itemId: item.id,
+          title,
+          status: "skipped",
+          targetCollectionId: collection.collectionId,
+          targetCollectionName: collection.path || collection.name,
+          reason: "Paper is no longer unfiled",
+        });
+        continue;
+      }
+      item.addToCollection(collection.collectionId);
+      await item.saveTx();
+      movedCount += 1;
+      results.push({
+        itemId: item.id,
+        title,
+        status: "moved",
+        targetCollectionId: collection.collectionId,
+        targetCollectionName: collection.path || collection.name,
+      });
+    }
+    if (movedCount > 0) {
+      const touchedLibraryIDs = new Set<number>();
+      for (const collection of collectionMap.values()) {
+        if (collection.libraryID > 0) {
+          touchedLibraryIDs.add(collection.libraryID);
+        }
+      }
+      for (const libraryID of touchedLibraryIDs) {
+        invalidatePaperSearchCache(libraryID);
+      }
+    }
+    return {
+      selectedCount: normalizedAssignments.length,
+      movedCount,
+      skippedCount: results.length - movedCount,
+      collections: Array.from(collectionMap.values()),
+      items: results,
+    };
+  }
+
+  async moveUnfiledItemsToCollection(params: {
+    itemIds: number[];
+    targetCollectionId: number;
+  }): Promise<{
+    selectedCount: number;
+    movedCount: number;
+    skippedCount: number;
+    collection: CollectionSummary;
+    items: BatchMoveItemResult[];
+  }> {
+    const collection = this.getCollectionSummary(params.targetCollectionId);
+    if (!collection) {
+      throw new Error("Collection not found");
+    }
+    const result = await this.moveUnfiledItemsToCollections({
+      assignments: params.itemIds.map((itemId) => ({
+        itemId,
+        targetCollectionId: params.targetCollectionId,
+      })),
+    });
+    return {
+      selectedCount: result.selectedCount,
+      movedCount: result.movedCount,
+      skippedCount: result.skippedCount,
+      collection,
+      items: result.items,
+    };
   }
 
   async saveAnswerToNote(params: {

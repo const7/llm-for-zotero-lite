@@ -181,6 +181,231 @@ function renderImageGalleryField(
   return previewGrid;
 }
 
+function renderChecklistField(
+  doc: Document,
+  field: Extract<AgentPendingField, { type: "checklist" }>,
+): {
+  element: HTMLDivElement;
+  accessor: {
+    id: string;
+    getValue: () => string[];
+    setDisabled: (disabled: boolean) => void;
+    isValid: () => boolean;
+    bindValidity: (callback: () => void) => void;
+  };
+} {
+  const wrap = doc.createElement("div");
+  wrap.className = "llm-agent-hitl-checklist";
+
+  const toolbar = doc.createElement("div");
+  toolbar.className = "llm-agent-hitl-checklist-toolbar";
+
+  const selectAllButton = doc.createElement("button");
+  selectAllButton.type = "button";
+  selectAllButton.className = "llm-agent-hitl-btn llm-agent-hitl-btn-alt";
+  selectAllButton.textContent = "Select all";
+  toolbar.appendChild(selectAllButton);
+
+  const clearAllButton = doc.createElement("button");
+  clearAllButton.type = "button";
+  clearAllButton.className = "llm-agent-hitl-btn llm-agent-hitl-btn-secondary";
+  clearAllButton.textContent = "Clear all";
+  toolbar.appendChild(clearAllButton);
+
+  wrap.appendChild(toolbar);
+
+  const list = doc.createElement("div");
+  list.className = "llm-agent-hitl-checklist-list";
+  wrap.appendChild(list);
+
+  const checkboxes: HTMLInputElement[] = [];
+  const listeners: Array<() => void> = [];
+  const emitValidityChange = () => {
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+  const getSelectedIds = () =>
+    checkboxes
+      .filter((checkbox) => checkbox.checked)
+      .map((checkbox) => checkbox.value);
+
+  for (const item of field.items) {
+    const row = doc.createElement("label");
+    row.className = "llm-agent-hitl-checklist-item";
+
+    const checkbox = doc.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "llm-agent-hitl-checklist-checkbox";
+    checkbox.value = item.id;
+    checkbox.checked = item.checked !== false;
+    checkbox.addEventListener("change", emitValidityChange);
+    checkboxes.push(checkbox);
+
+    const content = doc.createElement("span");
+    content.className = "llm-agent-hitl-checklist-content";
+
+    const title = doc.createElement("span");
+    title.className = "llm-agent-hitl-checklist-title";
+    title.textContent = item.label;
+    content.appendChild(title);
+
+    if (item.description) {
+      const description = doc.createElement("span");
+      description.className = "llm-agent-hitl-checklist-description";
+      description.textContent = item.description;
+      content.appendChild(description);
+    }
+
+    row.append(checkbox, content);
+    list.appendChild(row);
+  }
+
+  selectAllButton.addEventListener("click", () => {
+    for (const checkbox of checkboxes) {
+      checkbox.checked = true;
+    }
+    emitValidityChange();
+  });
+  clearAllButton.addEventListener("click", () => {
+    for (const checkbox of checkboxes) {
+      checkbox.checked = false;
+    }
+    emitValidityChange();
+  });
+
+  return {
+    element: wrap,
+    accessor: {
+      id: field.id,
+      getValue: () => getSelectedIds(),
+      setDisabled: (disabled) => {
+        for (const checkbox of checkboxes) {
+          checkbox.disabled = disabled;
+        }
+        selectAllButton.disabled = disabled;
+        clearAllButton.disabled = disabled;
+      },
+      isValid: () => getSelectedIds().length > 0,
+      bindValidity: (callback) => {
+        listeners.push(callback);
+      },
+    },
+  };
+}
+
+function renderAssignmentTableField(
+  doc: Document,
+  field: Extract<AgentPendingField, { type: "assignment_table" }>,
+): {
+  element: HTMLDivElement;
+  accessor: {
+    id: string;
+    getValue: () => Array<{ id: string; checked: boolean; value: string }>;
+    setDisabled: (disabled: boolean) => void;
+    isValid: () => boolean;
+    bindValidity: (callback: () => void) => void;
+  };
+} {
+  const wrap = doc.createElement("div");
+  wrap.className = "llm-agent-hitl-assignment-table";
+
+  const rows: Array<{
+    select: HTMLSelectElement;
+    id: string;
+  }> = [];
+  const listeners: Array<() => void> = [];
+  const emitValidityChange = () => {
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+  const getAssignments = () =>
+    rows.map((row) => ({
+      id: row.id,
+      checked: row.select.value !== "__skip__",
+      value: row.select.value,
+    }));
+
+  for (const item of field.rows) {
+    const row = doc.createElement("div");
+    row.className = "llm-agent-hitl-assignment-row";
+
+    const content = doc.createElement("div");
+    content.className = "llm-agent-hitl-assignment-content";
+
+    const title = doc.createElement("div");
+    title.className = "llm-agent-hitl-assignment-title";
+    title.textContent = item.label;
+    content.appendChild(title);
+
+    if (item.description) {
+      const description = doc.createElement("div");
+      description.className = "llm-agent-hitl-assignment-description";
+      description.textContent = item.description;
+      content.appendChild(description);
+    }
+
+    const control = doc.createElement("div");
+    control.className = "llm-agent-hitl-assignment-control";
+
+    const selectLabel = doc.createElement("div");
+    selectLabel.className = "llm-agent-hitl-assignment-select-label";
+    selectLabel.textContent = "Move to";
+    control.appendChild(selectLabel);
+
+    const select = doc.createElement("select");
+    select.className = "llm-agent-hitl-page-input llm-agent-hitl-assignment-select";
+    for (const option of field.options) {
+      const optionEl = doc.createElement("option");
+      optionEl.value = option.id;
+      optionEl.textContent = option.label;
+      select.appendChild(optionEl);
+    }
+    const initialValue =
+      item.checked === false ? "__skip__" : item.value || "__skip__";
+    let hasInitialValue = false;
+    for (let index = 0; index < select.options.length; index += 1) {
+      const option = select.options.item(index) as HTMLOptionElement | null;
+      if (option?.value === initialValue) {
+        hasInitialValue = true;
+        break;
+      }
+    }
+    select.value = hasInitialValue ? initialValue : "__skip__";
+    select.addEventListener("change", emitValidityChange);
+    control.appendChild(select);
+
+    rows.push({
+      select,
+      id: item.id,
+    });
+
+    row.append(content, control);
+    wrap.appendChild(row);
+  }
+
+  return {
+    element: wrap,
+    accessor: {
+      id: field.id,
+      getValue: () => getAssignments(),
+      setDisabled: (disabled) => {
+        for (const row of rows) {
+          row.select.disabled = disabled;
+        }
+      },
+      isValid: () =>
+        getAssignments().some(
+          (entry) => entry.checked && entry.value && entry.value !== "__skip__",
+        ),
+      bindValidity: (callback) => {
+        listeners.push(callback);
+      },
+    },
+  };
+}
+
 function renderPendingWriteActionCard(
   doc: Document,
   pending: { requestId: string; action: AgentPendingAction },
@@ -324,6 +549,28 @@ function renderPendingWriteActionCard(
         card.appendChild(label);
       }
       card.appendChild(renderImageGalleryField(doc, field));
+      continue;
+    }
+
+    if (field.type === "checklist") {
+      const label = doc.createElement("label");
+      label.className = "llm-agent-hitl-label";
+      label.textContent = field.label;
+      card.appendChild(label);
+      const rendered = renderChecklistField(doc, field);
+      card.appendChild(rendered.element);
+      fieldAccessors.push(rendered.accessor);
+      continue;
+    }
+
+    if (field.type === "assignment_table") {
+      const label = doc.createElement("label");
+      label.className = "llm-agent-hitl-label";
+      label.textContent = field.label;
+      card.appendChild(label);
+      const rendered = renderAssignmentTableField(doc, field);
+      card.appendChild(rendered.element);
+      fieldAccessors.push(rendered.accessor);
     }
   }
 
@@ -651,7 +898,14 @@ function toolContentLooksEmpty(content: unknown): boolean {
     return false;
   }
   const record = content as Record<string, unknown>;
-  for (const key of ["papers", "evidence", "results", "suggestions", "pages"]) {
+  for (const key of [
+    "papers",
+    "evidence",
+    "results",
+    "suggestions",
+    "pages",
+    "collections",
+  ]) {
     if (Array.isArray(record[key])) {
       return record[key].length === 0;
     }

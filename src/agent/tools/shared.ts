@@ -28,6 +28,24 @@ export function normalizePositiveInt(value: unknown): number | undefined {
   return Math.floor(parsed);
 }
 
+export function normalizePositiveIntArray(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  const out = value
+    .map((entry) => normalizePositiveInt(entry))
+    .filter((entry): entry is number => Number.isFinite(entry));
+  if (!out.length) return null;
+  return Array.from(new Set(out));
+}
+
+export function normalizeStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const out = value
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter(Boolean);
+  if (!out.length) return null;
+  return Array.from(new Set(out));
+}
+
 export function normalizeToolPaperContext(
   value: Record<string, unknown>,
 ): PaperContextRef | null {
