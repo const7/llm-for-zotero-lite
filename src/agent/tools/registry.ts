@@ -74,6 +74,10 @@ export class AgentToolRegistry {
     return Array.from(this.tools.values()).map((tool) => tool.spec);
   }
 
+  listToolDefinitions(): AgentToolDefinition<any, any>[] {
+    return Array.from(this.tools.values());
+  }
+
   listResources(): ResourceSpec[] {
     return Array.from(this.resources.values()).map((resource) => resource.spec);
   }
@@ -202,14 +206,12 @@ export class AgentToolRegistry {
     const shouldRequireConfirmation =
       (await tool.shouldRequireConfirmation?.(validation.value, context)) ??
       tool.spec.requiresConfirmation;
-    const createPendingAction =
-      tool.createPendingAction || tool.createPendingWriteAction;
-    if (shouldRequireConfirmation && createPendingAction) {
+    if (shouldRequireConfirmation && tool.createPendingAction) {
       const requestId = createRequestId();
       return {
         kind: "confirmation",
         requestId,
-        action: await createPendingAction(validation.value, context),
+        action: await tool.createPendingAction(validation.value, context),
         execute: runConfirmedExecution,
         deny: () => ({
           callId: call.id,

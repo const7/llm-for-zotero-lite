@@ -45,18 +45,29 @@ describe("AgentToolRegistry", function () {
         typeof (args as { content?: unknown })?.content === "string"
           ? { ok: true, value: { content: (args as { content: string }).content } }
           : { ok: false, error: "content required" },
-      createPendingWriteAction: (input) => ({
+      createPendingAction: (input) => ({
         toolName: "save_answer_to_note",
-        args: input,
         title: "Save note?",
         confirmLabel: "Approve",
         cancelLabel: "Cancel",
-        editableContent: input.content,
-        saveTargets: [
-          { id: "item", label: "Save as item note" },
-          { id: "standalone", label: "Save as standalone note" },
+        fields: [
+          {
+            type: "textarea",
+            id: "content",
+            label: "Note content",
+            value: input.content,
+          },
+          {
+            type: "select",
+            id: "target",
+            label: "Save target",
+            value: "item",
+            options: [
+              { id: "item", label: "Save as item note" },
+              { id: "standalone", label: "Save as standalone note" },
+            ],
+          },
         ],
-        defaultTargetId: "item",
       }),
       applyConfirmation: (input, resolutionData) => {
         if (!resolutionData || typeof resolutionData !== "object") {
@@ -95,6 +106,10 @@ describe("AgentToolRegistry", function () {
     assert.equal(result.kind, "confirmation");
     if (result.kind !== "confirmation") return;
     assert.equal(result.action.toolName, "save_answer_to_note");
+    assert.deepEqual(result.action.fields.map((field) => field.id), [
+      "content",
+      "target",
+    ]);
     assert.equal(result.deny().ok, false);
     const approved = await result.execute({
       content: "edited hello",

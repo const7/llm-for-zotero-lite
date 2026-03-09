@@ -12,6 +12,7 @@ import type {
   AgentToolResult,
 } from "./types";
 import type { AgentModelAdapter } from "./model/adapter";
+import { buildAgentInitialMessages } from "./model/messageBuilder";
 import {
   appendAgentRunEvent,
   createAgentRun,
@@ -155,6 +156,10 @@ export class AgentRuntime {
     return this.registry.listTools();
   }
 
+  getToolDefinition(name: string) {
+    return this.registry.getTool(name);
+  }
+
   getCapabilities(request: AgentRuntimeRequest) {
     return this.adapterFactory(request).getCapabilities(request);
   }
@@ -235,9 +240,10 @@ export class AgentRuntime {
       modelName: request.model || "unknown",
       modelProviderLabel: request.modelProviderLabel,
     };
-    const messages = adapter.buildInitialMessages
-      ? adapter.buildInitialMessages(request)
-      : ([] as AgentModelMessage[]);
+    const messages = buildAgentInitialMessages(
+      request,
+      this.registry.listToolDefinitions(),
+    ) as AgentModelMessage[];
 
     let consecutiveToolErrors = 0;
     const maxRounds = 4;
@@ -335,7 +341,13 @@ export class AgentRuntime {
           name: toolResult.name,
           content: stringifyToolResult(toolResult),
         });
-        const followupMessage = await buildArtifactFollowupMessage(toolResult);
+        const toolDefinition = this.registry.getTool(toolResult.name);
+        const followupMessage = toolDefinition?.buildFollowupMessage
+          ? await toolDefinition.buildFollowupMessage(toolResult, {
+              ...context,
+              currentAnswerText,
+            })
+          : await buildArtifactFollowupMessage(toolResult);
         if (followupMessage) {
           messages.push(followupMessage);
         }

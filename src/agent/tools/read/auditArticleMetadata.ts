@@ -21,6 +21,19 @@ type AuditArticleMetadataInput = {
   paperContext?: PaperContextRef;
 };
 
+function isMetadataAuditTask(userText: string): boolean {
+  const normalized = userText.trim().toLowerCase();
+  return (
+    /\bmetadata\b/.test(normalized) ||
+    (/\b(doi|title|abstract|journal|authors?|creator|date|pages|volume|issue|url|isbn|issn|publisher)\b/.test(
+      normalized,
+    ) &&
+      /\b(fix|edit|correct|clean|standardi[sz]e|complete|update|fill|repair)\b/.test(
+        normalized,
+      ))
+  );
+}
+
 type MetadataFieldSuggestion = {
   field: EditableArticleMetadataField | "creators";
   before: string;
@@ -552,6 +565,48 @@ export function createAuditArticleMetadataTool(
       },
       mutability: "read",
       requiresConfirmation: false,
+    },
+    guidance: {
+      matches: (request) => isMetadataAuditTask(request.userText || ""),
+      instruction: [
+        "When the user asks to fix, clean up, standardize, or complete article metadata, do not default to a follow-up conversation.",
+        "Treat metadata fixing as a full audit, not a spot edit. Review all supported metadata fields, especially creators/authors, title, venue, date, pages, DOI, URL, ISSN/ISBN, abstract, language, and extra.",
+        "Start by inspecting the current article metadata. If any field is missing, incomplete, inconsistent, or likely non-standard, gather stronger evidence before editing.",
+        "Use audit_article_metadata first. It compares the current item against matching library metadata and paper front matter, and it returns a suggestedPatch plus field-by-field reasons, including creator-list issues.",
+        "Treat suggestedPatch from audit_article_metadata as the high-confidence subset. If it is non-empty, pass it directly into edit_article_metadata, either as patch or suggestedPatch, so the user can review the proposed change set.",
+        "Only fall back to lower-level metadata tools such as search_library_items or read_paper_front_matter yourself when audit_article_metadata is inconclusive and you still need more evidence.",
+        "Only ask a follow-up if the target article is ambiguous or you truly cannot infer a safe metadata correction.",
+      ].join("\n"),
+    },
+    presentation: {
+      label: "Audit Metadata",
+      summaries: {
+        onCall: "Auditing the article metadata field by field",
+        onSuccess: ({ content }) => {
+          const suggestions =
+            content &&
+            typeof content === "object" &&
+            Array.isArray((content as { suggestions?: unknown }).suggestions)
+              ? (content as { suggestions: unknown[] }).suggestions
+              : [];
+          if (!suggestions.length) {
+            return "The metadata already looks complete from the available evidence";
+          }
+          const includesCreators = suggestions.some(
+            (entry) =>
+              entry &&
+              typeof entry === "object" &&
+              (entry as { field?: unknown }).field === "creators",
+          );
+          return includesCreators
+            ? `Identified ${suggestions.length} metadata update${
+                suggestions.length === 1 ? "" : "s"
+              }, including the author list`
+            : `Identified ${suggestions.length} metadata update${
+                suggestions.length === 1 ? "" : "s"
+              }`;
+        },
+      },
     },
     validate: (args) => {
       if (!validateObject<Record<string, unknown>>(args)) {

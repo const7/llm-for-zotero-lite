@@ -67,25 +67,48 @@ describe("editArticleMetadata tool", function () {
     assert.isTrue(validated.ok);
     if (!validated.ok) return;
 
-    const pending = tool.createPendingWriteAction?.(validated.value, baseContext);
+    const pending = tool.createPendingAction?.(validated.value, baseContext);
     assert.exists(pending);
     assert.equal(pending?.toolName, "edit_article_metadata");
     assert.equal(pending?.confirmLabel, "Apply");
     assert.equal(pending?.cancelLabel, "Cancel");
-    assert.equal(pending?.editorMode, "json");
-    assert.include(pending?.editableContent || "", "\"DOI\": \"10.1000/original\"");
-    assert.deepInclude(pending?.reviewItems?.[0] || {}, {
+    const contentField = pending?.fields.find((field) => field.id === "content");
+    const reviewField = pending?.fields.find((field) => field.id === "review");
+    assert.equal(contentField?.type, "textarea");
+    assert.equal(
+      contentField && contentField.type === "textarea"
+        ? contentField.editorMode
+        : "",
+      "json",
+    );
+    assert.include(
+      contentField && contentField.type === "textarea"
+        ? contentField.value || ""
+        : "",
+      "\"DOI\": \"10.1000/original\"",
+    );
+    assert.deepInclude(
+      reviewField && reviewField.type === "review_table"
+        ? reviewField.rows[0] || {}
+        : {},
+      {
       key: "title",
       label: "Title",
       before: "Original Paper",
       after: "Original Paper",
-    });
-    assert.deepInclude(pending?.reviewItems?.[1] || {}, {
+    },
+    );
+    assert.deepInclude(
+      reviewField && reviewField.type === "review_table"
+        ? reviewField.rows[1] || {}
+        : {},
+      {
       key: "DOI",
       label: "DOI",
       before: "",
       after: "10.1000/original",
-    });
+    },
+    );
 
     const confirmed = tool.applyConfirmation?.(validated.value, {
       content: JSON.stringify(

@@ -32,6 +32,25 @@ export function createSearchLibraryItemsTool(
       mutability: "read",
       requiresConfirmation: false,
     },
+    presentation: {
+      label: "Search Library",
+      summaries: {
+        onCall: "Searching your library for matching papers",
+        onSuccess: ({ content }) => {
+          const results =
+            content &&
+            typeof content === "object" &&
+            Array.isArray((content as { results?: unknown }).results)
+              ? (content as { results: unknown[] }).results
+              : [];
+          return results.length > 0
+            ? `Found ${results.length} matching paper${
+                results.length === 1 ? "" : "s"
+              } in your library`
+            : "No matching papers found in the library";
+        },
+      },
+    },
     validate: (args) => {
       if (!validateObject<Record<string, unknown>>(args)) {
         return fail<SearchLibraryItemsInput>("Expected an object");

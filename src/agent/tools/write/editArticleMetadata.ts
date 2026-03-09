@@ -240,6 +240,29 @@ export function createEditArticleMetadataTool(
       mutability: "write",
       requiresConfirmation: true,
     },
+    presentation: {
+      label: "Edit Metadata",
+      summaries: {
+        onCall: "Preparing metadata updates for the article",
+        onPending:
+          "Waiting for your approval before applying the metadata changes",
+        onApproved: "Approval received - applying the metadata changes",
+        onDenied: "Metadata changes cancelled",
+        onSuccess: ({ content }) => {
+          const changedFields =
+            content &&
+            typeof content === "object" &&
+            Array.isArray((content as { changedFields?: unknown }).changedFields)
+              ? (content as { changedFields: unknown[] }).changedFields
+              : [];
+          return changedFields.length > 0
+            ? `Applied ${changedFields.length} metadata change${
+                changedFields.length === 1 ? "" : "s"
+              }`
+            : "Applied the metadata changes";
+        },
+      },
+    },
     validate: (args) => {
       if (!validateObject<Record<string, unknown>>(args)) {
         return fail("Expected an object");
@@ -261,7 +284,7 @@ export function createEditArticleMetadataTool(
         metadata,
       });
     },
-    createPendingWriteAction: (input, context) => {
+    createPendingAction: (input, context) => {
       const targetItem = zoteroGateway.resolveMetadataItem({
         request: context.request,
         item: context.item,
@@ -305,14 +328,24 @@ export function createEditArticleMetadataTool(
       ];
       return {
         toolName: "edit_article_metadata",
-        args: input,
         title: `Review metadata updates for ${targetLabel}`,
         confirmLabel: "Apply",
         cancelLabel: "Cancel",
-        editableContent: formatMetadataPatch(input.metadata),
-        contentLabel: "Metadata updates",
-        editorMode: "json",
-        reviewItems,
+        fields: [
+          {
+            type: "review_table",
+            id: "review",
+            rows: reviewItems,
+          },
+          {
+            type: "textarea",
+            id: "content",
+            label: "Metadata updates",
+            value: formatMetadataPatch(input.metadata),
+            editorMode: "json",
+            spellcheck: false,
+          },
+        ],
       };
     },
     applyConfirmation: (input, resolutionData) => {

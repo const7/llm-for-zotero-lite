@@ -66,8 +66,65 @@ type PreparePdfFileParams = ResolvePdfTargetInput & {
   request: AgentRuntimeRequest;
 };
 
+type RenderablePdfPage = {
+  getViewport: (params: { scale: number }) => {
+    width: number;
+    height: number;
+  };
+  render: (params: {
+    canvasContext: unknown;
+    viewport: unknown;
+  }) =>
+    | Promise<unknown>
+    | {
+        promise?: Promise<unknown>;
+      };
+};
+
 function sanitizeText(value: unknown): string {
   return `${value ?? ""}`.replace(/\s+/g, " ").trim();
+}
+
+function unwrapWrappedJsObject<T>(value: T): T {
+  if (!value || (typeof value !== "object" && typeof value !== "function")) {
+    return value;
+  }
+  try {
+    return (
+      (value as T & { wrappedJSObject?: T }).wrappedJSObject || value
+    );
+  } catch (_error) {
+    return value;
+  }
+}
+
+export function resolveRenderablePdfPage(
+  value: unknown,
+): RenderablePdfPage | null {
+  const queue: unknown[] = [value];
+  const seen = new Set<unknown>();
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || seen.has(current)) continue;
+    seen.add(current);
+    const candidate = unwrapWrappedJsObject(current as Record<string, unknown>);
+    if (
+      typeof (candidate as Partial<RenderablePdfPage>).getViewport === "function" &&
+      typeof (candidate as Partial<RenderablePdfPage>).render === "function"
+    ) {
+      return candidate as RenderablePdfPage;
+    }
+    if (typeof candidate === "object") {
+      const record = candidate as Record<string, unknown>;
+      queue.push(
+        record.pdfPage,
+        record._pdfPage,
+        record.page,
+        record.pageProxy,
+      );
+    }
+  }
+  return null;
 }
 
 function normalizePositiveInt(value: unknown): number | undefined {
@@ -680,7 +737,20 @@ export class PdfPageService {
     const artifacts: AgentToolArtifact[] = [];
 
     for (const pageIndex of orderedPages) {
-      const pdfPage = await app.pdfDocument.getPage(pageIndex + 1);
+      const pdfDocument = unwrapWrappedJsObject(
+        app.pdfDocument as { getPage?: (pageNumber: number) => Promise<unknown> },
+      );
+      if (typeof pdfDocument?.getPage !== "function") {
+        throw new Error("Could not access the PDF document page loader");
+      }
+      const pdfPage = resolveRenderablePdfPage(
+        await pdfDocument.getPage(pageIndex + 1),
+      );
+      if (!pdfPage) {
+        throw new Error(
+          `Could not access a renderable PDF.js page for page ${pageIndex + 1}`,
+        );
+      }
       const viewport = pdfPage.getViewport({ scale: 1.8 });
       const canvas = canvasDoc.createElement("canvas") as HTMLCanvasElement;
       canvas.width = Math.max(1, Math.ceil(viewport.width));
@@ -693,9 +763,19 @@ export class PdfPageService {
         canvasContext: context,
         viewport,
       });
-      if (renderTask?.promise) {
+      if (
+        renderTask &&
+        typeof renderTask === "object" &&
+        "promise" in renderTask &&
+        renderTask.promise
+      ) {
         await renderTask.promise;
-      } else if (typeof renderTask?.then === "function") {
+      } else if (
+        renderTask &&
+        (typeof renderTask === "object" || typeof renderTask === "function") &&
+        "then" in renderTask &&
+        typeof renderTask.then === "function"
+      ) {
         await renderTask;
       }
       const bytes = await canvasToBytes(canvas);

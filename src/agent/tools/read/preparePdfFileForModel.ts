@@ -34,6 +34,16 @@ export function createPreparePdfFileForModelTool(
       mutability: "read",
       requiresConfirmation: true,
     },
+    presentation: {
+      label: "Prepare PDF File",
+      summaries: {
+        onCall: "Preparing the full PDF for direct model reading",
+        onPending: "Waiting for your approval before sending the whole PDF",
+        onApproved: "Approval received - sending the whole PDF",
+        onDenied: "Whole-PDF send cancelled",
+        onSuccess: "Prepared the whole PDF for direct model reading",
+      },
+    },
     validate: (args) => {
       const parsed = parsePdfTargetArgs(args);
       if (!parsed.ok) return parsed;
@@ -54,23 +64,27 @@ export function createPreparePdfFileForModelTool(
       });
       return {
         toolName: "prepare_pdf_file_for_model",
-        args: input,
-        approvalKind: "pdf_send",
         title: `Review whole-PDF input for ${prepared.target.title}`,
         description:
           "This will send the entire PDF file to the model. Use this only when full-document inspection is necessary.",
         confirmLabel: "Apply",
         cancelLabel: "Cancel",
-        reviewItems: [
+        fields: [
           {
-            key: "pdf",
-            label: "PDF",
-            after: prepared.target.title,
-          },
-          {
-            key: "scope",
-            label: "Scope",
-            after: "Whole document",
+            type: "review_table",
+            id: "review",
+            rows: [
+              {
+                key: "pdf",
+                label: "PDF",
+                after: prepared.target.title,
+              },
+              {
+                key: "scope",
+                label: "Scope",
+                after: "Whole document",
+              },
+            ],
           },
         ],
       };
