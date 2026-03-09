@@ -1,4 +1,6 @@
 import type {
+  AgentToolArtifact,
+  AgentToolExecutionOutput,
   AgentPromptDefinition,
   AgentResourceDefinition,
   AgentToolCall,
@@ -27,6 +29,28 @@ function createSyntheticErrorResult(
 
 function createRequestId(): string {
   return `confirm-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeExecutionOutput(
+  value: AgentToolExecutionOutput<any>,
+): { content: unknown; artifacts?: AgentToolArtifact[] } {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as {
+      content?: unknown;
+      artifacts?: unknown;
+    };
+    if (Object.prototype.hasOwnProperty.call(record, "content")) {
+      return {
+        content: record.content,
+        artifacts: Array.isArray(record.artifacts)
+          ? (record.artifacts as AgentToolArtifact[])
+          : undefined,
+      };
+    }
+  }
+  return {
+    content: value,
+  };
 }
 
 export class AgentToolRegistry {
@@ -89,12 +113,15 @@ export class AgentToolRegistry {
     const runExecution = async () => {
       const runWithInput = async (resolvedInput: typeof validation.value) => {
         try {
-          const content = await tool.execute(resolvedInput, context);
+          const executionOutput = normalizeExecutionOutput(
+            await tool.execute(resolvedInput, context),
+          );
           return {
             callId: call.id,
             name: call.name,
             ok: true,
-            content,
+            content: executionOutput.content,
+            artifacts: executionOutput.artifacts,
           };
         } catch (error) {
           return {
@@ -128,12 +155,15 @@ export class AgentToolRegistry {
           };
         }
         try {
-          const content = await tool.execute(resolved.value, context);
+          const executionOutput = normalizeExecutionOutput(
+            await tool.execute(resolved.value, context),
+          );
           return {
             callId: call.id,
             name: call.name,
             ok: true,
-            content,
+            content: executionOutput.content,
+            artifacts: executionOutput.artifacts,
           };
         } catch (error) {
           return {
@@ -147,12 +177,15 @@ export class AgentToolRegistry {
         }
       }
       try {
-        const content = await tool.execute(validation.value, context);
+        const executionOutput = normalizeExecutionOutput(
+          await tool.execute(validation.value, context),
+        );
         return {
           callId: call.id,
           name: call.name,
           ok: true,
-          content,
+          content: executionOutput.content,
+          artifacts: executionOutput.artifacts,
         };
       } catch (error) {
         return {
@@ -166,12 +199,17 @@ export class AgentToolRegistry {
       }
     };
 
-    if (tool.spec.requiresConfirmation && tool.createPendingWriteAction) {
+    const shouldRequireConfirmation =
+      (await tool.shouldRequireConfirmation?.(validation.value, context)) ??
+      tool.spec.requiresConfirmation;
+    const createPendingAction =
+      tool.createPendingAction || tool.createPendingWriteAction;
+    if (shouldRequireConfirmation && createPendingAction) {
       const requestId = createRequestId();
       return {
         kind: "confirmation",
         requestId,
-        action: tool.createPendingWriteAction(validation.value, context),
+        action: await createPendingAction(validation.value, context),
         execute: runConfirmedExecution,
         deny: () => ({
           callId: call.id,

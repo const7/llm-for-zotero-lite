@@ -2,9 +2,12 @@ import { RESPONSES_ENDPOINT, resolveEndpoint } from "../../utils/apiHelpers";
 import {
   postWithReasoningFallback,
   resolveRequestAuthState,
+  uploadFilesForResponses,
+  type ChatFileAttachment,
 } from "../../utils/llmClient";
 import type {
   AgentModelCapabilities,
+  AgentModelContentPart,
   AgentModelMessage,
   AgentModelStep,
   AgentRuntimeRequest,
@@ -12,6 +15,7 @@ import type {
   ToolSpec,
 } from "../types";
 import type { AgentModelAdapter, AgentStepParams } from "./adapter";
+import { normalizeStepFromPayload } from "./codexResponses";
 
 type ResponsesInputItem =
   | {
@@ -22,6 +26,7 @@ type ResponsesInputItem =
         | Array<
             | { type: "input_text"; text: string }
             | { type: "input_image"; image_url: string; detail?: "low" | "high" | "auto" }
+            | { type: "input_file"; file_id: string }
           >;
     }
   | {
@@ -30,42 +35,11 @@ type ResponsesInputItem =
       output: string;
     };
 
-type ResponsesOutputContent = {
-  type?: unknown;
-  text?: unknown;
-};
-
-type ResponsesOutputItem = {
-  id?: unknown;
-  type?: unknown;
-  call_id?: unknown;
-  name?: unknown;
-  arguments?: unknown;
-  text?: unknown;
-  content?: unknown;
-};
-
 type ResponsesPayload = {
   id?: unknown;
   output_text?: unknown;
   output?: unknown;
 };
-
-type NormalizedResponsesStep = {
-  responseId?: string;
-  text: string;
-  toolCalls: AgentToolCall[];
-  outputItems: unknown[];
-};
-
-function isCodexAuthRequest(request: AgentRuntimeRequest): boolean {
-  return (
-    request.authMode === "codex_auth" ||
-    /chatgpt\.com\/backend-api\/codex\/responses/i.test(
-      (request.apiBase || "").trim(),
-    )
-  );
-}
 
 function isMultimodalRequestSupported(request: AgentRuntimeRequest): boolean {
   const model = (request.model || "").trim().toLowerCase();
@@ -94,8 +68,6 @@ function getMetadataEditDirective(userText: string): string {
     "Start by inspecting the current article metadata. If any field is missing, incomplete, inconsistent, or likely non-standard, gather stronger evidence before editing.",
     "Use audit_article_metadata first. It compares the current item against matching library metadata and paper front matter, and it returns a suggestedPatch plus field-by-field reasons, including creator-list issues.",
     "Treat suggestedPatch from audit_article_metadata as the high-confidence subset. If it is non-empty, pass it directly into edit_article_metadata, either as patch or suggestedPatch, so the user can review the proposed change set.",
-    "Only fall back to lower-level metadata tools such as search_library_items or read_paper_front_matter yourself when audit_article_metadata is inconclusive and you still need more evidence.",
-    "Only ask a follow-up if the target article is ambiguous or you truly cannot infer a safe metadata correction.",
   ].join("\n");
 }
 
@@ -113,7 +85,7 @@ function getPdfVisualDirective(request: AgentRuntimeRequest): string {
     "Use prepare_pdf_pages_for_model to send selected PDF pages as images for visual inspection.",
     "If the user explicitly names page numbers, you may send those pages directly.",
     "If the pages are auto-selected by the tool, wait for approval before sending them.",
-    "Do not try to send a whole PDF file on codex_auth. Use page images instead.",
+    "Only use prepare_pdf_file_for_model when the user explicitly asks to inspect the entire PDF or whole document. Do not send a whole PDF by default.",
   ].join("\n");
 }
 
@@ -153,29 +125,27 @@ function buildUserMessage(request: AgentRuntimeRequest): AgentModelMessage {
       .join("\n\n");
     contextLines.push(selectedTextBlock);
   }
-  if (
-    Array.isArray(request.selectedPaperContexts) &&
-    request.selectedPaperContexts.length
-  ) {
-    const paperLines = request.selectedPaperContexts.map(
-      (entry, index) =>
-        `- Selected paper ${index + 1}: ${entry.title} [itemId=${entry.itemId}, contextItemId=${entry.contextItemId}]`,
+  if (Array.isArray(request.selectedPaperContexts) && request.selectedPaperContexts.length) {
+    contextLines.push(
+      "Selected paper refs:",
+      ...request.selectedPaperContexts.map(
+        (entry, index) =>
+          `- Selected paper ${index + 1}: ${entry.title} [itemId=${entry.itemId}, contextItemId=${entry.contextItemId}]`,
+      ),
     );
-    contextLines.push("Selected paper refs:", ...paperLines);
   }
-  if (
-    Array.isArray(request.pinnedPaperContexts) &&
-    request.pinnedPaperContexts.length
-  ) {
-    const paperLines = request.pinnedPaperContexts.map(
-      (entry, index) =>
-        `- Pinned paper ${index + 1}: ${entry.title} [itemId=${entry.itemId}, contextItemId=${entry.contextItemId}]`,
+  if (Array.isArray(request.pinnedPaperContexts) && request.pinnedPaperContexts.length) {
+    contextLines.push(
+      "Pinned paper refs:",
+      ...request.pinnedPaperContexts.map(
+        (entry, index) =>
+          `- Pinned paper ${index + 1}: ${entry.title} [itemId=${entry.itemId}, contextItemId=${entry.contextItemId}]`,
+      ),
     );
-    contextLines.push("Pinned paper refs:", ...paperLines);
   }
   if (Array.isArray(request.attachments) && request.attachments.length) {
     contextLines.push(
-      "Current uploaded attachments are available through the read_attachment_text tool.",
+      "Current uploaded attachments are available through read_attachment_text, search_pdf_pages, and prepare_pdf_file_for_model when appropriate.",
     );
   }
 
@@ -192,15 +162,10 @@ function buildUserMessage(request: AgentRuntimeRequest): AgentModelMessage {
   return {
     role: "user",
     content: [
-      {
-        type: "text",
-        text: promptText,
-      },
+      { type: "text", text: promptText },
       ...screenshots.map((url) => ({
         type: "image_url" as const,
-        image_url: {
-          url,
-        },
+        image_url: { url },
       })),
     ],
   };
@@ -228,12 +193,33 @@ function buildInitialMessages(request: AgentRuntimeRequest): AgentModelMessage[]
   ];
 }
 
-function buildResponsesInput(
+async function uploadFilePart(
+  part: Extract<AgentModelContentPart, { type: "file_ref" }>,
+  request: AgentRuntimeRequest,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  return uploadFilesForResponses({
+    apiBase: request.apiBase || "",
+    apiKey: request.apiKey || "",
+    attachments: [
+      {
+        name: part.file_ref.name,
+        mimeType: part.file_ref.mimeType,
+        storedPath: part.file_ref.storedPath,
+        contentHash: part.file_ref.contentHash,
+      } satisfies ChatFileAttachment,
+    ],
+    signal,
+  });
+}
+
+async function buildResponsesInput(
   messages: AgentModelMessage[],
-): { instructions?: string; input: ResponsesInputItem[] } {
+  request: AgentRuntimeRequest,
+  signal?: AbortSignal,
+): Promise<{ instructions?: string; input: ResponsesInputItem[] }> {
   const instructionsParts: string[] = [];
   const input: ResponsesInputItem[] = [];
-
   for (const message of messages) {
     if (message.role === "tool") continue;
     if (message.role === "system") {
@@ -249,28 +235,38 @@ function buildResponsesInput(
       });
       continue;
     }
+    const contentParts: Array<
+      | { type: "input_text"; text: string }
+      | { type: "input_image"; image_url: string; detail?: "low" | "high" | "auto" }
+      | { type: "input_file"; file_id: string }
+    > = [];
+    for (const part of message.content) {
+      if (part.type === "text") {
+        contentParts.push({ type: "input_text", text: part.text });
+        continue;
+      }
+      if (part.type === "image_url") {
+        contentParts.push({
+          type: "input_image",
+          image_url: part.image_url.url,
+          detail: part.image_url.detail,
+        });
+        continue;
+      }
+      const fileIds = await uploadFilePart(part, request, signal);
+      for (const fileId of fileIds) {
+        contentParts.push({
+          type: "input_file",
+          file_id: fileId,
+        });
+      }
+    }
     input.push({
       type: "message",
       role: message.role,
-      content: message.content.map((part) => {
-        if (part.type === "text") {
-          return { type: "input_text" as const, text: part.text };
-        }
-        if (part.type === "image_url") {
-          return {
-            type: "input_image" as const,
-            image_url: part.image_url.url,
-            detail: part.image_url.detail,
-          };
-        }
-        return {
-          type: "input_text" as const,
-          text: `[Prepared file: ${part.file_ref.name}]`,
-        };
-      }),
+      content: contentParts,
     });
   }
-
   return {
     instructions: instructionsParts.length
       ? instructionsParts.join("\n\n")
@@ -306,205 +302,19 @@ function buildResponsesTools(tools: ToolSpec[]) {
   }));
 }
 
-function normalizeText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    return value.map((entry) => normalizeText(entry)).join("");
-  }
-  if (value && typeof value === "object") {
-    const row = value as { text?: unknown; content?: unknown };
-    return normalizeText(row.text) || normalizeText(row.content);
-  }
-  return "";
-}
-
-function extractOutputTextFromContent(content: unknown): string {
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") return "";
-      const row = entry as ResponsesOutputContent;
-      const typeValue =
-        typeof row.type === "string" ? row.type.toLowerCase() : "";
-      if (typeValue && typeValue !== "output_text" && typeValue !== "text") {
-        return "";
-      }
-      return normalizeText(row.text);
-    })
-    .filter(Boolean)
-    .join("");
-}
-
-function parseToolCallArguments(raw: unknown): unknown {
-  if (typeof raw !== "string" || !raw.trim()) return {};
-  try {
-    return JSON.parse(raw);
-  } catch (_error) {
-    return { raw };
-  }
-}
-
-function extractToolCallsFromOutputs(outputs: unknown): AgentToolCall[] {
-  if (!Array.isArray(outputs)) return [];
-  const calls: AgentToolCall[] = [];
-  for (let index = 0; index < outputs.length; index += 1) {
-    const output = outputs[index];
-    if (!output || typeof output !== "object") continue;
-    const row = output as ResponsesOutputItem;
-    const typeValue =
-      typeof row.type === "string" ? row.type.toLowerCase() : "";
-    if (typeValue !== "function_call") continue;
-    const name =
-      typeof row.name === "string" && row.name.trim() ? row.name.trim() : "";
-    if (!name) continue;
-    const callId =
-      typeof row.call_id === "string" && row.call_id.trim()
-        ? row.call_id.trim()
-        : typeof row.id === "string" && row.id.trim()
-          ? row.id.trim()
-          : `tool-${Date.now()}-${index}`;
-    calls.push({
-      id: callId,
-      name,
-      arguments: parseToolCallArguments(row.arguments),
-    });
-  }
-  return calls;
-}
-
-function extractOutputText(outputs: unknown): string {
-  if (!Array.isArray(outputs)) return "";
-  return outputs
-    .map((output) => {
-      if (!output || typeof output !== "object") return "";
-      const row = output as ResponsesOutputItem;
-      const typeValue =
-        typeof row.type === "string" ? row.type.toLowerCase() : "";
-      if (typeValue === "function_call") return "";
-      return extractOutputTextFromContent(row.content) || normalizeText(row.text);
-    })
-    .filter(Boolean)
-    .join("");
-}
-
-export function normalizeStepFromPayload(
-  data: ResponsesPayload,
-): NormalizedResponsesStep {
-  const outputs = Array.isArray(data.output) ? data.output : [];
-  const responseId =
-    typeof data.id === "string" && data.id.trim() ? data.id.trim() : undefined;
-  const toolCalls = extractToolCallsFromOutputs(outputs);
-  const text =
-    normalizeText(data.output_text).trim() || extractOutputText(outputs).trim();
-  return {
-    responseId,
-    text,
-    toolCalls,
-    outputItems: outputs,
-  };
-}
-
-async function parseResponsesStepStream(
-  stream: ReadableStream<Uint8Array>,
-): Promise<NormalizedResponsesStep> {
-  const reader = stream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let responseId: string | undefined;
-  let latestPayload: ResponsesPayload | null = null;
-  let streamedText = "";
-  const streamedOutputs: ResponsesOutputItem[] = [];
-
-  const mergeOutputItem = (item: unknown) => {
-    if (!item || typeof item !== "object") return;
-    streamedOutputs.push(item as ResponsesOutputItem);
-  };
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) continue;
-        const data = trimmed.slice(5).trim();
-        if (!data || data === "[DONE]") continue;
-        try {
-          const parsed = JSON.parse(data) as {
-            type?: unknown;
-            delta?: unknown;
-            text?: unknown;
-            item?: unknown;
-            response?: ResponsesPayload;
-          };
-          const eventType =
-            typeof parsed.type === "string" ? parsed.type.toLowerCase() : "";
-          if (eventType === "response.output_text.delta") {
-            streamedText += normalizeText(parsed.delta);
-            continue;
-          }
-          if (
-            eventType === "response.output_item.added" ||
-            eventType === "response.output_item.done"
-          ) {
-            mergeOutputItem(parsed.item);
-            continue;
-          }
-          if (eventType === "response.completed" && parsed.response) {
-            latestPayload = parsed.response;
-            if (
-              typeof parsed.response.id === "string" &&
-              parsed.response.id.trim()
-            ) {
-              responseId = parsed.response.id.trim();
-            }
-            continue;
-          }
-        } catch (_error) {
-          continue;
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  if (latestPayload) {
-    const normalized = normalizeStepFromPayload(latestPayload);
-    return {
-      responseId: normalized.responseId || responseId,
-      text: normalized.text || streamedText.trim(),
-      toolCalls: normalized.toolCalls,
-      outputItems: normalized.outputItems,
-    };
-  }
-
-  const toolCalls = extractToolCallsFromOutputs(streamedOutputs);
-  return {
-    responseId,
-    text: streamedText.trim() || extractOutputText(streamedOutputs).trim(),
-    toolCalls,
-    outputItems: streamedOutputs,
-  };
-}
-
-export class CodexResponsesAgentAdapter implements AgentModelAdapter {
+export class OpenAIResponsesAgentAdapter implements AgentModelAdapter {
   private conversationItems: unknown[] | null = null;
 
-  getCapabilities(request: AgentRuntimeRequest): AgentModelCapabilities {
+  getCapabilities(_request: AgentRuntimeRequest): AgentModelCapabilities {
     return {
       streaming: false,
-      toolCalls: isCodexAuthRequest(request),
-      multimodal: isMultimodalRequestSupported(request),
+      toolCalls: true,
+      multimodal: true,
     };
   }
 
-  supportsTools(request: AgentRuntimeRequest): boolean {
-    return this.getCapabilities(request).toolCalls;
+  supportsTools(_request: AgentRuntimeRequest): boolean {
+    return true;
   }
 
   buildInitialMessages(request: AgentRuntimeRequest): AgentModelMessage[] {
@@ -518,7 +328,11 @@ export class CodexResponsesAgentAdapter implements AgentModelAdapter {
       apiKey: request.apiKey || "",
       signal: params.signal,
     });
-    const initialInput = buildResponsesInput(params.messages);
+    const initialInput = await buildResponsesInput(
+      params.messages,
+      request,
+      params.signal,
+    );
     const instructions =
       initialInput.instructions?.trim() ||
       "You are the agent runtime inside a Zotero plugin.";
@@ -535,7 +349,7 @@ export class CodexResponsesAgentAdapter implements AgentModelAdapter {
       tools: buildResponsesTools(params.tools),
       tool_choice: "auto",
       store: false,
-      stream: true,
+      stream: false,
     };
     const url = resolveEndpoint(request.apiBase || "", RESPONSES_ENDPOINT);
     const response = await postWithReasoningFallback({
@@ -546,13 +360,10 @@ export class CodexResponsesAgentAdapter implements AgentModelAdapter {
       buildPayload: () => payload,
       signal: params.signal,
     });
-
-    const normalized = response.body
-      ? await parseResponsesStepStream(response.body)
-      : normalizeStepFromPayload((await response.json()) as ResponsesPayload);
-
+    const normalized = normalizeStepFromPayload(
+      (await response.json()) as ResponsesPayload,
+    );
     this.conversationItems = [...inputItems, ...normalized.outputItems];
-
     if (normalized.toolCalls.length) {
       return {
         kind: "tool_calls",
@@ -564,7 +375,6 @@ export class CodexResponsesAgentAdapter implements AgentModelAdapter {
         },
       };
     }
-
     return {
       kind: "final",
       text: normalized.text,

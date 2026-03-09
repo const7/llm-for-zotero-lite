@@ -1,10 +1,13 @@
 import { AgentToolRegistry } from "./tools/registry";
+import { readAttachmentBytes } from "../modules/contextPanel/attachmentStorage";
 import type {
+  AgentModelContentPart,
   AgentConfirmationResolution,
   AgentEvent,
   AgentModelMessage,
   AgentRuntimeOutcome,
   AgentRuntimeRequest,
+  AgentToolArtifact,
   AgentToolContext,
   AgentToolResult,
 } from "./types";
@@ -32,6 +35,108 @@ function createRunId(): string {
 
 function stringifyToolResult(result: AgentToolResult): string {
   return JSON.stringify(result.content ?? {}, null, 2);
+}
+
+function encodeBytesBase64(bytes: Uint8Array): string {
+  let out = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, Math.min(bytes.length, index + chunkSize));
+    out += String.fromCharCode(...chunk);
+  }
+  const btoaFn =
+    (globalThis as typeof globalThis & { btoa?: (value: string) => string }).btoa;
+  if (typeof btoaFn !== "function") {
+    throw new Error("btoa is unavailable");
+  }
+  return btoaFn(out);
+}
+
+async function toDataUrl(
+  storedPath: string,
+  mimeType: string,
+): Promise<string> {
+  const bytes = await readAttachmentBytes(storedPath);
+  return `data:${mimeType};base64,${encodeBytesBase64(bytes)}`;
+}
+
+function summarizeArtifacts(artifacts: AgentToolArtifact[]): string {
+  const imagePages = artifacts
+    .filter((artifact): artifact is Extract<AgentToolArtifact, { kind: "image" }> => {
+      return artifact.kind === "image";
+    })
+    .map((artifact) => artifact.pageLabel || (Number.isFinite(artifact.pageIndex) ? `${artifact.pageIndex! + 1}` : ""));
+  const fileTitles = artifacts
+    .filter((artifact): artifact is Extract<AgentToolArtifact, { kind: "file_ref" }> => {
+      return artifact.kind === "file_ref";
+    })
+    .map((artifact) => artifact.title || artifact.name);
+  const parts: string[] = [];
+  if (imagePages.length) {
+    parts.push(
+      `Prepared PDF page image${imagePages.length === 1 ? "" : "s"} (${imagePages
+        .filter(Boolean)
+        .map((entry) => `p${entry}`)
+        .join(", ") || `${imagePages.length} page${imagePages.length === 1 ? "" : "s"}`}) for visual inspection.`,
+    );
+  }
+  if (fileTitles.length) {
+    parts.push(
+      `Prepared the PDF file${fileTitles.length === 1 ? "" : "s"} ${fileTitles
+        .map((entry) => `"${entry}"`)
+        .join(", ")} for direct reading.`,
+    );
+  }
+  parts.push(
+    "Use the attached pages or PDF directly when answering. Do not ask the user to re-upload them.",
+  );
+  return parts.join(" ");
+}
+
+async function buildArtifactFollowupMessage(
+  result: AgentToolResult,
+): Promise<AgentModelMessage | null> {
+  const artifacts = Array.isArray(result.artifacts) ? result.artifacts : [];
+  if (!artifacts.length || !result.ok) return null;
+  const parts: AgentModelContentPart[] = [
+    {
+      type: "text",
+      text: summarizeArtifacts(artifacts),
+    },
+  ];
+  for (const artifact of artifacts) {
+    if (artifact.kind === "image") {
+      if (!artifact.storedPath || !artifact.mimeType) continue;
+      try {
+        const url = await toDataUrl(artifact.storedPath, artifact.mimeType);
+        parts.push({
+          type: "image_url",
+          image_url: {
+            url,
+            detail: "high",
+          },
+        });
+      } catch (error) {
+        ztoolkit.log("LLM Agent: Failed to load image artifact", artifact, error);
+      }
+      continue;
+    }
+    parts.push({
+      type: "file_ref",
+      file_ref: {
+        name: artifact.name,
+        mimeType: artifact.mimeType,
+        storedPath: artifact.storedPath,
+        contentHash: artifact.contentHash,
+      },
+    });
+  }
+  return parts.length > 1
+    ? {
+        role: "user",
+        content: parts,
+      }
+    : null;
 }
 
 export class AgentRuntime {
@@ -222,6 +327,7 @@ export class AgentRuntime {
           name: toolResult.name,
           ok: toolResult.ok,
           content: toolResult.content,
+          artifacts: toolResult.artifacts,
         });
         messages.push({
           role: "tool",
@@ -229,6 +335,10 @@ export class AgentRuntime {
           name: toolResult.name,
           content: stringifyToolResult(toolResult),
         });
+        const followupMessage = await buildArtifactFollowupMessage(toolResult);
+        if (followupMessage) {
+          messages.push(followupMessage);
+        }
         if (consecutiveToolErrors >= 2) {
           const finalText =
             currentAnswerText ||

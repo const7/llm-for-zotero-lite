@@ -2045,9 +2045,37 @@
   color: var(--fill-primary);
 }
 
+.llm-agent-hitl-description {
+  font-size: var(--llm-fs-10);
+  line-height: 1.45;
+  color: var(--fill-secondary);
+}
+
 .llm-agent-hitl-label {
   font-size: var(--llm-fs-10);
   color: var(--fill-tertiary);
+}
+
+.llm-agent-hitl-page-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--llm-fs-10);
+  line-height: 1.4;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--stroke-secondary);
+  background: var(--fill-quaternary);
+  color: var(--fill-primary);
+}
+
+.llm-agent-hitl-page-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.llm-agent-hitl-page-input:disabled {
+  opacity: 0.7;
 }
 
 .llm-agent-hitl-input {
@@ -2093,6 +2121,33 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.llm-agent-hitl-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.llm-agent-hitl-preview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.llm-agent-hitl-preview-image {
+  width: 100%;
+  aspect-ratio: 0.72;
+  object-fit: cover;
+  border-radius: 10px;
+  background: var(--fill-quaternary);
+  border: 1px solid var(--stroke-secondary);
+}
+
+.llm-agent-hitl-preview-label {
+  font-size: var(--llm-fs-10);
+  color: var(--fill-secondary);
 }
 
 .llm-agent-hitl-review-item {

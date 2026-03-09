@@ -187,6 +187,10 @@ async function readBytes(path: string): Promise<Uint8Array> {
   throw new Error("No binary read API available");
 }
 
+export async function readAttachmentBytes(path: string): Promise<Uint8Array> {
+  return readBytes(path);
+}
+
 async function writeBytes(path: string, bytes: Uint8Array): Promise<void> {
   const io = getIOUtils();
   if (io?.write) {

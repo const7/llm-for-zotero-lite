@@ -71,6 +71,24 @@ function getMetadataEditDirective(userText: string): string {
   ].join("\n");
 }
 
+function getPdfVisualDirective(request: AgentRuntimeRequest): string {
+  const normalized = (request.userText || "").trim().toLowerCase();
+  const looksLikePdfVisualTask =
+    /\b(pdf|figure|equation|table|diagram|chart|graph|panel|page|layout)\b/.test(
+      normalized,
+    ) ||
+    (Array.isArray(request.screenshots) && request.screenshots.some(Boolean));
+  if (!looksLikePdfVisualTask) return "";
+  return [
+    "When the user asks about a figure, equation, table, page layout, or any PDF-specific visual detail, use the PDF tools instead of guessing from text alone.",
+    "Start with search_pdf_pages to find relevant pages.",
+    "Use prepare_pdf_pages_for_model to send selected PDF pages as images for visual inspection.",
+    "If the user explicitly names page numbers, you may send those pages directly.",
+    "If the pages are auto-selected by the tool, wait for approval before sending them.",
+    "Only use prepare_pdf_file_for_model when the user explicitly asks to inspect the entire PDF or whole document.",
+  ].join("\n");
+}
+
 function buildUserMessage(request: AgentRuntimeRequest): AgentModelMessage {
   const contextLines: string[] = [
     "Current Zotero context summary:",
@@ -132,7 +150,13 @@ function buildUserMessage(request: AgentRuntimeRequest): AgentModelMessage {
 function stringifyContent(content: AgentModelMessage["content"]): string {
   if (typeof content === "string") return content;
   return content
-    .map((part) => (part.type === "text" ? part.text : "[image]"))
+    .map((part) =>
+      part.type === "text"
+        ? part.text
+        : part.type === "image_url"
+          ? "[image]"
+          : "[file]",
+    )
     .join("\n");
 }
 
@@ -156,6 +180,7 @@ function buildMessages(request: AgentRuntimeRequest): AgentModelMessage[] {
     "If a write action is needed, call the write tool and wait for confirmation.",
     "When enough evidence has been collected, answer clearly and concisely.",
     getMetadataEditDirective(request.userText || ""),
+    getPdfVisualDirective(request),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -200,7 +225,19 @@ function buildMessagesPayload(messages: AgentModelMessage[]) {
     }
     return {
       role: message.role,
-      content: message.content,
+      content:
+        typeof message.content === "string"
+          ? message.content
+          : message.content
+              .filter((part) => part.type !== "file_ref")
+              .map((part) =>
+                part.type === "text"
+                  ? part
+                  : {
+                      type: "image_url" as const,
+                      image_url: part.image_url,
+                    },
+              ),
       ...(message.role === "assistant" &&
       Array.isArray(message.tool_calls) &&
       message.tool_calls.length

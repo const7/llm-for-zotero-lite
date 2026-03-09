@@ -1,4 +1,7 @@
 import { assert } from "chai";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { AgentRuntime } from "../src/agent/runtime";
 import { AgentToolRegistry } from "../src/agent/tools/registry";
 import type {
@@ -269,6 +272,145 @@ describe("AgentRuntime", function () {
         ),
       );
     } finally {
+      restoreDb();
+    }
+  });
+
+  it("passes image artifacts back into the next model step", async function () {
+    const restoreDb = installMockDb();
+    const restoreIOUtils = (
+      globalThis as typeof globalThis & {
+        IOUtils?: { read?: (path: string) => Promise<Uint8Array> };
+        btoa?: (value: string) => string;
+      }
+    ).IOUtils;
+    const restoreBtoa = (
+      globalThis as typeof globalThis & { btoa?: (value: string) => string }
+    ).btoa;
+    const tempDir = mkdtempSync(join(tmpdir(), "llm-zotero-agent-runtime-"));
+    const imagePath = join(tempDir, "page.png");
+    writeFileSync(imagePath, Uint8Array.from([137, 80, 78, 71, 1, 2, 3, 4]));
+    try {
+      (
+        globalThis as typeof globalThis & {
+          IOUtils?: { read?: (path: string) => Promise<Uint8Array> };
+        }
+      ).IOUtils = {
+        read: async (path: string) => new Uint8Array(readFileSync(path)),
+      };
+      (
+        globalThis as typeof globalThis & {
+          btoa?: (value: string) => string;
+        }
+      ).btoa = (value: string) => Buffer.from(value, "binary").toString("base64");
+
+      const registry = new AgentToolRegistry();
+      registry.register({
+        spec: {
+          name: "prepare_pdf_pages_for_model",
+          description: "prepare pages",
+          inputSchema: { type: "object" },
+          mutability: "read",
+          requiresConfirmation: false,
+        },
+        validate: () => ({ ok: true, value: {} }),
+        execute: async () => ({
+          content: { pageCount: 1 },
+          artifacts: [
+            {
+              kind: "image" as const,
+              mimeType: "image/png",
+              storedPath: imagePath,
+              contentHash: "hash-1",
+              pageIndex: 2,
+              pageLabel: "3",
+              title: "Paper - page 3",
+            },
+          ],
+        }),
+      });
+
+      let sawArtifactUserMessage = false;
+      const runtime = new AgentRuntime({
+        registry,
+        adapterFactory: () => ({
+          getCapabilities: () => ({
+            streaming: false,
+            toolCalls: true,
+            multimodal: true,
+          }),
+          supportsTools: () => true,
+          async runStep(params: AgentStepParams): Promise<AgentModelStep> {
+            if (!sawArtifactUserMessage) {
+              sawArtifactUserMessage = params.messages.some(
+                (message) =>
+                  message.role === "user" &&
+                  Array.isArray(message.content) &&
+                  message.content.some(
+                    (part) =>
+                      part.type === "image_url" &&
+                      part.image_url.url.startsWith("data:image/png;base64,"),
+                  ),
+              );
+              if (!sawArtifactUserMessage) {
+                return {
+                  kind: "tool_calls",
+                  calls: [
+                    {
+                      id: "call-1",
+                      name: "prepare_pdf_pages_for_model",
+                      arguments: {},
+                    },
+                  ],
+                  assistantMessage: {
+                    role: "assistant",
+                    content: "",
+                    tool_calls: [
+                      {
+                        id: "call-1",
+                        name: "prepare_pdf_pages_for_model",
+                        arguments: {},
+                      },
+                    ],
+                  },
+                };
+              }
+            }
+            return {
+              kind: "final",
+              text: "Done.",
+              assistantMessage: {
+                role: "assistant",
+                content: "Done.",
+              },
+            };
+          },
+        }),
+      });
+
+      const outcome = await runtime.runTurn({
+        request: {
+          conversationKey: 1,
+          mode: "agent",
+          userText: "Explain the figure",
+          model: "gpt-4.1",
+          apiBase: "https://api.openai.com/v1/chat/completions",
+          apiKey: "test",
+        },
+      });
+
+      assert.equal(outcome.kind, "completed");
+      assert.isTrue(sawArtifactUserMessage);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      (
+        globalThis as typeof globalThis & {
+          IOUtils?: { read?: (path: string) => Promise<Uint8Array> };
+        }
+      ).IOUtils = restoreIOUtils;
+      (
+        globalThis as typeof globalThis & { btoa?: (value: string) => string }
+      ).btoa = restoreBtoa;
       restoreDb();
     }
   });

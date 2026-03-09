@@ -30,15 +30,25 @@ export type PendingWriteAction = {
   title: string;
   confirmLabel: string;
   cancelLabel: string;
+  approvalKind?: "write" | "pdf_send";
+  description?: string;
   editableContent?: string;
   contentLabel?: string;
   editorMode?: "plain" | "json";
+  pageSelectionValue?: string;
+  pageSelectionLabel?: string;
   reviewItems?: Array<{
     key: string;
     label: string;
     before?: string;
     after: string;
     multiline?: boolean;
+  }>;
+  previewImages?: Array<{
+    label: string;
+    storedPath: string;
+    mimeType?: string;
+    title?: string;
   }>;
   saveTargets?: Array<{
     id: string;
@@ -79,7 +89,14 @@ export type PromptSpec = {
 export type AgentEvent =
   | { type: "status"; text: string }
   | { type: "tool_call"; callId: string; name: string; args: unknown }
-  | { type: "tool_result"; callId: string; name: string; ok: boolean; content: unknown }
+  | {
+      type: "tool_result";
+      callId: string;
+      name: string;
+      ok: boolean;
+      content: unknown;
+      artifacts?: AgentToolArtifact[];
+    }
   | { type: "confirmation_required"; requestId: string; action: PendingWriteAction }
   | {
       type: "confirmation_resolved";
@@ -126,7 +143,16 @@ export type AgentModelCapabilities = {
 
 export type AgentModelContentPart =
   | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string; detail?: "low" | "high" | "auto" } };
+  | { type: "image_url"; image_url: { url: string; detail?: "low" | "high" | "auto" } }
+  | {
+      type: "file_ref";
+      file_ref: {
+        name: string;
+        mimeType: string;
+        storedPath: string;
+        contentHash?: string;
+      };
+    };
 
 export type AgentSystemMessage = {
   role: "system";
@@ -192,12 +218,41 @@ export type AgentRuntimeOutcome =
       usedFallback: true;
     };
 
+export type AgentToolArtifact =
+  | {
+      kind: "image";
+      mimeType: string;
+      storedPath: string;
+      contentHash?: string;
+      title?: string;
+      pageIndex?: number;
+      pageLabel?: string;
+      paperContext?: PaperContextRef;
+    }
+  | {
+      kind: "file_ref";
+      mimeType: string;
+      storedPath: string;
+      name: string;
+      contentHash?: string;
+      title?: string;
+      paperContext?: PaperContextRef;
+    };
+
 export type AgentToolResult = {
   callId: string;
   name: string;
   ok: boolean;
   content: unknown;
+  artifacts?: AgentToolArtifact[];
 };
+
+export type AgentToolExecutionOutput<TResult = unknown> =
+  | TResult
+  | {
+      content: TResult;
+      artifacts?: AgentToolArtifact[];
+    };
 
 export type AgentToolContext = {
   request: AgentRuntimeRequest;
@@ -214,11 +269,22 @@ export type AgentToolInputValidation<T> =
 export type AgentToolDefinition<TInput = unknown, TResult = unknown> = {
   spec: ToolSpec;
   validate: (args: unknown) => AgentToolInputValidation<TInput>;
-  execute: (input: TInput, context: AgentToolContext) => Promise<TResult>;
+  execute: (
+    input: TInput,
+    context: AgentToolContext,
+  ) => Promise<AgentToolExecutionOutput<TResult>>;
+  shouldRequireConfirmation?: (
+    input: TInput,
+    context: AgentToolContext,
+  ) => boolean | Promise<boolean>;
+  createPendingAction?: (
+    input: TInput,
+    context: AgentToolContext,
+  ) => PendingWriteAction | Promise<PendingWriteAction>;
   createPendingWriteAction?: (
     input: TInput,
     context: AgentToolContext,
-  ) => PendingWriteAction;
+  ) => PendingWriteAction | Promise<PendingWriteAction>;
   applyConfirmation?: (
     input: TInput,
     resolutionData: unknown,

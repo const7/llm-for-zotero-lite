@@ -5,6 +5,7 @@ import type {
 } from "../../../agent/types";
 import type { Message, PaperContextRef } from "../types";
 import { sanitizeText, getSelectedTextSourceIcon } from "../textUtils";
+import { toFileUrl } from "../../../utils/pathFileUrl";
 import {
   normalizePaperContextRefs,
   normalizeSelectedTextSources,
@@ -52,6 +53,9 @@ const AGENT_TRACE_TOOL_LABELS: Record<string, string> = {
   read_paper_front_matter: "Read Front Matter",
   search_library_items: "Search Library",
   audit_article_metadata: "Audit Metadata",
+  search_pdf_pages: "Search PDF Pages",
+  prepare_pdf_pages_for_model: "Prepare PDF Pages",
+  prepare_pdf_file_for_model: "Prepare PDF File",
   read_attachment_text: "Read Attachment",
   save_answer_to_note: "Save to Note",
   edit_article_metadata: "Edit Metadata",
@@ -238,13 +242,63 @@ function renderPendingWriteActionCard(
   title.textContent = pending.action.title;
   card.appendChild(title);
 
-  const contentLabel = doc.createElement("label");
-  contentLabel.className = "llm-agent-hitl-label";
-  contentLabel.textContent = pending.action.contentLabel || "Content";
-  card.appendChild(contentLabel);
+  if (pending.action.description) {
+    const description = doc.createElement("div");
+    description.className = "llm-agent-hitl-description";
+    description.textContent = pending.action.description;
+    card.appendChild(description);
+  }
 
   const reviewItems = renderPendingWriteReviewItems(doc, pending.action);
   let editor: HTMLTextAreaElement | null = null;
+  let pageSelectionInput: HTMLInputElement | null = null;
+
+  if (pending.action.pageSelectionLabel) {
+    const pageLabel = doc.createElement("label");
+    pageLabel.className = "llm-agent-hitl-label";
+    pageLabel.textContent = pending.action.pageSelectionLabel;
+    card.appendChild(pageLabel);
+    pageSelectionInput = doc.createElement("input");
+    pageSelectionInput.type = "text";
+    pageSelectionInput.className = "llm-agent-hitl-page-input";
+    pageSelectionInput.value = pending.action.pageSelectionValue || "";
+    pageSelectionInput.placeholder = "e.g. p3 or p3-5";
+    card.appendChild(pageSelectionInput);
+  }
+
+  if (pending.action.contentLabel && (!reviewItems || pending.action.editableContent)) {
+    const contentLabel = doc.createElement("label");
+    contentLabel.className = "llm-agent-hitl-label";
+    contentLabel.textContent = pending.action.contentLabel;
+    card.appendChild(contentLabel);
+  }
+
+  if (
+    Array.isArray(pending.action.previewImages) &&
+    pending.action.previewImages.length
+  ) {
+    const previewGrid = doc.createElement("div");
+    previewGrid.className = "llm-agent-hitl-preview-grid";
+    for (const image of pending.action.previewImages) {
+      const previewCard = doc.createElement("div");
+      previewCard.className = "llm-agent-hitl-preview-card";
+      const previewImg = doc.createElement("img");
+      previewImg.className = "llm-agent-hitl-preview-image";
+      previewImg.loading = "lazy";
+      previewImg.alt = image.title || image.label;
+      const previewUrl = toFileUrl(image.storedPath);
+      if (previewUrl) {
+        previewImg.src = previewUrl;
+      }
+      const previewLabel = doc.createElement("div");
+      previewLabel.className = "llm-agent-hitl-preview-label";
+      previewLabel.textContent = image.label;
+      previewCard.append(previewImg, previewLabel);
+      previewGrid.appendChild(previewCard);
+    }
+    card.appendChild(previewGrid);
+  }
+
   if (reviewItems) {
     card.appendChild(reviewItems);
   } else {
@@ -278,15 +332,21 @@ function renderPendingWriteActionCard(
     if (editor) {
       editor.disabled = disabled;
     }
+    if (pageSelectionInput) {
+      pageSelectionInput.disabled = disabled;
+    }
     for (const button of buttons) {
       button.disabled = disabled;
     }
   };
   const syncSaveButtons = () => {
     const hasContent = editor ? editor.value.trim().length > 0 : true;
+    const hasPages = pageSelectionInput
+      ? pageSelectionInput.value.trim().length > 0
+      : true;
     for (const button of buttons) {
       if (button.dataset.kind === "save") {
-        button.disabled = !hasContent;
+        button.disabled = !(hasContent && hasPages);
       }
     }
   };
@@ -294,6 +354,12 @@ function renderPendingWriteActionCard(
     setButtonsDisabled(true);
     getAgentRuntime().resolveConfirmation(pending.requestId, true, {
       ...(editor ? { content: editor.value } : {}),
+      ...(pageSelectionInput
+        ? {
+            pageSelection: pageSelectionInput.value,
+            pages: pageSelectionInput.value,
+          }
+        : {}),
       target: targetId === "default" ? undefined : targetId,
     });
   };
@@ -328,6 +394,7 @@ function renderPendingWriteActionCard(
   card.appendChild(actionRow);
   syncSaveButtons();
   editor?.addEventListener("input", syncSaveButtons);
+  pageSelectionInput?.addEventListener("input", syncSaveButtons);
 
   return card;
 }
@@ -444,6 +511,45 @@ function buildAgentTraceToolChips(
     }
   }
 
+  if (
+    toolName === "search_pdf_pages" ||
+    toolName === "prepare_pdf_pages_for_model" ||
+    toolName === "prepare_pdf_file_for_model"
+  ) {
+    const attachmentName = readAgentTraceText(record?.name);
+    if (attachmentName && !chips.length) {
+      chips.push({
+        icon: "📄",
+        label: truncateAgentTraceText(attachmentName, 36),
+        title: attachmentName,
+      });
+    }
+    const pages =
+      Array.isArray(record?.pages) && record?.pages.length
+        ? record.pages
+        : readAgentTraceText(record?.pages)
+          ? [record?.pages]
+          : [];
+    if (pages.length) {
+      const labels = Array.isArray(pages)
+        ? pages
+            .map((entry) =>
+              typeof entry === "number"
+                ? `p${Math.max(1, Math.floor(entry) + 1)}`
+                : truncateAgentTraceText(entry, 16),
+            )
+            .join(", ")
+        : "";
+      if (labels) {
+        chips.push({
+          icon: "§",
+          label: truncateAgentTraceText(labels, 24),
+          title: labels,
+        });
+      }
+    }
+  }
+
   if (toolName === "get_active_context" && !chips.length) {
     return buildAgentTraceRequestChips(userMessage);
   }
@@ -495,6 +601,24 @@ function summarizeAgentTraceToolCall(name: string): AgentTraceSummaryRow {
         icon: "≡",
         text: "Auditing the article metadata field by field",
       };
+    case "search_pdf_pages":
+      return {
+        kind: "tool",
+        icon: "⌕",
+        text: "Locating the most relevant PDF pages",
+      };
+    case "prepare_pdf_pages_for_model":
+      return {
+        kind: "tool",
+        icon: "↓",
+        text: "Preparing PDF pages for visual inspection",
+      };
+    case "prepare_pdf_file_for_model":
+      return {
+        kind: "tool",
+        icon: "⇣",
+        text: "Preparing the full PDF for direct model reading",
+      };
     case "read_attachment_text":
       return {
         kind: "tool",
@@ -539,6 +663,20 @@ function summarizeAgentTraceConfirmationRequest(
       text: "Waiting for your approval before applying the metadata changes",
     };
   }
+  if (toolName === "prepare_pdf_pages_for_model") {
+    return {
+      kind: "plan",
+      icon: "…",
+      text: "Waiting for your approval before sending the selected PDF pages",
+    };
+  }
+  if (toolName === "prepare_pdf_file_for_model") {
+    return {
+      kind: "plan",
+      icon: "…",
+      text: "Waiting for your approval before sending the whole PDF",
+    };
+  }
   return {
     kind: "plan",
     icon: "…",
@@ -561,6 +699,10 @@ function summarizeAgentTraceConfirmationResolved(
           ? "Approval received — saving the note"
           : toolName === "edit_article_metadata"
             ? "Approval received — applying the metadata changes"
+            : toolName === "prepare_pdf_pages_for_model"
+              ? "Approval received — sending the selected PDF pages"
+              : toolName === "prepare_pdf_file_for_model"
+                ? "Approval received — sending the whole PDF"
           : "Approval received — continuing",
     };
   }
@@ -572,6 +714,10 @@ function summarizeAgentTraceConfirmationResolved(
         ? "Note save cancelled"
         : toolName === "edit_article_metadata"
           ? "Metadata changes cancelled"
+          : toolName === "prepare_pdf_pages_for_model"
+            ? "PDF page send cancelled"
+            : toolName === "prepare_pdf_file_for_model"
+              ? "Whole-PDF send cancelled"
         : "Action cancelled",
   };
 }
@@ -668,6 +814,34 @@ function summarizeAgentTraceToolResult(
             : "The metadata already looks complete from the available evidence",
       };
     }
+    case "search_pdf_pages": {
+      const count = Array.isArray(normalized?.pages) ? normalized.pages.length : 0;
+      return {
+        kind: count > 0 ? "ok" : "skip",
+        icon: count > 0 ? "✓" : "−",
+        text:
+          count > 0
+            ? `Located ${count} relevant PDF page${count === 1 ? "" : "s"}`
+            : "Could not find relevant PDF pages",
+      };
+    }
+    case "prepare_pdf_pages_for_model": {
+      const count = Array.isArray(normalized?.pages) ? normalized.pages.length : 0;
+      return {
+        kind: count > 0 ? "ok" : "skip",
+        icon: count > 0 ? "✓" : "−",
+        text:
+          count > 0
+            ? `Prepared ${count} PDF page image${count === 1 ? "" : "s"} for inspection`
+            : "Could not prepare PDF page images",
+      };
+    }
+    case "prepare_pdf_file_for_model":
+      return {
+        kind: "ok",
+        icon: "✓",
+        text: "Prepared the whole PDF for direct model reading",
+      };
     case "read_paper_excerpt":
       return {
         kind: "ok",
@@ -755,6 +929,17 @@ function buildInitialAgentMessage(
       ? "I’ve got your request and the attached context. I’ll audit the article metadata first, then show you the proposed changes before I apply them."
       : "I’ve got your request. I’ll audit the article metadata first, then show you the proposed changes before I apply them.";
   }
+  if (firstToolName === "search_pdf_pages") {
+    return requestChips.length
+      ? "I’ve got your question and the attached context. I’ll identify the relevant PDF pages first, then inspect them directly before I answer."
+      : "I’ve got your question. I’ll identify the relevant PDF pages first, then inspect them directly before I answer.";
+  }
+  if (firstToolName === "prepare_pdf_pages_for_model") {
+    return "I’ve got your question. I’m preparing the requested PDF pages so I can inspect them visually before I answer.";
+  }
+  if (firstToolName === "prepare_pdf_file_for_model") {
+    return "I’ve got your request. I’ll prepare the full PDF for direct inspection, then continue once you approve it.";
+  }
   return requestChips.length
     ? "I’ve got your question and the attached context. I’m checking that first so I can ground the answer properly."
     : "I’ve got your question. I’m checking the current context first.";
@@ -780,6 +965,12 @@ function buildToolFollowUpMessage(
         return "I know what I need now, so I’m searching your library next.";
       case "audit_article_metadata":
         return "I know which article is in scope now, so I’m auditing the metadata field by field next.";
+      case "search_pdf_pages":
+        return "I know which PDF is in scope now, so I’m locating the most relevant pages next.";
+      case "prepare_pdf_pages_for_model":
+        return "I found the right pages, so I’m preparing them for visual inspection next.";
+      case "prepare_pdf_file_for_model":
+        return "This looks like a full-document request, so I’m preparing the whole PDF next.";
       case "read_attachment_text":
         return "I’ve narrowed it down, so I’m opening the attached file next.";
       case "save_answer_to_note":
@@ -797,6 +988,10 @@ function buildToolFollowUpMessage(
       ? "I’ve prepared the draft. Review or edit it below, then choose where you want me to save it."
       : nextPayload.action.toolName === "edit_article_metadata"
         ? "I’ve prepared the metadata updates. Review or edit them below, then apply them if they look right."
+        : nextPayload.action.toolName === "prepare_pdf_pages_for_model"
+          ? "I’ve prepared the PDF pages. Review them below, adjust the page list if needed, then apply when you want me to send them."
+          : nextPayload.action.toolName === "prepare_pdf_file_for_model"
+            ? "I’ve prepared the whole PDF for model input. Review the action below, then apply if you want me to continue."
       : "I’m ready for the next action. Review it below and approve if you want me to continue.";
   }
   if (nextPayload.type === "message_delta") {
@@ -910,6 +1105,10 @@ function buildAgentTraceDisplayItems(
               ? "I drafted the note. Review or edit it below, then tell me where you want me to save it."
               : entry.payload.action.toolName === "edit_article_metadata"
                 ? "I drafted the metadata updates. Review or edit them below, then apply them if they look right."
+                : entry.payload.action.toolName === "prepare_pdf_pages_for_model"
+                  ? "I picked the PDF pages I need. Review them below, edit the page list if needed, then apply when you want me to continue."
+                  : entry.payload.action.toolName === "prepare_pdf_file_for_model"
+                    ? "I’m ready to send the whole PDF. Review the action below, then apply if you want me to continue."
               : "I’m ready for the next action, but I need your approval before I continue.",
         });
         items.push({
@@ -937,6 +1136,12 @@ function buildAgentTraceDisplayItems(
               : confirmationToolNames.get(entry.payload.requestId) ===
                   "edit_article_metadata"
                 ? "Thanks — I’m applying those metadata changes now."
+                : confirmationToolNames.get(entry.payload.requestId) ===
+                    "prepare_pdf_pages_for_model"
+                  ? "Thanks — I’m sending those PDF pages to the model now."
+                  : confirmationToolNames.get(entry.payload.requestId) ===
+                      "prepare_pdf_file_for_model"
+                    ? "Thanks — I’m sending the whole PDF to the model now."
               : "Thanks — I’m continuing with that action now."
             : confirmationToolNames.get(entry.payload.requestId) ===
                 "save_answer_to_note"
@@ -944,6 +1149,12 @@ function buildAgentTraceDisplayItems(
               : confirmationToolNames.get(entry.payload.requestId) ===
                   "edit_article_metadata"
                 ? "No problem — I left the metadata unchanged."
+                : confirmationToolNames.get(entry.payload.requestId) ===
+                    "prepare_pdf_pages_for_model"
+                  ? "No problem — I did not send those PDF pages."
+                  : confirmationToolNames.get(entry.payload.requestId) ===
+                      "prepare_pdf_file_for_model"
+                    ? "No problem — I did not send the whole PDF."
               : "No problem — I stopped there.",
         });
         break;

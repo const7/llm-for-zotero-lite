@@ -951,7 +951,7 @@ async function uploadAttachmentForResponses(params: {
   throw new Error(lastError);
 }
 
-async function uploadFilesForResponses(params: {
+export async function uploadFilesForResponses(params: {
   apiBase: string;
   apiKey: string;
   attachments: ChatFileAttachment[] | undefined;

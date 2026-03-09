@@ -10,12 +10,17 @@ import { createSearchLibraryItemsTool } from "./read/searchLibraryItems";
 import { createReadAttachmentTextTool } from "./read/readAttachmentText";
 import { createReadPaperFrontMatterTool } from "./read/readPaperFrontMatter";
 import { createAuditArticleMetadataTool } from "./read/auditArticleMetadata";
+import { createSearchPdfPagesTool } from "./read/searchPdfPages";
+import { createPreparePdfPagesForModelTool } from "./read/preparePdfPagesForModel";
+import { createPreparePdfFileForModelTool } from "./read/preparePdfFileForModel";
 import { createSaveAnswerToNoteTool } from "./write/saveAnswerToNote";
 import { createEditArticleMetadataTool } from "./write/editArticleMetadata";
+import { PdfPageService } from "../services/pdfPageService";
 
 type BuiltInAgentToolDeps = {
   zoteroGateway: ZoteroGateway;
   pdfService: PdfService;
+  pdfPageService: PdfPageService;
   retrievalService: RetrievalService;
 };
 
@@ -39,6 +44,9 @@ export function createBuiltInToolRegistry(
   registry.register(
     createAuditArticleMetadataTool(deps.zoteroGateway, deps.pdfService),
   );
+  registry.register(createSearchPdfPagesTool(deps.pdfPageService));
+  registry.register(createPreparePdfPagesForModelTool(deps.pdfPageService));
+  registry.register(createPreparePdfFileForModelTool(deps.pdfPageService));
   registry.register(createReadAttachmentTextTool());
   registry.register(createSaveAnswerToNoteTool(deps.zoteroGateway));
   registry.register(createEditArticleMetadataTool(deps.zoteroGateway));
