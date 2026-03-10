@@ -399,6 +399,9 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   const popupAddTextEnabledInput = doc.querySelector(
     `#${config.addonRef}-popup-add-text-enabled`,
   ) as HTMLInputElement | null;
+  const enableAgentModeInput = doc.querySelector(
+    `#${config.addonRef}-enable-agent-mode`,
+  ) as HTMLInputElement | null;
 
   if (!modelSections) return;
 
@@ -979,6 +982,22 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       Zotero.Prefs.set(
         `${config.prefsPrefix}.showPopupAddText`,
         popupAddTextEnabledInput.checked,
+        true,
+      );
+    });
+  }
+
+  if (enableAgentModeInput) {
+    const prefValue = Zotero.Prefs.get(
+      `${config.prefsPrefix}.enableAgentMode`,
+      true,
+    );
+    enableAgentModeInput.checked =
+      prefValue === true || `${prefValue || ""}`.toLowerCase() === "true";
+    enableAgentModeInput.addEventListener("change", () => {
+      Zotero.Prefs.set(
+        `${config.prefsPrefix}.enableAgentMode`,
+        enableAgentModeInput.checked,
         true,
       );
     });

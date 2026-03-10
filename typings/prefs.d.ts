@@ -26,6 +26,7 @@ declare namespace _ZoteroTypes {
       "maxTokensTertiary": string;
       "temperatureQuaternary": string;
       "maxTokensQuaternary": string;
+      "enableAgentMode": boolean;
     };
   }
 }

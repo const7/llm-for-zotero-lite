@@ -87,6 +87,7 @@ import {
 import {
   getAvailableModelEntries,
   getStringPref,
+  getAgentModeEnabled,
   getSelectedModelEntryForItem,
   applyPanelFontScale,
   getAdvancedModelParamsForEntry,
@@ -430,13 +431,22 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   };
   const updateRuntimeModeButton = () => {
     if (!runtimeModeBtn) return;
+    const agentFeatureEnabled = getAgentModeEnabled();
+    // Hide the entire toggle when the agent mode feature is disabled in prefs.
+    runtimeModeBtn.style.display = agentFeatureEnabled ? "" : "none";
+    if (!agentFeatureEnabled) {
+      // Force chat mode when the feature is hidden so state stays consistent.
+      if (item) selectedRuntimeModeCache.set(getConversationKey(item), "chat");
+      panelRoot.dataset.runtimeMode = "chat";
+      return;
+    }
     const mode = getCurrentRuntimeMode();
     const enabled = mode === "agent";
     const label = runtimeModeBtn.querySelector(
       ".llm-agent-toggle-label",
     ) as HTMLSpanElement | null;
     if (label) {
-      label.textContent = "Agent mode";
+      label.textContent = "Agent (beta)";
     }
     runtimeModeBtn.classList.toggle("llm-agent-toggle-enabled", enabled);
     runtimeModeBtn.dataset.mode = mode;

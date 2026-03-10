@@ -33,6 +33,21 @@ export function getStringPref(key: string): string {
   return typeof value === "string" ? value : "";
 }
 
+export function getBoolPref(key: string, defaultValue = false): boolean {
+  const value = getZoteroPrefs()?.get?.(`${config.prefsPrefix}.${key}`, true);
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return defaultValue;
+}
+
+export function getAgentModeEnabled(): boolean {
+  return getBoolPref("enableAgentMode", false);
+}
+
 const LAST_REASONING_LEVEL_PREF_KEY = "lastUsedReasoningLevel";
 const LAST_REASONING_EXPANDED_PREF_KEY = "lastReasoningExpanded";
 const LAST_PAPER_CONVERSATION_MAP_PREF_KEY = "lastUsedPaperConversationMap";
