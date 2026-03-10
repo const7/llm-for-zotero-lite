@@ -14,6 +14,30 @@ import {
 } from "./pdfToolShared";
 import { fail, ok } from "../shared";
 
+type PreparedFileCache = {
+  contextItemId?: number;
+  expiresAt: number;
+};
+
+const fileCache = new Map<number, PreparedFileCache>();
+const CACHE_TTL_MS = 10 * 60 * 1000;
+
+function getCachedFile(conversationKey: number): PreparedFileCache | null {
+  const entry = fileCache.get(conversationKey);
+  if (!entry || Date.now() > entry.expiresAt) {
+    fileCache.delete(conversationKey);
+    return null;
+  }
+  return entry;
+}
+
+function setCachedFile(conversationKey: number, contextItemId?: number): void {
+  fileCache.set(conversationKey, {
+    contextItemId,
+    expiresAt: Date.now() + CACHE_TTL_MS,
+  });
+}
+
 function supportsNativePdfInput(params: {
   providerProtocol?: string;
   apiBase?: string;
@@ -61,7 +85,9 @@ export function createPreparePdfFileForModelTool(
         scope: "whole_document" as const,
       });
     },
-    shouldRequireConfirmation: async () => true,
+    shouldRequireConfirmation: async (_input, context) => {
+      return getCachedFile(context.request.conversationKey) === null;
+    },
     createPendingAction: async (input, context) => {
       const prepared = await pdfPageService.preparePdfFileForModel({
         request: context.request,
@@ -106,6 +132,7 @@ export function createPreparePdfFileForModelTool(
         attachmentId: input.attachmentId,
         name: input.name,
       });
+      setCachedFile(context.request.conversationKey, prepared.target.contextItemId);
       return {
         content: {
           target: {

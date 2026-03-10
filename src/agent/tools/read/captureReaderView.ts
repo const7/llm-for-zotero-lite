@@ -142,7 +142,14 @@ export function createCaptureReaderViewTool(
       });
     },
     shouldRequireConfirmation: async (_input, context) => {
-      return getCachedCapture(context.request.conversationKey) === null;
+      const cached = getCachedCapture(context.request.conversationKey);
+      if (!cached) return true;
+      // If the user has navigated to a different page, ask again
+      const currentPageIndex = pdfPageService.getActivePageIndex();
+      if (currentPageIndex !== null && currentPageIndex !== cached.pageIndex) {
+        return true;
+      }
+      return false;
     },
     createPendingAction: async (input, context) => {
       const preview = await pdfPageService.captureActiveView({

@@ -33,6 +33,36 @@ function samePageSet(left: number[] | undefined, right: number[] | undefined): b
   return normalizedLeft.every((value, index) => value === normalizedRight[index]);
 }
 
+type PreparedPagesCache = {
+  pageIndexes: number[];
+  contextItemId?: number;
+  expiresAt: number;
+};
+
+const pagesCache = new Map<number, PreparedPagesCache>();
+const CACHE_TTL_MS = 10 * 60 * 1000;
+
+function getCachedPages(conversationKey: number): PreparedPagesCache | null {
+  const entry = pagesCache.get(conversationKey);
+  if (!entry || Date.now() > entry.expiresAt) {
+    pagesCache.delete(conversationKey);
+    return null;
+  }
+  return entry;
+}
+
+function setCachedPages(
+  conversationKey: number,
+  pageIndexes: number[],
+  contextItemId?: number,
+): void {
+  pagesCache.set(conversationKey, {
+    pageIndexes,
+    contextItemId,
+    expiresAt: Date.now() + CACHE_TTL_MS,
+  });
+}
+
 export function createPreparePdfPagesForModelTool(
   pdfPageService: PdfPageService,
 ): AgentToolDefinition<PdfTargetArgs, unknown> {
@@ -81,8 +111,13 @@ export function createPreparePdfPagesForModelTool(
       return ok(parsed.value);
     },
     shouldRequireConfirmation: async (input, context) => {
+      // User explicitly typed these page numbers — no need to ask
       const explicit = parsePageSelectionText(context.request.userText);
-      return !samePageSet(input.pages, explicit?.pageIndexes);
+      if (samePageSet(input.pages, explicit?.pageIndexes)) return false;
+      // Same page set already confirmed earlier in this conversation
+      const cached = getCachedPages(context.request.conversationKey);
+      if (cached && samePageSet(input.pages, cached.pageIndexes)) return false;
+      return true;
     },
     createPendingAction: async (input, context) => {
       const preview = await pdfPageService.preparePagesForModel({
@@ -147,6 +182,11 @@ export function createPreparePdfPagesForModelTool(
         pages: input.pages || [],
         neighborPages: input.neighborPages,
       });
+      setCachedPages(
+        context.request.conversationKey,
+        prepared.pages.map((p) => p.pageIndex),
+        prepared.target.contextItemId,
+      );
       return {
         content: {
           target: {

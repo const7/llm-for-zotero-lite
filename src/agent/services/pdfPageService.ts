@@ -590,6 +590,22 @@ export class PdfPageService {
     return parsePageSelectionText(request.userText);
   }
 
+  getActivePageIndex(): number | null {
+    const reader = getActiveReaderForSelectedTab();
+    if (!reader) return null;
+    const app = getPdfViewerApplication(reader);
+    if (!app?.pdfDocument) return null;
+    const rawPageNumber = Number(
+      app?.pdfViewer?.currentPageNumber ||
+        app?.pdfViewer?.currentPageLabel ||
+        app?.page ||
+        1,
+    );
+    return Number.isFinite(rawPageNumber)
+      ? Math.max(0, Math.floor(rawPageNumber) - 1)
+      : null;
+  }
+
   async resolveTarget(
     params: ResolvePdfTargetInput & { request: AgentRuntimeRequest },
   ): Promise<ResolvedPdfTarget> {
