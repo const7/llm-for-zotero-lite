@@ -514,7 +514,6 @@ export async function parseResponsesStepStream(
     }
   };
 
-  let rawDebugLines: string[] = [];
   try {
     while (true) {
       const { value, done } = await reader.read();
@@ -525,7 +524,6 @@ export async function parseResponsesStepStream(
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (rawDebugLines.length < 30) rawDebugLines.push(trimmed.slice(0, 200));
         if (!trimmed.startsWith("data:")) continue;
         const data = trimmed.slice(5).trim();
         if (!data || data === "[DONE]") continue;
@@ -765,7 +763,6 @@ export async function parseResponsesStepStream(
             latestPayload.output_text &&
               normalizeResponsesText(latestPayload.output_text),
           ) || false,
-        rawDebugSample: rawDebugLines,
       });
     }
     return {
@@ -785,7 +782,6 @@ export async function parseResponsesStepStream(
       outputItemTypes: streamedOutputs
         .map((item) => item.type)
         .filter(Boolean),
-      rawDebugSample: rawDebugLines,
     });
   }
   return {
