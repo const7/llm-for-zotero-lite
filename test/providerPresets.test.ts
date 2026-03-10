@@ -22,10 +22,23 @@ describe("providerPresets", function () {
       "anthropic",
     );
     assert.equal(
+      detectProviderPreset("https://api.minimax.io/anthropic/v1/messages"),
+      "minimax",
+    );
+    assert.equal(
+      detectProviderPreset(
+        "https://open.bigmodel.cn/api/anthropic/v1/messages",
+      ),
+      "glm",
+    );
+    assert.equal(
       detectProviderPreset("https://api.deepseek.com/v1/chat/completions"),
       "deepseek",
     );
-    assert.equal(detectProviderPreset("https://api.deepseek.com/v1"), "deepseek");
+    assert.equal(
+      detectProviderPreset("https://api.deepseek.com/v1"),
+      "deepseek",
+    );
     assert.equal(detectProviderPreset("https://api.x.ai/v1/responses"), "grok");
     assert.equal(
       detectProviderPreset(
@@ -41,7 +54,9 @@ describe("providerPresets", function () {
 
   it("falls back to customized for unknown URLs", function () {
     assert.equal(
-      detectProviderPreset("https://custom.provider.example/v1/chat/completions"),
+      detectProviderPreset(
+        "https://custom.provider.example/v1/chat/completions",
+      ),
       "customized",
     );
   });
@@ -60,6 +75,14 @@ describe("providerPresets", function () {
       "https://api.x.ai/v1/responses",
     );
     assert.equal(
+      getProviderPreset("minimax").defaultApiBase,
+      "https://api.minimax.io/anthropic",
+    );
+    assert.equal(
+      getProviderPreset("glm").defaultApiBase,
+      "https://open.bigmodel.cn/api/anthropic",
+    );
+    assert.equal(
       getProviderPreset("kimi").defaultApiBase,
       "https://api.moonshot.cn/v1",
     );
@@ -72,6 +95,14 @@ describe("providerPresets", function () {
       getProviderPreset("anthropic").defaultProtocol,
       "anthropic_messages",
     );
+    assert.deepEqual(getProviderPreset("minimax").supportedProtocols, [
+      "anthropic_messages",
+      "openai_chat_compat",
+    ]);
+    assert.deepEqual(getProviderPreset("glm").supportedProtocols, [
+      "anthropic_messages",
+      "openai_chat_compat",
+    ]);
     assert.deepEqual(getProviderPreset("deepseek").supportedProtocols, [
       "openai_chat_compat",
     ]);

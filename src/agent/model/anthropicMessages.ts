@@ -1,5 +1,8 @@
 import { buildReasoningPayload } from "../../utils/llmClient";
-import { normalizeMaxTokens, normalizeTemperature } from "../../utils/normalization";
+import {
+  normalizeMaxTokens,
+  normalizeTemperature,
+} from "../../utils/normalization";
 import {
   buildProviderTransportHeaders,
   resolveProviderTransportEndpoint,
@@ -13,7 +16,10 @@ import type {
   ToolSpec,
 } from "../types";
 import type { AgentModelAdapter, AgentStepParams } from "./adapter";
-import { isMultimodalRequestSupported, stringifyMessageContent } from "./messageBuilder";
+import {
+  isMultimodalRequestSupported,
+  stringifyMessageContent,
+} from "./messageBuilder";
 import {
   createFallbackToolCallId,
   getFetch,
@@ -22,11 +28,10 @@ import {
   parseDataUrl,
 } from "./shared";
 
-type AnthropicContentBlock =
-  | { type: "text"; text: string }
-  | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
-  | { type: "tool_use"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; tool_use_id: string; content: string };
+type AnthropicContentBlock = {
+  type: string;
+  [key: string]: unknown;
+};
 
 type AnthropicMessage = {
   role: "user" | "assistant";
@@ -35,13 +40,18 @@ type AnthropicMessage = {
 
 type AnthropicResponse = {
   id?: unknown;
-  content?: Array<{
-    type?: unknown;
-    text?: unknown;
-    id?: unknown;
-    name?: unknown;
-    input?: unknown;
-  }>;
+  content?: unknown[];
+};
+
+type AnthropicNormalizedResponse = {
+  text: string;
+  toolCalls: AgentToolCall[];
+  responseBlocks: AnthropicContentBlock[];
+};
+
+type AnthropicStreamBlockState = {
+  block: AnthropicContentBlock;
+  partialJson?: string;
 };
 
 function buildAnthropicTools(tools: ToolSpec[]) {
@@ -52,7 +62,30 @@ function buildAnthropicTools(tools: ToolSpec[]) {
   }));
 }
 
-function buildAnthropicParts(message: AgentModelMessage): AnthropicContentBlock[] {
+function cloneAnthropicContentBlock(
+  block: AnthropicContentBlock,
+): AnthropicContentBlock {
+  return { ...block };
+}
+
+function normalizeAnthropicContentBlock(
+  value: unknown,
+): AnthropicContentBlock | null {
+  if (!value || typeof value !== "object") return null;
+  const type =
+    typeof (value as { type?: unknown }).type === "string"
+      ? (value as { type: string }).type.trim()
+      : "";
+  if (!type) return null;
+  return {
+    ...(value as Record<string, unknown>),
+    type,
+  };
+}
+
+function buildAnthropicParts(
+  message: AgentModelMessage,
+): AnthropicContentBlock[] {
   if (typeof message.content === "string") {
     return [{ type: "text", text: message.content }];
   }
@@ -86,9 +119,10 @@ function buildAnthropicParts(message: AgentModelMessage): AnthropicContentBlock[
   return blocks.length ? blocks : [{ type: "text", text: "" }];
 }
 
-function buildInitialAnthropicMessages(
-  messages: AgentModelMessage[],
-): { system?: string; messages: AnthropicMessage[] } {
+function buildInitialAnthropicMessages(messages: AgentModelMessage[]): {
+  system?: string;
+  messages: AnthropicMessage[];
+} {
   const systemParts: string[] = [];
   const anthropicMessages: AnthropicMessage[] = [];
   for (const message of messages) {
@@ -129,9 +163,8 @@ function buildInitialAnthropicMessages(
 function buildAnthropicContinuationMessages(
   messages: AgentModelMessage[],
 ): AnthropicMessage[] {
-  const { toolMessages, followupUserMessages } = groupToolContinuationMessages(
-    messages,
-  );
+  const { toolMessages, followupUserMessages } =
+    groupToolContinuationMessages(messages);
   const anthropicMessages: AnthropicMessage[] = [];
   if (toolMessages.length) {
     anthropicMessages.push({
@@ -152,25 +185,26 @@ function buildAnthropicContinuationMessages(
   return anthropicMessages;
 }
 
-function normalizeAnthropicResponse(data: AnthropicResponse): {
-  text: string;
-  toolCalls: AgentToolCall[];
-} {
-  const toolCalls: AgentToolCall[] = [];
+function normalizeAnthropicResponseBlocks(
+  blocks: AnthropicContentBlock[],
+): AnthropicNormalizedResponse {
   const textParts: string[] = [];
-  const content = Array.isArray(data.content) ? data.content : [];
-  for (let index = 0; index < content.length; index += 1) {
-    const block = content[index];
-    if (!block || typeof block !== "object") continue;
-    const typeValue =
-      typeof block.type === "string" ? block.type.toLowerCase() : "";
+  const toolCalls: AgentToolCall[] = [];
+  const responseBlocks = blocks.map((block) =>
+    cloneAnthropicContentBlock(block),
+  );
+  for (let index = 0; index < responseBlocks.length; index += 1) {
+    const block = responseBlocks[index];
+    const typeValue = block.type.toLowerCase();
     if (typeValue === "text" && typeof block.text === "string") {
       textParts.push(block.text);
       continue;
     }
     if (typeValue !== "tool_use") continue;
     const name =
-      typeof block.name === "string" && block.name.trim() ? block.name.trim() : "";
+      typeof block.name === "string" && block.name.trim()
+        ? block.name.trim()
+        : "";
     if (!name) continue;
     toolCalls.push({
       id:
@@ -178,32 +212,35 @@ function normalizeAnthropicResponse(data: AnthropicResponse): {
           ? block.id.trim()
           : createFallbackToolCallId("anthropic-call", index),
       name,
-      arguments: block.input && typeof block.input === "object" ? block.input : {},
+      arguments:
+        block.input && typeof block.input === "object" ? block.input : {},
     });
   }
   return {
     text: textParts.join(""),
     toolCalls,
+    responseBlocks,
   };
+}
+
+function normalizeAnthropicResponse(
+  data: AnthropicResponse,
+): AnthropicNormalizedResponse {
+  const responseBlocks = (Array.isArray(data.content) ? data.content : [])
+    .map((block) => normalizeAnthropicContentBlock(block))
+    .filter((block): block is AnthropicContentBlock => Boolean(block));
+  return normalizeAnthropicResponseBlocks(responseBlocks);
 }
 
 async function parseAnthropicStepStream(
   stream: ReadableStream<Uint8Array>,
   onTextDelta?: (delta: string) => void | Promise<void>,
-): Promise<{ text: string; toolCalls: AgentToolCall[] }> {
+): Promise<AnthropicNormalizedResponse> {
   const reader = stream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
-  const toolBlocks = new Map<
-    number,
-    {
-      id: string;
-      name: string;
-      partialJson: string;
-      input?: unknown;
-    }
-  >();
+  const contentBlocks = new Map<number, AnthropicStreamBlockState>();
 
   const handleFrame = async (payload: string) => {
     if (!payload || payload === "[DONE]") return;
@@ -229,32 +266,38 @@ async function parseAnthropicStepStream(
         ? parsed.index
         : -1;
     if (eventType === "content_block_start" && index >= 0) {
-      const contentBlock = parsed.content_block;
-      const blockType =
-        typeof contentBlock?.type === "string"
-          ? contentBlock.type.toLowerCase()
-          : "";
-      if (blockType === "tool_use") {
-        toolBlocks.set(index, {
-          id:
-            typeof contentBlock?.id === "string" && contentBlock.id.trim()
-              ? contentBlock.id.trim()
-              : createFallbackToolCallId("anthropic-call", index),
-          name:
-            typeof contentBlock?.name === "string" ? contentBlock.name.trim() : "",
-          partialJson:
-            contentBlock?.input && typeof contentBlock.input === "object"
-              ? JSON.stringify(contentBlock.input)
-              : "",
-          input: contentBlock?.input,
-        });
+      const contentBlock = normalizeAnthropicContentBlock(parsed.content_block);
+      if (contentBlock) {
+        const state: AnthropicStreamBlockState = { block: contentBlock };
+        if (
+          contentBlock.type.toLowerCase() === "tool_use" &&
+          contentBlock.input &&
+          typeof contentBlock.input === "object" &&
+          Object.keys(contentBlock.input as Record<string, unknown>).length > 0
+        ) {
+          state.partialJson = JSON.stringify(contentBlock.input);
+        }
+        contentBlocks.set(index, state);
       }
       return;
     }
     if (eventType !== "content_block_delta") return;
     const deltaType =
-      typeof parsed.delta?.type === "string" ? parsed.delta.type.toLowerCase() : "";
+      typeof parsed.delta?.type === "string"
+        ? parsed.delta.type.toLowerCase()
+        : "";
     if (deltaType === "text_delta" && typeof parsed.delta?.text === "string") {
+      const existing = contentBlocks.get(index);
+      const nextText =
+        typeof existing?.block.text === "string" ? existing.block.text : "";
+      contentBlocks.set(index, {
+        block: {
+          ...(existing?.block || { type: "text" }),
+          type: existing?.block.type || "text",
+          text: `${nextText}${parsed.delta.text}`,
+        },
+        partialJson: existing?.partialJson,
+      });
       text += parsed.delta.text;
       if (onTextDelta) {
         await onTextDelta(parsed.delta.text);
@@ -262,14 +305,55 @@ async function parseAnthropicStepStream(
       return;
     }
     if (
+      deltaType === "thinking_delta" &&
+      index >= 0 &&
+      typeof (parsed.delta as { thinking?: unknown }).thinking === "string"
+    ) {
+      const deltaThinking = (parsed.delta as { thinking: string }).thinking;
+      const existing = contentBlocks.get(index);
+      const nextThinking =
+        typeof existing?.block.thinking === "string"
+          ? existing.block.thinking
+          : "";
+      contentBlocks.set(index, {
+        block: {
+          ...(existing?.block || { type: "thinking" }),
+          type: existing?.block.type || "thinking",
+          thinking: `${nextThinking}${deltaThinking}`,
+        },
+        partialJson: existing?.partialJson,
+      });
+      return;
+    }
+    if (
+      deltaType === "signature_delta" &&
+      index >= 0 &&
+      typeof (parsed.delta as { signature?: unknown }).signature === "string"
+    ) {
+      const deltaSignature = (parsed.delta as { signature: string }).signature;
+      const existing = contentBlocks.get(index);
+      const nextSignature =
+        typeof existing?.block.signature === "string"
+          ? existing.block.signature
+          : "";
+      contentBlocks.set(index, {
+        block: {
+          ...(existing?.block || { type: "thinking" }),
+          type: existing?.block.type || "thinking",
+          signature: `${nextSignature}${deltaSignature}`,
+        },
+        partialJson: existing?.partialJson,
+      });
+      return;
+    }
+    if (
       deltaType === "input_json_delta" &&
       index >= 0 &&
       typeof parsed.delta?.partial_json === "string"
     ) {
-      const existing = toolBlocks.get(index);
-      if (existing) {
-        existing.partialJson += parsed.delta.partial_json;
-      }
+      const existing = contentBlocks.get(index);
+      if (!existing) return;
+      existing.partialJson = `${existing.partialJson || ""}${parsed.delta.partial_json}`;
     }
   };
 
@@ -296,32 +380,41 @@ async function parseAnthropicStepStream(
     reader.releaseLock();
   }
 
-  const toolCalls: AgentToolCall[] = Array.from(toolBlocks.values())
-    .filter((block) => block.name)
-    .map((block, index) => ({
-      id: block.id || createFallbackToolCallId("anthropic-call", index),
-      name: block.name,
-      arguments: block.partialJson
-        ? (() => {
-            try {
-              return JSON.parse(block.partialJson);
-            } catch (_error) {
-              return block.input && typeof block.input === "object"
-                ? block.input
-                : {};
-            }
-          })()
-        : block.input && typeof block.input === "object"
-          ? block.input
-          : {},
-    }));
-  return { text, toolCalls };
+  const responseBlocks = Array.from(contentBlocks.entries())
+    .sort((left, right) => left[0] - right[0])
+    .map(([, state]) => {
+      const block = cloneAnthropicContentBlock(state.block);
+      if (block.type.toLowerCase() === "tool_use" && state.partialJson) {
+        try {
+          block.input = JSON.parse(state.partialJson);
+        } catch (_error) {
+          if (!(block.input && typeof block.input === "object")) {
+            block.input = {};
+          }
+        }
+      }
+      return block;
+    });
+  const normalized = normalizeAnthropicResponseBlocks(responseBlocks);
+  return {
+    ...normalized,
+    text: normalized.text || text,
+  };
 }
 
 function buildAssistantConversationMessage(step: {
   text: string;
   toolCalls: AgentToolCall[];
+  responseBlocks?: AnthropicContentBlock[];
 }): AnthropicMessage {
+  if (Array.isArray(step.responseBlocks) && step.responseBlocks.length) {
+    return {
+      role: "assistant",
+      content: step.responseBlocks.map((block) =>
+        cloneAnthropicContentBlock(block),
+      ),
+    };
+  }
   return {
     role: "assistant",
     content: [
@@ -416,7 +509,9 @@ export class AnthropicMessagesAgentAdapter implements AgentModelAdapter {
     }
     const normalized = response.body
       ? await parseAnthropicStepStream(response.body, params.onTextDelta)
-      : normalizeAnthropicResponse((await response.json()) as AnthropicResponse);
+      : normalizeAnthropicResponse(
+          (await response.json()) as AnthropicResponse,
+        );
     this.conversationMessages = [
       ...messages,
       buildAssistantConversationMessage(normalized),

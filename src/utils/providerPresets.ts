@@ -4,6 +4,8 @@ export type SupportedProviderPresetId =
   | "openai"
   | "gemini"
   | "anthropic"
+  | "minimax"
+  | "glm"
   | "deepseek"
   | "grok"
   | "qwen"
@@ -83,9 +85,31 @@ const GEMINI_PATHS = [
 ];
 
 const ANTHROPIC_PATHS = ["/", "/v1", "/v1/messages", "/v1/chat/completions"];
+const MINIMAX_PATHS = [
+  "/",
+  "/v1",
+  "/v1/chat/completions",
+  "/anthropic",
+  "/anthropic/v1",
+  "/anthropic/v1/messages",
+];
+const GLM_PATHS = [
+  "/",
+  "/api/paas/v4",
+  "/api/paas/v4/chat/completions",
+  "/api/coding/paas/v4",
+  "/api/coding/paas/v4/chat/completions",
+  "/api/anthropic",
+  "/api/anthropic/v1",
+  "/api/anthropic/v1/messages",
+];
 const DEEPSEEK_PATHS = ["/", "/v1", "/v1/chat/completions"];
 const GROK_PATHS = ["/", "/v1", "/v1/chat/completions", "/v1/responses"];
-const QWEN_PATHS = ["/", "/compatible-mode/v1", "/compatible-mode/v1/chat/completions"];
+const QWEN_PATHS = [
+  "/",
+  "/compatible-mode/v1",
+  "/compatible-mode/v1/chat/completions",
+];
 const KIMI_PATHS = ["/", "/v1", "/v1/chat/completions"];
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -109,8 +133,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       "responses_api",
       "openai_chat_compat",
     ],
-    helperText:
-      "Preset uses Gemini's native generateContent endpoint.",
+    helperText: "Preset uses Gemini's native generateContent endpoint.",
     matches: makeHostAndPathMatcher(
       ["generativelanguage.googleapis.com"],
       GEMINI_PATHS,
@@ -122,9 +145,31 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultApiBase: "https://api.anthropic.com/v1",
     defaultProtocol: "anthropic_messages",
     supportedProtocols: ["anthropic_messages", "openai_chat_compat"],
-    helperText:
-      "Preset uses Anthropic's native Messages API.",
+    helperText: "Preset uses Anthropic's native Messages API.",
     matches: makeHostAndPathMatcher(["api.anthropic.com"], ANTHROPIC_PATHS),
+  },
+  {
+    id: "minimax",
+    label: "MiniMax",
+    defaultApiBase: "https://api.minimax.io/anthropic",
+    defaultProtocol: "anthropic_messages",
+    supportedProtocols: ["anthropic_messages", "openai_chat_compat"],
+    helperText:
+      "Preset uses MiniMax's recommended Anthropic-compatible endpoint.",
+    matches: makeHostAndPathMatcher(
+      ["api.minimax.io", "api.minimaxi.com"],
+      MINIMAX_PATHS,
+    ),
+  },
+  {
+    id: "glm",
+    label: "GLM",
+    defaultApiBase: "https://open.bigmodel.cn/api/anthropic",
+    defaultProtocol: "anthropic_messages",
+    supportedProtocols: ["anthropic_messages", "openai_chat_compat"],
+    helperText:
+      "Preset uses GLM's Claude-compatible endpoint for agent tool use.",
+    matches: makeHostAndPathMatcher(["open.bigmodel.cn"], GLM_PATHS),
   },
   {
     id: "deepseek",
@@ -151,8 +196,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultApiBase: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     defaultProtocol: "openai_chat_compat",
     supportedProtocols: ["openai_chat_compat"],
-    helperText:
-      "Preset uses DashScope's compatible-mode API base (v1).",
+    helperText: "Preset uses DashScope's compatible-mode API base (v1).",
     matches: makeHostAndPathMatcher(
       ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"],
       QWEN_PATHS,
@@ -164,8 +208,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultApiBase: "https://api.moonshot.cn/v1",
     defaultProtocol: "openai_chat_compat",
     supportedProtocols: ["openai_chat_compat"],
-    helperText:
-      "Preset uses Moonshot's official API base (v1).",
+    helperText: "Preset uses Moonshot's official API base (v1).",
     matches: makeHostAndPathMatcher(
       ["api.moonshot.cn", "api.moonshot.ai"],
       KIMI_PATHS,

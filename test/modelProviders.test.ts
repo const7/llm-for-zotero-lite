@@ -34,9 +34,20 @@ describe("modelProviders", function () {
       deriveProviderLabel("https://api.openai.com/v1/chat/completions"),
       "OpenAI",
     );
-    assert.equal(deriveProviderLabel("https://api.deepseek.com/v1"), "DeepSeek");
+    assert.equal(
+      deriveProviderLabel("https://api.deepseek.com/v1"),
+      "DeepSeek",
+    );
     assert.equal(deriveProviderLabel("https://api.moonshot.ai/v1"), "Kimi");
     assert.equal(deriveProviderLabel("https://api.x.ai/v1/responses"), "Grok");
+    assert.equal(
+      deriveProviderLabel("https://api.minimax.io/anthropic"),
+      "MiniMax",
+    );
+    assert.equal(
+      deriveProviderLabel("https://open.bigmodel.cn/api/anthropic"),
+      "GLM",
+    );
     assert.equal(
       deriveProviderLabel(
         "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
@@ -185,7 +196,9 @@ describe("modelProviders", function () {
           id: "provider-legacy",
           apiBase: "https://chatgpt.com/backend-api/codex/responses",
           apiKey: "",
-          models: [{ id: "m1", model: "gpt-5.4", temperature: 0.3, maxTokens: 4096 }],
+          models: [
+            { id: "m1", model: "gpt-5.4", temperature: 0.3, maxTokens: 4096 },
+          ],
         },
       ]),
       true,
@@ -216,7 +229,9 @@ describe("modelProviders", function () {
           apiKey: "",
           authMode: "codex_auth",
           providerProtocol: "gemini_native",
-          models: [{ id: "m1", model: "gpt-5.4", temperature: 0.3, maxTokens: 4096 }],
+          models: [
+            { id: "m1", model: "gpt-5.4", temperature: 0.3, maxTokens: 4096 },
+          ],
         },
       ]),
       true,

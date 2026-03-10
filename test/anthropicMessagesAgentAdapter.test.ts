@@ -15,9 +15,9 @@ function makeSseStream(chunks: string[]): ReadableStream<Uint8Array> {
 }
 
 describe("AnthropicMessagesAgentAdapter", function () {
-  const originalToolkit = (globalThis as typeof globalThis & { ztoolkit?: unknown })
-    .ztoolkit;
-  const adapter = new AnthropicMessagesAgentAdapter();
+  const originalToolkit = (
+    globalThis as typeof globalThis & { ztoolkit?: unknown }
+  ).ztoolkit;
   const tools: ToolSpec[] = [
     {
       name: "search_pdf_pages",
@@ -50,6 +50,7 @@ describe("AnthropicMessagesAgentAdapter", function () {
   });
 
   it("serializes native tool schemas and parses tool_use blocks", async function () {
+    const adapter = new AnthropicMessagesAgentAdapter();
     let capturedBody: Record<string, unknown> | null = null;
     (
       globalThis as typeof globalThis & {
@@ -93,7 +94,10 @@ describe("AnthropicMessagesAgentAdapter", function () {
       tools,
     });
 
-    assert.equal((capturedBody?.tools as Array<Record<string, unknown>>)[0]?.name, "search_pdf_pages");
+    assert.equal(
+      (capturedBody?.tools as Array<Record<string, unknown>>)[0]?.name,
+      "search_pdf_pages",
+    );
     assert.equal(step.kind, "tool_calls");
     if (step.kind !== "tool_calls") return;
     assert.equal(step.calls[0].id, "toolu_123");
@@ -101,6 +105,7 @@ describe("AnthropicMessagesAgentAdapter", function () {
   });
 
   it("streams text deltas from native messages SSE", async function () {
+    const adapter = new AnthropicMessagesAgentAdapter();
     const deltas: string[] = [];
     (
       globalThis as typeof globalThis & {
@@ -136,5 +141,92 @@ describe("AnthropicMessagesAgentAdapter", function () {
     if (step.kind !== "final") return;
     assert.equal(step.text, "Hello world");
     assert.deepEqual(deltas, ["Hello ", "world"]);
+  });
+
+  it("preserves native content blocks across tool continuations", async function () {
+    const adapter = new AnthropicMessagesAgentAdapter();
+    const requestBodies: Record<string, unknown>[] = [];
+    let callCount = 0;
+    (
+      globalThis as typeof globalThis & {
+        ztoolkit: { getGlobal: (name: string) => unknown };
+      }
+    ).ztoolkit = {
+      getGlobal: (name: string) => {
+        if (name !== "fetch") return undefined;
+        return async (_url: string, init?: RequestInit) => {
+          callCount += 1;
+          requestBodies.push(
+            JSON.parse(String(init?.body || "{}")) as Record<string, unknown>,
+          );
+          if (callCount === 1) {
+            return {
+              ok: true,
+              status: 200,
+              statusText: "OK",
+              body: makeSseStream([
+                'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n\n',
+                'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Plan first"}}\n\n',
+                'data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-123"}}\n\n',
+                'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_456","name":"search_pdf_pages","input":{}}}\n\n',
+                'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\":\\"methods\\"}"}}\n\n',
+              ]),
+              json: async () => ({}),
+              text: async () => "",
+            };
+          }
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            body: undefined,
+            json: async () => ({
+              content: [{ type: "text", text: "Done" }],
+            }),
+            text: async () => "",
+          };
+        };
+      },
+    };
+
+    const firstStep = await adapter.runStep({
+      request: makeRequest(),
+      messages: [{ role: "user", content: "Search methods" }],
+      tools,
+    });
+
+    assert.equal(firstStep.kind, "tool_calls");
+    if (firstStep.kind !== "tool_calls") return;
+
+    await adapter.runStep({
+      request: makeRequest(),
+      messages: [
+        firstStep.assistantMessage,
+        {
+          role: "tool",
+          tool_call_id: "toolu_456",
+          name: "search_pdf_pages",
+          content: '{"matches":["methods"]}',
+        },
+      ],
+      tools,
+    });
+
+    const secondRequestMessages = requestBodies[1]?.messages as Array<{
+      role?: string;
+      content?: Array<Record<string, unknown>>;
+    }>;
+    assert.equal(secondRequestMessages[1]?.role, "assistant");
+    assert.deepEqual(secondRequestMessages[1]?.content?.[0], {
+      type: "thinking",
+      thinking: "Plan first",
+      signature: "sig-123",
+    });
+    assert.deepEqual(secondRequestMessages[1]?.content?.[1], {
+      type: "tool_use",
+      id: "toolu_456",
+      name: "search_pdf_pages",
+      input: { query: "methods" },
+    });
   });
 });

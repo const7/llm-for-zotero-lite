@@ -8,12 +8,109 @@ import type { ProviderProtocol } from "./providerProtocol";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 
+type ParsedApiBase = {
+  origin: string;
+  hostname: string;
+  pathname: string;
+};
+
 function trimTrailingSlash(value: string): string {
   return value.trim().replace(/\/+$/, "");
 }
 
-export function normalizeAnthropicMessagesBase(apiBase: string): string {
+function parseApiBase(apiBase: string): ParsedApiBase | null {
   const cleaned = trimTrailingSlash(apiBase);
+  if (!cleaned) return null;
+  try {
+    const parsed = new URL(cleaned);
+    return {
+      origin: parsed.origin,
+      hostname: parsed.hostname.trim().toLowerCase(),
+      pathname: parsed.pathname.replace(/\/+$/, "") || "/",
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+function isMiniMaxHost(parsed: ParsedApiBase | null): boolean {
+  return Boolean(
+    parsed &&
+    (parsed.hostname === "api.minimax.io" ||
+      parsed.hostname === "api.minimaxi.com"),
+  );
+}
+
+function isBigModelHost(parsed: ParsedApiBase | null): boolean {
+  return Boolean(parsed && parsed.hostname === "open.bigmodel.cn");
+}
+
+function rewriteApiBasePath(parsed: ParsedApiBase, pathname: string): string {
+  return `${parsed.origin}${pathname}`;
+}
+
+function normalizeOpenAICompatibleBase(apiBase: string): string {
+  const cleaned = trimTrailingSlash(apiBase);
+  const parsed = parseApiBase(cleaned);
+  if (!parsed) return cleaned;
+
+  if (isMiniMaxHost(parsed)) {
+    if (
+      parsed.pathname === "/" ||
+      parsed.pathname === "/anthropic" ||
+      parsed.pathname === "/anthropic/v1" ||
+      parsed.pathname === "/anthropic/v1/messages"
+    ) {
+      return rewriteApiBasePath(parsed, "/v1");
+    }
+  }
+
+  if (isBigModelHost(parsed)) {
+    if (
+      parsed.pathname === "/" ||
+      parsed.pathname === "/api/anthropic" ||
+      parsed.pathname === "/api/anthropic/v1" ||
+      parsed.pathname === "/api/anthropic/v1/messages"
+    ) {
+      return rewriteApiBasePath(parsed, "/api/paas/v4");
+    }
+  }
+
+  return cleaned;
+}
+
+function normalizeAnthropicCompatibleBase(apiBase: string): string {
+  const cleaned = trimTrailingSlash(apiBase);
+  const parsed = parseApiBase(cleaned);
+  if (!parsed) return cleaned;
+
+  if (isMiniMaxHost(parsed)) {
+    if (
+      parsed.pathname === "/" ||
+      parsed.pathname === "/v1" ||
+      parsed.pathname === "/v1/chat/completions"
+    ) {
+      return rewriteApiBasePath(parsed, "/anthropic");
+    }
+  }
+
+  if (isBigModelHost(parsed)) {
+    if (
+      parsed.pathname === "/" ||
+      parsed.pathname === "/api/paas/v4" ||
+      parsed.pathname === "/api/paas/v4/chat/completions" ||
+      parsed.pathname === "/api/coding/paas/v4" ||
+      parsed.pathname === "/api/coding/paas/v4/chat/completions"
+    ) {
+      return rewriteApiBasePath(parsed, "/api/anthropic");
+    }
+  }
+
+  return cleaned;
+}
+
+export function normalizeAnthropicMessagesBase(apiBase: string): string {
+  const cleaned = normalizeAnthropicCompatibleBase(apiBase);
   if (!cleaned) return "";
   return cleaned.replace(/\/messages$/i, "");
 }
@@ -53,7 +150,9 @@ export function resolveGeminiNativeEndpoint(params: {
   const base = normalizeGeminiNativeBase(params.apiBase);
   if (!base) return "";
   const modelName = encodeURIComponent((params.model || "").trim());
-  const action = params.stream ? "streamGenerateContent?alt=sse" : "generateContent";
+  const action = params.stream
+    ? "streamGenerateContent?alt=sse"
+    : "generateContent";
   return `${base}/models/${modelName}:${action}`;
 }
 
@@ -63,11 +162,17 @@ export function resolveProviderTransportEndpoint(params: {
   model?: string;
   stream?: boolean;
 }): string {
-  if (params.protocol === "codex_responses" || params.protocol === "responses_api") {
+  if (
+    params.protocol === "codex_responses" ||
+    params.protocol === "responses_api"
+  ) {
     return resolveEndpoint(params.apiBase, RESPONSES_ENDPOINT);
   }
   if (params.protocol === "openai_chat_compat") {
-    return resolveEndpoint(params.apiBase, API_ENDPOINT);
+    return resolveEndpoint(
+      normalizeOpenAICompatibleBase(params.apiBase),
+      API_ENDPOINT,
+    );
   }
   if (params.protocol === "anthropic_messages") {
     return resolveAnthropicMessagesEndpoint(params.apiBase);

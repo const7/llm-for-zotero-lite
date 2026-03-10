@@ -3321,13 +3321,12 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       <div class="llm-welcome">
         <div class="llm-welcome-icon">💬</div>
         <div class="llm-welcome-text">
-          <div class="llm-welcome-title">LLM-for-Zotero helps answer questions about the current paper.</div>
+          <div class="llm-welcome-title">Ask about the current paper, work across papers, or turn on Agent mode.</div>
           <ul class="llm-welcome-list">
-            <li><strong>Paper chat</strong> sends the current paper's full text on the first turn, then switches to focused retrieval for follow-up questions. <strong>Open chat</strong> gives you a clean slate to add context yourself for questions across papers.</li>
-            <li>Switch between <strong>Paper chat</strong> and <strong>Open chat</strong> by clicking the mode chip. To keep one Open chat across different paper tabs, click the lock icon.</li>
-            <li>Use <strong>Add Text</strong> to include selected PDF passages, and <strong>Screenshots</strong> to attach figures. For multimodal models, screenshots also work well for math equations.</li>
-            <li>Right-click a context item to pin it. Left-click a text context item to jump back to the page where it was selected.</li>
-            <li>Type <strong>/</strong> or use <strong>Context actions</strong> to add other papers or upload files.</li>
+            <li><strong>Paper chat</strong> starts with the current paper. <strong>Open chat</strong> is a blank slate for questions across papers and files.</li>
+            <li>Turn on <strong>Agent mode</strong> when you want the assistant to search your library, inspect papers, and handle multi-step tasks.</li>
+            <li>Use <strong>Add Text</strong>, <strong>Screenshots</strong>, or type <strong>/</strong> to attach passages, figures, other papers, or files.</li>
+            <li>Switch between <strong>Paper chat</strong> and <strong>Open chat</strong> with the mode chip. The lock icon keeps one Open chat across paper tabs.</li>
           </ul>
         </div>
       </div>

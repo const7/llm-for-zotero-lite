@@ -1,8 +1,5 @@
 import { config } from "../../package.json";
-import {
-  DEFAULT_MAX_TOKENS,
-  DEFAULT_TEMPERATURE,
-} from "./llmDefaults";
+import { DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE } from "./llmDefaults";
 import {
   normalizeMaxTokens,
   normalizeOptionalInputTokenCap,
@@ -176,6 +173,10 @@ export function deriveProviderLabel(
     return "OpenAI";
   }
   if (lowerHost.includes("anthropic.com")) return "Anthropic";
+  if (lowerHost.includes("minimax")) return "MiniMax";
+  if (lowerHost.includes("bigmodel.cn") || lowerHost.includes("z.ai")) {
+    return "GLM";
+  }
   if (lowerHost.includes("deepseek.com")) return "DeepSeek";
   if (lowerHost.includes("moonshot.ai") || lowerHost.includes("moonshot.cn")) {
     return "Kimi";
@@ -209,9 +210,7 @@ function extractProviderHost(apiBase: string): string {
   }
 }
 
-function normalizeGroup(
-  group: unknown,
-): ModelProviderGroup | null {
+function normalizeGroup(group: unknown): ModelProviderGroup | null {
   if (!group || typeof group !== "object") return null;
   const rawGroup = group as {
     id?: unknown;
@@ -248,7 +247,9 @@ function normalizeGroup(
     presetIdOverride: normalizePresetIdOverride(rawGroup.presetIdOverride),
   };
 }
-function normalizePresetIdOverride(value: unknown): ProviderPresetId | undefined {
+function normalizePresetIdOverride(
+  value: unknown,
+): ProviderPresetId | undefined {
   if (value !== "customized") return undefined;
   return "customized";
 }
@@ -307,13 +308,15 @@ function storeModelProviderGroups(groups: ModelProviderGroup[]): void {
 function resolveLegacyModelSlot(
   key: LegacyModelSlotKey,
 ): LegacyModelSlot | null {
-  const suffixMap: Record<LegacyModelSlotKey, "" | "Primary" | "Secondary" | "Tertiary" | "Quaternary"> =
-    {
-      primary: "Primary",
-      secondary: "Secondary",
-      tertiary: "Tertiary",
-      quaternary: "Quaternary",
-    };
+  const suffixMap: Record<
+    LegacyModelSlotKey,
+    "" | "Primary" | "Secondary" | "Tertiary" | "Quaternary"
+  > = {
+    primary: "Primary",
+    secondary: "Secondary",
+    tertiary: "Tertiary",
+    quaternary: "Quaternary",
+  };
   const suffix = suffixMap[key];
   const modelName =
     key === "primary"
@@ -331,7 +334,11 @@ function resolveLegacyModelSlot(
       : normalizeApiBase(getStringPref(`apiBase${suffix}`));
   const apiKey =
     key === "primary"
-      ? (getStringPref(`apiKey${suffix}`) || getStringPref("apiKey") || "").trim()
+      ? (
+          getStringPref(`apiKey${suffix}`) ||
+          getStringPref("apiKey") ||
+          ""
+        ).trim()
       : getStringPref(`apiKey${suffix}`).trim();
   const temperature = normalizeTemperature(
     getStringPref(`temperature${suffix}`) || `${DEFAULT_TEMPERATURE}`,
@@ -415,7 +422,9 @@ function migrateLegacyModelProviderGroups(): ModelProviderGroup[] {
   const migration = buildModelProviderGroupsFromLegacySlots(legacySlots);
   storeModelProviderGroups(migration.groups);
 
-  const legacyLastUsedProfile = getStringPref(LEGACY_LAST_MODEL_PROFILE_PREF_KEY)
+  const legacyLastUsedProfile = getStringPref(
+    LEGACY_LAST_MODEL_PROFILE_PREF_KEY,
+  )
     .trim()
     .toLowerCase();
   if (
@@ -483,7 +492,10 @@ export function getRuntimeModelEntries(): RuntimeModelEntry[] {
 
   for (const [groupIndex, group] of groups.entries()) {
     const authMode = normalizeProviderAuthMode(group.authMode);
-    const baseProviderLabel = deriveProviderLabel(group.apiBase, groupIndex + 1);
+    const baseProviderLabel = deriveProviderLabel(
+      group.apiBase,
+      groupIndex + 1,
+    );
     const providerLabel =
       authMode === "codex_auth"
         ? `${baseProviderLabel} (codex auth)`
