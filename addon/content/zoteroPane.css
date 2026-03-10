@@ -2310,6 +2310,11 @@
   min-width: 0;
 }
 
+.llm-agent-hitl-tag-input {
+  width: 100%;
+  min-width: 0;
+}
+
 .llm-agent-hitl-actions {
   display: flex;
   flex-wrap: wrap;

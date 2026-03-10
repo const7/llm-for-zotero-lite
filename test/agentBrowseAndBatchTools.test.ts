@@ -3,6 +3,7 @@ import { AgentToolRegistry } from "../src/agent/tools/registry";
 import { createBrowseCollectionsTool } from "../src/agent/tools/read/browseCollections";
 import { createListCollectionPapersTool } from "../src/agent/tools/read/listCollectionPapers";
 import { createListUnfiledPapersTool } from "../src/agent/tools/read/listUnfiledPapers";
+import { createListUntaggedPapersTool } from "../src/agent/tools/read/listUntaggedPapers";
 import { createApplyTagsTool } from "../src/agent/tools/write/applyTags";
 import { createMoveUnfiledPapersToCollectionTool } from "../src/agent/tools/write/moveUnfiledPapersToCollection";
 import type { AgentToolContext } from "../src/agent/types";
@@ -73,11 +74,26 @@ describe("browse and batch agent tools", function () {
           },
         ],
       }),
+      listUntaggedPaperTargets: async () => ({
+        totalCount: 1,
+        papers: [
+          {
+            itemId: 77,
+            title: "Untagged Paper",
+            firstCreator: "Casey Example",
+            year: "2019",
+            attachments: [{ contextItemId: 301, title: "PDF" }],
+            tags: [],
+            collectionIds: [11],
+          },
+        ],
+      }),
     };
 
     const browseTool = createBrowseCollectionsTool(fakeGateway as never);
     const listCollectionTool = createListCollectionPapersTool(fakeGateway as never);
     const listUnfiledTool = createListUnfiledPapersTool(fakeGateway as never);
+    const listUntaggedTool = createListUntaggedPapersTool(fakeGateway as never);
 
     const browseResult = await browseTool.execute({}, baseContext);
     assert.equal(
@@ -104,11 +120,85 @@ describe("browse and batch agent tools", function () {
 
     const unfiledResult = await listUnfiledTool.execute({}, baseContext);
     assert.equal((unfiledResult as { totalCount: number }).totalCount, 1);
+
+    const untaggedResult = await listUntaggedTool.execute({}, baseContext);
+    assert.equal((untaggedResult as { totalCount: number }).totalCount, 1);
   });
 
-  it("apply_tags builds a checklist confirmation and respects edited payloads", async function () {
+  it("apply_tags can open a guided confirmation for untagged papers", async function () {
+    const registry = new AgentToolRegistry();
+    const fakeGateway = {
+      resolveLibraryID: () => 1,
+      listUntaggedPaperTargets: async () => ({
+        totalCount: 2,
+        papers: [
+          {
+            itemId: 10,
+            title: "Paper One",
+            firstCreator: "Alice Example",
+            year: "2021",
+            attachments: [{ contextItemId: 1001, title: "PDF" }],
+            tags: [],
+            collectionIds: [],
+          },
+          {
+            itemId: 11,
+            title: "Paper Two",
+            firstCreator: "Bob Example",
+            year: "2022",
+            attachments: [{ contextItemId: 1002, title: "PDF" }],
+            tags: [],
+            collectionIds: [],
+          },
+        ],
+      }),
+      getPaperTargetsByItemIds: (itemIds: number[]) =>
+        itemIds.map((itemId) => ({
+          itemId,
+          title: `Paper ${itemId}`,
+          firstCreator: "Author",
+          year: "2024",
+          attachments: [{ contextItemId: itemId + 1000, title: "PDF" }],
+          tags: [],
+          collectionIds: [],
+        })),
+      applyTagAssignments: async () => ({
+        selectedCount: 0,
+        updatedCount: 0,
+        skippedCount: 0,
+        items: [],
+      }),
+      applyTagsToItems: async () => ({
+        selectedCount: 0,
+        updatedCount: 0,
+        skippedCount: 0,
+        items: [],
+      }),
+    };
+    registry.register(createApplyTagsTool(fakeGateway as never));
+
+    const actionable = await registry.prepareExecution(
+      {
+        id: "call-0",
+        name: "apply_tags",
+        arguments: {},
+      },
+      baseContext,
+    );
+    assert.equal(actionable.kind, "confirmation");
+    if (actionable.kind !== "confirmation") return;
+    const field = actionable.action.fields.find((entry) => entry.id === "assignments");
+    assert.equal(field?.type, "tag_assignment_table");
+    assert.lengthOf(
+      field && field.type === "tag_assignment_table" ? field.rows : [],
+      2,
+    );
+  });
+
+  it("apply_tags builds per-paper tag recommendations and respects edited payloads", async function () {
     const calls: Array<Record<string, unknown>> = [];
     const fakeGateway = {
+      resolveLibraryID: () => 1,
       getPaperTargetsByItemIds: () => [
         {
           itemId: 10,
@@ -129,57 +219,92 @@ describe("browse and batch agent tools", function () {
           collectionIds: [],
         },
       ],
-      applyTagsToItems: async (params: Record<string, unknown>) => {
+      applyTagAssignments: async (params: Record<string, unknown>) => {
         calls.push(params);
         return {
-          selectedCount: 1,
-          updatedCount: 1,
+          selectedCount: 2,
+          updatedCount: 2,
           skippedCount: 0,
           items: [],
         };
       },
+      applyTagsToItems: async () => ({
+        selectedCount: 0,
+        updatedCount: 0,
+        skippedCount: 0,
+        items: [],
+      }),
     };
     const tool = createApplyTagsTool(fakeGateway as never);
     const validated = tool.validate({
-      itemIds: [10, 11],
-      tags: ["alpha", "beta"],
+      assignments: [
+        {
+          itemId: 10,
+          tags: ["alpha", "beta"],
+          reason: "The title suggests these tags.",
+        },
+      ],
     });
     assert.isTrue(validated.ok);
     if (!validated.ok) return;
 
-    const pending = tool.createPendingAction?.(validated.value, baseContext);
+    const pending = await tool.createPendingAction?.(validated.value, baseContext);
     assert.exists(pending);
     assert.deepEqual(
       pending?.fields.map((field) => field.type),
-      ["textarea", "checklist"],
+      ["tag_assignment_table"],
     );
-    const checklistField = pending?.fields.find(
-      (field) => field.id === "selectedItemIds",
+    const tableField = pending?.fields.find(
+      (field) => field.id === "assignments",
     );
-    assert.equal(checklistField?.type, "checklist");
-    assert.lengthOf(
-      checklistField && checklistField.type === "checklist"
-        ? checklistField.items
+    assert.equal(tableField?.type, "tag_assignment_table");
+    assert.deepEqual(
+      tableField && tableField.type === "tag_assignment_table"
+        ? tableField.rows.map((row) => ({
+            id: row.id,
+            value: row.value,
+          }))
         : [],
-      2,
+      [
+        { id: "10", value: "alpha, beta" },
+        { id: "11", value: "" },
+      ],
     );
 
     const confirmed = tool.applyConfirmation?.(validated.value, {
-      tags: "beta\ngamma",
-      selectedItemIds: ["10"],
+      assignments: [
+        { id: "10", value: "beta, gamma" },
+        { id: "11", value: "reading-list" },
+      ],
     });
     assert.isTrue(Boolean(confirmed?.ok));
     if (!confirmed?.ok) return;
     assert.deepEqual(confirmed.value, {
-      itemIds: [10],
-      tags: ["beta", "gamma"],
+      assignments: [
+        {
+          itemId: 10,
+          tags: ["beta", "gamma"],
+        },
+        {
+          itemId: 11,
+          tags: ["reading-list"],
+        },
+      ],
     });
 
     const result = await tool.execute(confirmed.value, baseContext);
-    assert.equal((result as { updatedCount: number }).updatedCount, 1);
+    assert.equal((result as { updatedCount: number }).updatedCount, 2);
     assert.deepEqual(calls[0], {
-      itemIds: [10],
-      tags: ["beta", "gamma"],
+      assignments: [
+        {
+          itemId: 10,
+          tags: ["beta", "gamma"],
+        },
+        {
+          itemId: 11,
+          tags: ["reading-list"],
+        },
+      ],
     });
   });
 
@@ -312,7 +437,7 @@ describe("browse and batch agent tools", function () {
       assignmentField && assignmentField.type === "assignment_table"
         ? assignmentField.rows
         : [],
-      2,
+      1,
     );
     assert.deepEqual(
       assignmentField && assignmentField.type === "assignment_table"
@@ -321,10 +446,7 @@ describe("browse and batch agent tools", function () {
             value: row.value,
           }))
         : [],
-      [
-        { id: "10", value: "56" },
-        { id: "11", value: "__skip__" },
-      ],
+      [{ id: "10", value: "56" }],
     );
     const approved = await actionable.execute({
       assignments: [

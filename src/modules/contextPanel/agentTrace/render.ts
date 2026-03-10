@@ -406,6 +406,101 @@ function renderAssignmentTableField(
   };
 }
 
+function renderTagAssignmentTableField(
+  doc: Document,
+  field: Extract<AgentPendingField, { type: "tag_assignment_table" }>,
+): {
+  element: HTMLDivElement;
+  accessor: {
+    id: string;
+    getValue: () => Array<{ id: string; value: string }>;
+    setDisabled: (disabled: boolean) => void;
+    isValid: () => boolean;
+    bindValidity: (callback: () => void) => void;
+  };
+} {
+  const wrap = doc.createElement("div");
+  wrap.className = "llm-agent-hitl-assignment-table";
+
+  const rows: Array<{
+    input: HTMLInputElement;
+    id: string;
+  }> = [];
+  const listeners: Array<() => void> = [];
+  const emitValidityChange = () => {
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+  const getAssignments = () =>
+    rows.map((row) => ({
+      id: row.id,
+      value: row.input.value,
+    }));
+
+  for (const item of field.rows) {
+    const row = doc.createElement("div");
+    row.className = "llm-agent-hitl-assignment-row";
+
+    const content = doc.createElement("div");
+    content.className = "llm-agent-hitl-assignment-content";
+
+    const title = doc.createElement("div");
+    title.className = "llm-agent-hitl-assignment-title";
+    title.textContent = item.label;
+    content.appendChild(title);
+
+    if (item.description) {
+      const description = doc.createElement("div");
+      description.className = "llm-agent-hitl-assignment-description";
+      description.textContent = item.description;
+      content.appendChild(description);
+    }
+
+    const control = doc.createElement("div");
+    control.className = "llm-agent-hitl-assignment-control";
+
+    const inputLabel = doc.createElement("div");
+    inputLabel.className = "llm-agent-hitl-assignment-select-label";
+    inputLabel.textContent = "Suggested tags";
+    control.appendChild(inputLabel);
+
+    const input = doc.createElement("input");
+    input.type = "text";
+    input.className = "llm-agent-hitl-page-input llm-agent-hitl-tag-input";
+    input.value = item.value || "";
+    input.placeholder = item.placeholder || "tag-one, tag-two";
+    input.addEventListener("input", emitValidityChange);
+    control.appendChild(input);
+
+    rows.push({
+      input,
+      id: item.id,
+    });
+
+    row.append(content, control);
+    wrap.appendChild(row);
+  }
+
+  return {
+    element: wrap,
+    accessor: {
+      id: field.id,
+      getValue: () => getAssignments(),
+      setDisabled: (disabled) => {
+        for (const row of rows) {
+          row.input.disabled = disabled;
+        }
+      },
+      isValid: () =>
+        getAssignments().some((entry) => entry.value.trim().length > 0),
+      bindValidity: (callback) => {
+        listeners.push(callback);
+      },
+    },
+  };
+}
+
 function renderPendingWriteActionCard(
   doc: Document,
   pending: { requestId: string; action: AgentPendingAction },
@@ -569,6 +664,17 @@ function renderPendingWriteActionCard(
       label.textContent = field.label;
       card.appendChild(label);
       const rendered = renderAssignmentTableField(doc, field);
+      card.appendChild(rendered.element);
+      fieldAccessors.push(rendered.accessor);
+      continue;
+    }
+
+    if (field.type === "tag_assignment_table") {
+      const label = doc.createElement("label");
+      label.className = "llm-agent-hitl-label";
+      label.textContent = field.label;
+      card.appendChild(label);
+      const rendered = renderTagAssignmentTableField(doc, field);
       card.appendChild(rendered.element);
       fieldAccessors.push(rendered.accessor);
     }

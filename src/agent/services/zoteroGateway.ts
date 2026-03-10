@@ -108,6 +108,11 @@ export type BatchTagItemResult = {
   reason?: string;
 };
 
+export type BatchTagAssignment = {
+  itemId: number;
+  tags: string[];
+};
+
 export type BatchMoveItemResult = {
   itemId: number;
   title: string;
@@ -698,6 +703,41 @@ export class ZoteroGateway {
     };
   }
 
+  async listUntaggedPaperTargets(params: {
+    libraryID: number;
+    limit?: number;
+  }): Promise<{
+    papers: LibraryPaperTarget[];
+    totalCount: number;
+  }> {
+    const libraryID = Number.isFinite(params.libraryID)
+      ? Math.floor(params.libraryID)
+      : 0;
+    if (!libraryID) {
+      throw new Error("No active library available for listing untagged papers");
+    }
+    const candidates = await listLibraryPaperCandidates(libraryID);
+    const papers: LibraryPaperTarget[] = [];
+    for (const candidate of candidates) {
+      const item = this.resolveBibliographicItem(this.getItem(candidate.itemId));
+      if (!item) continue;
+      const target = buildPaperTargetFromItem(item);
+      if (target && target.tags.length === 0) {
+        papers.push(target);
+      }
+    }
+    const normalizedLimit = Number.isFinite(params.limit)
+      ? Math.max(1, Math.floor(params.limit as number))
+      : undefined;
+    return {
+      papers:
+        normalizedLimit && papers.length > normalizedLimit
+          ? papers.slice(0, normalizedLimit)
+          : papers,
+      totalCount: papers.length,
+    };
+  }
+
   async searchLibraryItems(params: {
     libraryID: number;
     query: string;
@@ -712,36 +752,58 @@ export class ZoteroGateway {
     );
   }
 
-  async applyTagsToItems(params: {
-    itemIds: number[];
-    tags: string[];
+  async applyTagAssignments(params: {
+    assignments: BatchTagAssignment[];
   }): Promise<{
     selectedCount: number;
     updatedCount: number;
     skippedCount: number;
     items: BatchTagItemResult[];
   }> {
-    const normalizedTags = Array.from(
-      new Set(params.tags.map((entry) => normalizeText(entry)).filter(Boolean)),
-    );
-    const items = this.getPaperTargetsByItemIds(params.itemIds);
+    const normalizedAssignments: BatchTagAssignment[] = [];
+    const seen = new Set<number>();
+    for (const entry of params.assignments) {
+      const itemId = Number.isFinite(entry.itemId) ? Math.floor(entry.itemId) : 0;
+      const tags = Array.from(
+        new Set(
+          (Array.isArray(entry.tags) ? entry.tags : [])
+            .map((tag) => normalizeText(tag))
+            .filter(Boolean),
+        ),
+      );
+      if (!itemId || !tags.length || seen.has(itemId)) continue;
+      seen.add(itemId);
+      normalizedAssignments.push({
+        itemId,
+        tags,
+      });
+    }
+    if (!normalizedAssignments.length) {
+      throw new Error("No valid tag assignments were provided");
+    }
     const results: BatchTagItemResult[] = [];
-    for (const target of items) {
-      const item = this.resolveBibliographicItem(this.getItem(target.itemId));
+    let updatedCount = 0;
+    for (const assignment of normalizedAssignments) {
+      const item = this.resolveBibliographicItem(this.getItem(assignment.itemId));
       if (!item) {
         results.push({
-          itemId: target.itemId,
-          title: target.title,
+          itemId: assignment.itemId,
+          title: `Item ${assignment.itemId}`,
           status: "missing",
           addedTags: [],
-          skippedTags: normalizedTags,
+          skippedTags: assignment.tags,
           reason: "Item not found",
         });
         continue;
       }
+      const target = buildPaperTargetFromItem(item);
+      const title =
+        target?.title ||
+        normalizeText(item.getDisplayTitle?.()) ||
+        `Item ${item.id}`;
       const addedTags: string[] = [];
       const skippedTags: string[] = [];
-      for (const tag of normalizedTags) {
+      for (const tag of assignment.tags) {
         if (!tag) continue;
         if (item.hasTag?.(tag)) {
           skippedTags.push(tag);
@@ -752,23 +814,40 @@ export class ZoteroGateway {
       }
       if (addedTags.length) {
         await item.saveTx();
+        updatedCount += 1;
       }
       results.push({
         itemId: item.id,
-        title: target.title,
+        title,
         status: addedTags.length ? "updated" : "skipped",
         addedTags,
         skippedTags,
         reason: addedTags.length ? undefined : "All tags already existed",
       });
     }
-    const updatedCount = results.filter((entry) => entry.status === "updated").length;
     return {
-      selectedCount: items.length,
+      selectedCount: normalizedAssignments.length,
       updatedCount,
       skippedCount: results.length - updatedCount,
       items: results,
     };
+  }
+
+  async applyTagsToItems(params: {
+    itemIds: number[];
+    tags: string[];
+  }): Promise<{
+    selectedCount: number;
+    updatedCount: number;
+    skippedCount: number;
+    items: BatchTagItemResult[];
+  }> {
+    return this.applyTagAssignments({
+      assignments: params.itemIds.map((itemId) => ({
+        itemId,
+        tags: params.tags,
+      })),
+    });
   }
 
   async moveUnfiledItemsToCollections(params: {

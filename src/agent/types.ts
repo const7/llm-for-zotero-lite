@@ -100,6 +100,18 @@ export type AgentPendingField =
         value?: string;
         checked?: boolean;
       }>;
+    }
+  | {
+      type: "tag_assignment_table";
+      id: string;
+      label: string;
+      rows: Array<{
+        id: string;
+        label: string;
+        description?: string;
+        value?: string;
+        placeholder?: string;
+      }>;
     };
 
 export type AgentPendingAction = {

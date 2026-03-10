@@ -180,6 +180,7 @@ describe("self-contained agent tool", function () {
         "select",
         "checklist",
         "assignment_table",
+        "tag_assignment_table",
         "review_table",
         "image_gallery",
       ],
@@ -211,6 +212,7 @@ describe("self-contained agent tool", function () {
                 "select",
                 "checklist",
                 "assignment_table",
+                "tag_assignment_table",
                 "review_table",
                 "image_gallery",
               ],
@@ -223,6 +225,10 @@ describe("self-contained agent tool", function () {
               assignments: [
                 { id: "demo-1", value: "secondary", checked: true },
                 { id: "demo-2", value: "__skip__", checked: false },
+              ],
+              tagAssignments: [
+                { id: "demo-1", value: "approved, demo" },
+                { id: "demo-2", value: "" },
               ],
             });
           }

@@ -7,6 +7,7 @@ import { createListPaperContextsTool } from "./read/listPaperContexts";
 import { createBrowseCollectionsTool } from "./read/browseCollections";
 import { createListCollectionPapersTool } from "./read/listCollectionPapers";
 import { createListUnfiledPapersTool } from "./read/listUnfiledPapers";
+import { createListUntaggedPapersTool } from "./read/listUntaggedPapers";
 import { createRetrievePaperEvidenceTool } from "./read/retrievePaperEvidence";
 import { createReadPaperExcerptTool } from "./read/readPaperExcerpt";
 import { createSearchLibraryItemsTool } from "./read/searchLibraryItems";
@@ -43,6 +44,7 @@ export function createBuiltInToolRegistry(
   registry.register(createBrowseCollectionsTool(deps.zoteroGateway));
   registry.register(createListCollectionPapersTool(deps.zoteroGateway));
   registry.register(createListUnfiledPapersTool(deps.zoteroGateway));
+  registry.register(createListUntaggedPapersTool(deps.zoteroGateway));
   registry.register(
     createRetrievePaperEvidenceTool(
       deps.zoteroGateway,

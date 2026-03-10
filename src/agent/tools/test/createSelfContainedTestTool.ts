@@ -139,6 +139,24 @@ export function createSelfContainedTestTool(): AgentToolDefinition<
           ],
         },
         {
+          type: "tag_assignment_table",
+          id: "tagAssignments",
+          label: "Demo tag assignment table",
+          rows: [
+            {
+              id: "demo-1",
+              label: "Demo tag row 1",
+              description: "Suggested tags can be edited here",
+              value: "demo, sample",
+            },
+            {
+              id: "demo-2",
+              label: "Demo tag row 2",
+              placeholder: "tag-one, tag-two",
+            },
+          ],
+        },
+        {
           type: "review_table",
           id: "review",
           rows: [

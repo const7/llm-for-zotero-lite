@@ -148,9 +148,13 @@ function resolveCandidateTargets(
     throw new Error("No active library available for moving unfiled papers");
   }
   const collections = zoteroGateway.listCollectionSummaries(libraryID);
-  if (input.itemIds?.length) {
+  const assignmentItemIds = input.assignments?.map((entry) => entry.itemId) || [];
+  const candidateItemIds = assignmentItemIds.length
+    ? assignmentItemIds
+    : input.itemIds || [];
+  if (candidateItemIds.length) {
     const targets = zoteroGateway
-      .getPaperTargetsByItemIds(input.itemIds)
+      .getPaperTargetsByItemIds(candidateItemIds)
       .filter((target) => target.collectionIds.length === 0);
     return Promise.resolve({
       libraryID,
