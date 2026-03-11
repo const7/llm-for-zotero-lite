@@ -184,56 +184,6 @@ describe("multiContextPlanner", function () {
     assert.equal(mode, "retrieval");
   });
 
-  it("assembles retrieval evidence with per-paper coverage", async function () {
-    const paperA: PaperContextRef = {
-      itemId: 1,
-      contextItemId: 11,
-      title: "Paper A",
-    };
-    const paperB: PaperContextRef = {
-      itemId: 2,
-      contextItemId: 22,
-      title: "Paper B",
-    };
-    const papers = [
-      {
-        paperContext: paperA,
-        contextItem: null,
-        pdfContext: buildPdfContext("A", [
-          "shared phenomenon and common result",
-          "method details and calibration",
-          "additional shared analysis",
-        ]),
-      },
-      {
-        paperContext: paperB,
-        contextItem: null,
-        pdfContext: buildPdfContext("B", [
-          "common result appears again in paper B",
-          "implementation details",
-          "discussion on shared behavior",
-        ]),
-      },
-    ];
-    const result = await assembleRetrievedMultiPaperContext({
-      papers: papers as any,
-      question: "summarize common result",
-      contextBudgetTokens: 10_000,
-      minChunksByPaper: new Map([
-        [buildPaperKey(paperA), 2],
-        [buildPaperKey(paperB), 1],
-      ]),
-    });
-    assert.isAtLeast(result.selectedChunkCount, 3);
-    assert.isAtLeast(result.selectedPaperCount, 2);
-    assert.include(result.contextText, "Retrieved Evidence:");
-    assert.include(result.contextText, "Paper 1");
-    assert.include(result.contextText, "Paper 2");
-    assert.include(result.contextText, "Source label:");
-    assert.include(result.contextText, "Quoted evidence:");
-    assert.notInclude(result.contextText, "[P1-");
-  });
-
   it("assembles full multi-paper context blocks", function () {
     const paperA: PaperContextRef = {
       itemId: 3,

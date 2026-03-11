@@ -209,7 +209,6 @@ Currently, the agent mode supports the following tools:
 - `read_paper_evidence`: Read the paper evidence.
 - `read_paper_excerpt`: Read the paper excerpt.
 - `prepare_pdf_pages_for_model`: Prepare the PDF pages for the model.
-- `prepare_pdf_file_for_model`: Prepare the PDF file for the model.
 - `write_note`: Write a note.
 - `apply_tags`: Apply tags to the paper.
 - ... And more!

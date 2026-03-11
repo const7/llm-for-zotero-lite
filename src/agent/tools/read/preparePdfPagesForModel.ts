@@ -89,7 +89,7 @@ export function createPreparePdfPagesForModelTool(
         "Use prepare_pdf_pages_for_model whenever the user wants you to visually inspect one or more PDF pages (figures, equations, tables, page layout, etc.).",
         "If the user names specific pages or a range (e.g. 'page 3', 'pages 2–4', 'pages 2, 4, 7'), call this tool with the corresponding pages array.",
         "If the user asks to send or inspect the entire PDF/document/paper (e.g. 'send the whole PDF and summarise it'), treat that as a whole-document visual request and call this tool with scope:\"whole_document\" so all pages are sent as images.",
-        "Prefer this tool over prepare_pdf_file_for_model for whole-document inspection so behaviour is consistent across providers — the model can read text, figures, tables, and equations from the rendered page images.",
+        "Use this tool for whole-document inspection so behaviour is consistent across providers — the model can read text, figures, tables, and equations from the rendered page images.",
       ].join("\n"),
     },
     presentation: {

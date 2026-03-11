@@ -32,7 +32,7 @@ export function createSearchPdfPagesTool(
         "Only use search_pdf_pages when the user does NOT have a PDF open in the reader and is asking a general question that requires locating a page (e.g. 'find the section about plasticity').",
         "If the user explicitly names page numbers (a single page or a range like 'pages 3–5'), call prepare_pdf_pages_for_model directly without search, passing those pages.",
         "If the user asks to send or inspect the entire PDF/document/paper (e.g. 'send the whole PDF and summarise it'), treat this as a whole-document *visual* request and call prepare_pdf_pages_for_model with scope:\"whole_document\" so all pages are sent as images.",
-        "Avoid using prepare_pdf_file_for_model for normal requests — whole-document inspection should go through prepare_pdf_pages_for_model so it works consistently across providers.",
+        "Whole-document inspection should go through prepare_pdf_pages_for_model so it works consistently across providers.",
       ].join("\n"),
     },
     presentation: {

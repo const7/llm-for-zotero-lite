@@ -20,10 +20,6 @@ import {
   clearPreparePdfPagesCache,
 } from "./read/preparePdfPagesForModel";
 import {
-  createPreparePdfFileForModelTool,
-  clearPreparePdfFileCache,
-} from "./read/preparePdfFileForModel";
-import {
   createCaptureReaderViewTool,
   clearCaptureReaderViewCache,
 } from "./read/captureReaderView";
@@ -79,7 +75,6 @@ export function createBuiltInToolRegistry(
   );
   registry.register(createSearchPdfPagesTool(deps.pdfPageService));
   registry.register(createPreparePdfPagesForModelTool(deps.pdfPageService));
-  registry.register(createPreparePdfFileForModelTool(deps.pdfPageService));
   registry.register(createCaptureReaderViewTool(deps.pdfPageService));
   registry.register(createReadAttachmentTextTool());
   registry.register(
@@ -105,5 +100,4 @@ export function createBuiltInToolRegistry(
 export function clearAllAgentToolCaches(conversationKey: number): void {
   clearCaptureReaderViewCache(conversationKey);
   clearPreparePdfPagesCache(conversationKey);
-  clearPreparePdfFileCache(conversationKey);
 }
