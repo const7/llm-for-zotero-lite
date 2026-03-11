@@ -14,12 +14,13 @@
 Please see the latest [release notes](https://github.com/yilewang/llm-for-zotero/releases). The plugin name is now changed to `llm-for-zotero`.
 
 
-## Update: 🤖 LLM-for-Zotero now becomes your own Zotero Agent (BETA)! Please check the [Agent Mode](#agent-mode) section for more details.
+## Recent Update: 🤖 LLM-for-Zotero now becomes your own Agent in your Zotero app (BETA)! Please check the [Agent Mode](#agent-mode) section for more details.
 
 LLM-for-Zotero now becomes your own Zotero Agent! It is currently in beta and is disabled by default. To enable it, please go to the settings and check the `Enable Agent Mode` checkbox.
 
 When you enable the agent mode, you will see the `Agent (beta)` toggle in the context bar. Click it to switch to agent mode.
 
+However, the agent mode is still in beta and is disabled by default. The functionality is still limited and is not fully tested. I recommend you to use either Codex, Gemini or Anthropic models to get the best performance. If you have any feedback or suggestions, please feel free to open an issue on GitHub!
 
 ## Previous Update: ChatGPT Plus subscription users can use their Codex quote to access Codex models (e.g. `gpt-5.4`) without an API key. Please see the [Usage Guide](#usage-guide) for more details. 
 
@@ -201,7 +202,7 @@ You can always check the connections by clicking the "Test Connection" button.
 
 ### Agent Mode
 
-When you enable the agent mode, you will see the `Agent (beta)` toggle in the context bar. Click it to switch to agent mode.
+When you enable the agent mode in the preferences settings, you will see the `Agent (beta)` toggle in the context bar. Click it to switch to agent mode.
 
 Currently, the agent mode supports the following tools:
 - `search_related_papers_online`: Search for related or similar papers online.
@@ -252,6 +253,7 @@ I only show some of the tools in the demos below. You can always check the tools
   <img src="./assets/agent/write_note.gif" alt="agent mode demo" width="1024" />
 </p>
 
+This is one the first step for this agent mode. In the future, it should be a versatile agent mastering all the tasks in your Zotero library.
 
 ### Usage Guide
 
