@@ -654,6 +654,7 @@ export class ZoteroGateway {
   listPaperContexts(request: AgentRuntimeRequest): PaperContextRef[] {
     const out = [
       ...normalizePaperContexts(request.selectedPaperContexts),
+      ...normalizePaperContexts(request.fullTextPaperContexts),
       ...normalizePaperContexts(request.pinnedPaperContexts),
     ];
     const activeItem = this.getItem(request.activeItemId);

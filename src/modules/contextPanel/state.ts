@@ -7,6 +7,7 @@ import type {
   SelectedTextContext,
   PaperContextRef,
   ChatRuntimeMode,
+  PaperContextSendMode,
 } from "./types";
 // =============================================================================
 // Module State
@@ -92,6 +93,10 @@ export const selectedImageCache = new Map<number, string[]>();
 export const selectedFileAttachmentCache = new Map<number, ChatAttachment[]>();
 export const selectedFilePreviewExpandedCache = new Map<number, boolean>();
 export const selectedPaperContextCache = new Map<number, PaperContextRef[]>();
+export const paperContextModeOverrides = new Map<
+  number,
+  Map<string, PaperContextSendMode>
+>();
 // Stores the contextItemId of the currently expanded (sticky) paper chip, or false/undefined if none
 export const selectedPaperPreviewExpandedCache = new Map<number, number | false>();
 export const activeGlobalConversationByLibrary = new Map<number, number>();

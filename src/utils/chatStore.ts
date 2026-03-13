@@ -25,6 +25,7 @@ export type StoredChatMessage = {
   selectedTextSources?: SelectedTextSource[];
   selectedTextPaperContexts?: (PaperContextRef | undefined)[];
   paperContexts?: PaperContextRef[];
+  fullTextPaperContexts?: PaperContextRef[];
   screenshotImages?: string[];
   attachments?: Array<{
     id: string;
@@ -166,6 +167,7 @@ export async function initChatStore(): Promise<void> {
         selected_text_sources_json TEXT,
         selected_text_paper_contexts_json TEXT,
         paper_contexts_json TEXT,
+        full_text_paper_contexts_json TEXT,
         screenshot_images TEXT,
         attachments_json TEXT,
         model_name TEXT,
@@ -271,6 +273,15 @@ export async function initChatStore(): Promise<void> {
          ADD COLUMN paper_contexts_json TEXT`,
       );
     }
+    const hasFullTextPaperContextsJsonColumn = Boolean(
+      columns?.some((column) => column?.name === "full_text_paper_contexts_json"),
+    );
+    if (!hasFullTextPaperContextsJsonColumn) {
+      await Zotero.DB.queryAsync(
+        `ALTER TABLE ${CHAT_MESSAGES_TABLE}
+         ADD COLUMN full_text_paper_contexts_json TEXT`,
+      );
+    }
     const hasScreenshotImagesColumn = Boolean(
       columns?.some((column) => column?.name === "screenshot_images"),
     );
@@ -365,6 +376,7 @@ export async function loadConversation(
             selected_text_sources_json AS selectedTextSourcesJson,
             selected_text_paper_contexts_json AS selectedTextPaperContextsJson,
             paper_contexts_json AS paperContextsJson,
+            full_text_paper_contexts_json AS fullTextPaperContextsJson,
             screenshot_images AS screenshotImages,
             attachments_json AS attachmentsJson,
             model_name AS modelName,
@@ -389,6 +401,7 @@ export async function loadConversation(
         selectedTextSourcesJson?: unknown;
         selectedTextPaperContextsJson?: unknown;
         paperContextsJson?: unknown;
+        fullTextPaperContextsJson?: unknown;
         screenshotImages?: unknown;
         attachmentsJson?: unknown;
         modelName?: unknown;
@@ -478,6 +491,21 @@ export async function loadConversation(
         }
       } catch (_err) {
         paperContexts = undefined;
+      }
+    }
+    let fullTextPaperContexts: PaperContextRef[] | undefined;
+    if (
+      typeof row.fullTextPaperContextsJson === "string" &&
+      row.fullTextPaperContextsJson
+    ) {
+      try {
+        const parsed = JSON.parse(row.fullTextPaperContextsJson) as unknown;
+        const normalized = normalizePaperContextRefs(parsed);
+        if (normalized.length) {
+          fullTextPaperContexts = normalized;
+        }
+      } catch (_err) {
+        fullTextPaperContexts = undefined;
       }
     }
     let screenshotImages: string[] | undefined;
@@ -601,6 +629,7 @@ export async function loadConversation(
       })(),
       selectedTextPaperContexts,
       paperContexts,
+      fullTextPaperContexts,
       screenshotImages,
       attachments,
       modelName: typeof row.modelName === "string" ? row.modelName : undefined,
@@ -648,6 +677,9 @@ export async function appendMessage(
     selectedTexts.length,
   );
   const paperContexts = normalizePaperContextRefs(message.paperContexts);
+  const fullTextPaperContexts = normalizePaperContextRefs(
+    message.fullTextPaperContexts,
+  );
   const screenshotImages = Array.isArray(message.screenshotImages)
     ? message.screenshotImages.filter((entry) => Boolean(entry))
     : [];
@@ -671,8 +703,8 @@ export async function appendMessage(
     : [];
   await Zotero.DB.queryAsync(
     `INSERT INTO ${CHAT_MESSAGES_TABLE}
-      (conversation_key, role, text, timestamp, run_mode, agent_run_id, selected_text, selected_texts_json, selected_text_sources_json, selected_text_paper_contexts_json, paper_contexts_json, screenshot_images, attachments_json, model_name, model_entry_id, model_provider_label, reasoning_summary, reasoning_details)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (conversation_key, role, text, timestamp, run_mode, agent_run_id, selected_text, selected_texts_json, selected_text_sources_json, selected_text_paper_contexts_json, paper_contexts_json, full_text_paper_contexts_json, screenshot_images, attachments_json, model_name, model_entry_id, model_provider_label, reasoning_summary, reasoning_details)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       normalizedKey,
       message.role,
@@ -687,6 +719,9 @@ export async function appendMessage(
         ? JSON.stringify(selectedTextPaperContexts)
         : null,
       paperContexts.length ? JSON.stringify(paperContexts) : null,
+      fullTextPaperContexts.length
+        ? JSON.stringify(fullTextPaperContexts)
+        : null,
       screenshotImages.length ? JSON.stringify(screenshotImages) : null,
       attachments.length ? JSON.stringify(attachments) : null,
       message.modelName || null,
@@ -711,6 +746,7 @@ export async function updateLatestUserMessage(
     | "selectedTextSources"
     | "selectedTextPaperContexts"
     | "paperContexts"
+    | "fullTextPaperContexts"
     | "screenshotImages"
     | "attachments"
   >,
@@ -735,6 +771,9 @@ export async function updateLatestUserMessage(
     selectedTexts.length,
   );
   const paperContexts = normalizePaperContextRefs(message.paperContexts);
+  const fullTextPaperContexts = normalizePaperContextRefs(
+    message.fullTextPaperContexts,
+  );
   const screenshotImages = Array.isArray(message.screenshotImages)
     ? message.screenshotImages.filter((entry) => Boolean(entry))
     : [];
@@ -768,6 +807,7 @@ export async function updateLatestUserMessage(
          selected_text_sources_json = ?,
          selected_text_paper_contexts_json = ?,
          paper_contexts_json = ?,
+         full_text_paper_contexts_json = ?,
          screenshot_images = ?,
          attachments_json = ?
      WHERE id = (
@@ -789,6 +829,9 @@ export async function updateLatestUserMessage(
         ? JSON.stringify(selectedTextPaperContexts)
         : null,
       paperContexts.length ? JSON.stringify(paperContexts) : null,
+      fullTextPaperContexts.length
+        ? JSON.stringify(fullTextPaperContexts)
+        : null,
       screenshotImages.length ? JSON.stringify(screenshotImages) : null,
       attachments.length ? JSON.stringify(attachments) : null,
       normalizedKey,

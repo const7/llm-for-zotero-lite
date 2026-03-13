@@ -400,17 +400,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       textContent: "Select references",
     },
   );
-  const slashSendPdfVisualBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-send-pdf-visual-option",
-      type: "button",
-      textContent: "Send entire PDF visually",
-    },
-  );
-  slashMenu.append(slashUploadBtn, slashReferenceBtn, slashSendPdfVisualBtn);
+  slashMenu.append(slashUploadBtn, slashReferenceBtn);
   container.appendChild(slashMenu);
 
   // Retry model menu (opened from latest assistant retry action)

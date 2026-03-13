@@ -15,6 +15,7 @@ export type AgentRequest = {
   activeItemId?: number;
   selectedTexts?: string[];
   selectedPaperContexts?: PaperContextRef[];
+  fullTextPaperContexts?: PaperContextRef[];
   pinnedPaperContexts?: PaperContextRef[];
   attachments?: ChatAttachment[];
   screenshots?: string[];

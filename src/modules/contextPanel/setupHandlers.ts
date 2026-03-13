@@ -1,6 +1,7 @@
 import { createElement } from "../../utils/domHelpers";
 import type { RuntimeModelEntry } from "../../utils/modelProviders";
 import {
+  config,
   AUTO_SCROLL_BOTTOM_THRESHOLD,
   MAX_SELECTED_IMAGES,
   MAX_SELECTED_PAPER_CONTEXTS,
@@ -35,11 +36,11 @@ import {
   selectedImagePreviewActiveIndexCache,
   selectedFilePreviewExpandedCache,
   selectedPaperContextCache,
+  paperContextModeOverrides,
   selectedPaperPreviewExpandedCache,
   pinnedSelectedTextKeys,
   pinnedImageKeys,
   pinnedFileKeys,
-  pinnedPaperKeys,
   setCancelledRequestId,
   currentAbortController,
   panelFontScalePercent,
@@ -141,6 +142,7 @@ import {
   flashPageInLivePdfReader,
 } from "./livePdfSelectionLocator";
 import { resolvePaperContextRefFromAttachment } from "./paperAttribution";
+import { buildPaperKey } from "./pdfContext";
 import { captureScreenshotSelection, optimizeImageDataUrl } from "./screenshot";
 import {
   createNoteFromAssistantText,
@@ -189,6 +191,7 @@ import type {
   ReasoningOption,
   AdvancedModelParams,
   PaperContextRef,
+  PaperContextSendMode,
   SelectedTextContext,
 } from "./types";
 import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/llmClient";
@@ -255,13 +258,10 @@ import {
   clearPinnedContextOwner,
   isPinnedFile,
   isPinnedImage,
-  isPinnedPaper,
   prunePinnedFileKeys,
   prunePinnedImageKeys,
-  prunePinnedPaperKeys,
   removePinnedFile,
   removePinnedImage,
-  removePinnedPaper,
   removePinnedSelectedText,
   retainPinnedFiles,
   retainPinnedImages,
@@ -335,7 +335,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashMenu,
     slashUploadOption,
     slashReferenceOption,
-    slashSendPdfVisualOption,
     imagePreview,
     selectedContextList,
     previewStrip,
@@ -585,6 +584,36 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     updateRuntimeModeButton();
   };
   syncConversationIdentity();
+
+  // Keep the agent mode toggle in sync when the preference is changed in the
+  // Preferences window (which runs in a separate window context).
+  {
+    const agentPrefKey = `${config.prefsPrefix}.enableAgentMode`;
+    let observerId: symbol | undefined;
+    const onAgentPrefChange = () => {
+      if (!(body as Element).isConnected) {
+        // Panel is gone – clean up the observer.
+        try {
+          if (observerId !== undefined)
+            (Zotero as any).Prefs.unregisterObserver(observerId);
+        } catch {
+          // no-op
+        }
+        return;
+      }
+      updateRuntimeModeButton();
+    };
+    try {
+      observerId = (Zotero as any).Prefs.registerObserver(
+        agentPrefKey,
+        onAgentPrefChange,
+        true,
+      );
+    } catch {
+      // Zotero.Prefs.registerObserver not available – no live sync
+    }
+  }
+
   let activeEditSession: EditLatestTurnMarker | null = null;
   let attachmentGcTimer: number | null = null;
   const scheduleAttachmentGc = (delayMs = 5_000) => {
@@ -1337,10 +1366,106 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     clearPinnedContextOwner(pinnedFileKeys, itemId);
   };
 
+  const hasUserTurnsForCurrentConversation = (): boolean => {
+    if (!item) return false;
+    const history = chatHistory.get(getConversationKey(item)) || [];
+    return history.some((message) => message.role === "user");
+  };
+
+  const getPaperModeOverride = (
+    itemId: number,
+    paperContext: PaperContextRef,
+  ): PaperContextSendMode | null => {
+    return paperContextModeOverrides.get(itemId)?.get(buildPaperKey(paperContext)) || null;
+  };
+
+  const setPaperModeOverride = (
+    itemId: number,
+    paperContext: PaperContextRef,
+    mode: PaperContextSendMode,
+  ) => {
+    let overrides = paperContextModeOverrides.get(itemId);
+    if (!overrides) {
+      overrides = new Map<string, PaperContextSendMode>();
+      paperContextModeOverrides.set(itemId, overrides);
+    }
+    overrides.set(buildPaperKey(paperContext), mode);
+  };
+
+  const clearPaperModeOverrides = (itemId: number) => {
+    paperContextModeOverrides.delete(itemId);
+  };
+
+  const consumePaperModeState = (itemId: number) => {
+    if (!item || item.id !== itemId) {
+      clearPaperModeOverrides(itemId);
+      return;
+    }
+    const fullTextPaperContexts = getEffectiveFullTextPaperContexts(item);
+    if (!fullTextPaperContexts.length) return;
+    let overrides = paperContextModeOverrides.get(itemId);
+    for (const paperContext of fullTextPaperContexts) {
+      if (resolvePaperContextNextSendMode(itemId, paperContext) !== "full-next") {
+        continue;
+      }
+      if (!overrides) {
+        overrides = new Map<string, PaperContextSendMode>();
+        paperContextModeOverrides.set(itemId, overrides);
+      }
+      overrides.set(buildPaperKey(paperContext), "retrieval");
+    }
+  };
+
+  const isPaperContextFullTextMode = (
+    mode: PaperContextSendMode | null | undefined,
+  ): boolean => {
+    return mode === "full-next" || mode === "full-sticky";
+  };
+
+  const resolvePaperContextNextSendMode = (
+    itemId: number,
+    paperContext: PaperContextRef,
+  ): PaperContextSendMode => {
+    const explicitMode = getPaperModeOverride(itemId, paperContext);
+    if (explicitMode) return explicitMode;
+    const autoLoadedPaperContext =
+      item && item.id === itemId ? resolveAutoLoadedPaperContext() : null;
+    if (
+      autoLoadedPaperContext &&
+      buildPaperKey(autoLoadedPaperContext) === buildPaperKey(paperContext) &&
+      !hasUserTurnsForCurrentConversation()
+    ) {
+      return "full-next";
+    }
+    return "retrieval";
+  };
+
+  const getEffectiveFullTextPaperContexts = (
+    currentItem: Zotero.Item,
+    selectedPaperContexts?: PaperContextRef[],
+  ): PaperContextRef[] => {
+    const selectedPapers =
+      selectedPaperContexts ||
+      normalizePaperContextEntries(selectedPaperContextCache.get(currentItem.id) || []);
+    const autoLoadedPaperContext = isGlobalPortalItem(currentItem)
+      ? null
+      : resolveAutoLoadedPaperContext();
+    const effectivePapers = normalizePaperContextEntries([
+      ...(autoLoadedPaperContext ? [autoLoadedPaperContext] : []),
+      ...selectedPapers,
+    ]);
+    return effectivePapers.filter(
+      (paperContext) =>
+        isPaperContextFullTextMode(
+          resolvePaperContextNextSendMode(currentItem.id, paperContext),
+        ),
+    );
+  };
+
   const clearSelectedPaperState = (itemId: number) => {
     selectedPaperContextCache.delete(itemId);
     selectedPaperPreviewExpandedCache.delete(itemId);
-    clearPinnedContextOwner(pinnedPaperKeys, itemId);
+    clearPaperModeOverrides(itemId);
   };
 
   const clearSelectedTextState = (itemId: number) => {
@@ -1420,11 +1545,35 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       selectedPaperContextCache.get(itemId) || [],
     );
     if (retained.length) {
-      prunePinnedPaperKeys(pinnedPaperKeys, itemId, retained);
       selectedPaperContextCache.set(itemId, retained);
+    } else {
+      selectedPaperContextCache.delete(itemId);
+    }
+    const autoLoadedPaperContext =
+      item && item.id === itemId ? resolveAutoLoadedPaperContext() : null;
+    const overrides = paperContextModeOverrides.get(itemId);
+    if (overrides?.size) {
+      const validKeys = new Set(
+        retained.map((paperContext) => buildPaperKey(paperContext)),
+      );
+      if (autoLoadedPaperContext) {
+        validKeys.add(buildPaperKey(autoLoadedPaperContext));
+      }
+      for (const key of Array.from(overrides.keys())) {
+        if (!validKeys.has(key)) {
+          overrides.delete(key);
+        }
+      }
+      if (!overrides.size) {
+        paperContextModeOverrides.delete(itemId);
+      }
+    }
+    if (retained.length) {
       return;
     }
-    clearSelectedPaperState(itemId);
+    if (!autoLoadedPaperContext) {
+      selectedPaperPreviewExpandedCache.delete(itemId);
+    }
   };
   const retainPinnedTextState = (itemId: number) => {
     const retained = retainPinnedSelectedTextContexts(
@@ -1800,11 +1949,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       removable?: boolean;
       removableIndex?: number;
       autoLoaded?: boolean;
-      pinned?: boolean;
+      fullText?: boolean;
     },
   ) => {
     const removable = options?.removable === true;
-    const pinned = options?.pinned === true;
+    const fullText = options?.fullText === true;
     const chip = createElement(
       ownerDoc,
       "div",
@@ -1819,8 +1968,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     if (removable) {
       chip.dataset.paperContextIndex = `${options?.removableIndex ?? -1}`;
     }
-    chip.dataset.pinned = pinned ? "true" : "false";
-    chip.classList.toggle("llm-paper-context-chip-pinned", pinned);
+    chip.dataset.fullText = fullText ? "true" : "false";
+    chip.classList.toggle("llm-paper-context-chip-full", fullText);
     chip.classList.add("collapsed");
 
     const chipHeader = createElement(
@@ -1885,7 +2034,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     const selectedPapers = normalizePaperContextEntries(
       selectedPaperContextCache.get(itemId) || [],
     );
-    prunePinnedPaperKeys(pinnedPaperKeys, itemId, selectedPapers);
     const autoLoadedPaperContext = resolveAutoLoadedPaperContext();
     if (!selectedPapers.length && !autoLoadedPaperContext) {
       paperPreview.style.display = "none";
@@ -1907,14 +2055,20 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     if (autoLoadedPaperContext) {
       appendPaperChip(ownerDoc, paperPreviewList, autoLoadedPaperContext, {
         autoLoaded: true,
-        pinned: true,
+        fullText:
+          isPaperContextFullTextMode(
+            resolvePaperContextNextSendMode(itemId, autoLoadedPaperContext),
+          ),
       });
     }
     selectedPapers.forEach((paperContext, index) => {
       appendPaperChip(ownerDoc, paperPreviewList, paperContext, {
         removable: true,
         removableIndex: index,
-        pinned: isPinnedPaper(pinnedPaperKeys, itemId, paperContext),
+        fullText:
+          isPaperContextFullTextMode(
+            resolvePaperContextNextSendMode(itemId, paperContext),
+          ),
       });
     });
   };
@@ -2374,8 +2528,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     paperContexts: Array.isArray(message.paperContexts)
       ? [...message.paperContexts]
       : undefined,
-    pinnedPaperContexts: Array.isArray(message.pinnedPaperContexts)
-      ? [...message.pinnedPaperContexts]
+    fullTextPaperContexts: Array.isArray(message.fullTextPaperContexts)
+      ? [...message.fullTextPaperContexts]
       : undefined,
     attachments: Array.isArray(message.attachments)
       ? message.attachments.map((attachment) => ({ ...attachment }))
@@ -6063,8 +6217,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         : inputBox.value.length;
     return parseAtSearchToken(inputBox.value, caretEnd);
   };
-  // Legacy alias – used internally by consumeActiveAtToken and schedulePaperPickerSearch
-  const getActiveSlashToken = getActiveAtToken;
+  // In non-agent mode, '/' also triggers the paper picker, so check both tokens
+  const getActiveSlashToken = (): ActiveSlashToken | null =>
+    getActiveAtToken() ??
+    (getCurrentRuntimeMode() !== "agent" ? getActiveActionToken() : null);
   const getActiveActionToken = (): ActiveSlashToken | null => {
     const caretEnd =
       typeof inputBox.selectionStart === "number"
@@ -6139,6 +6295,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   /** Populates the action picker based on the current `/query` token. */
   const scheduleActionPickerTrigger = () => {
     if (!item || !actionPicker || !actionPickerList) {
+      closeActionPicker();
+      return;
+    }
+    if (getCurrentRuntimeMode() !== "agent") {
       closeActionPicker();
       return;
     }
@@ -6595,12 +6755,17 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       },
     ];
     selectedPaperContextCache.set(item.id, nextPapers);
+    setPaperModeOverride(
+      item.id,
+      nextPapers[nextPapers.length - 1],
+      "full-next",
+    );
     selectedPaperPreviewExpandedCache.set(item.id, false);
     updatePaperPreviewPreservingScroll();
     if (status) {
       setStatus(
         status,
-        `Paper context added (${nextPapers.length}/${MAX_SELECTED_PAPER_CONTEXTS})`,
+        "Paper context added. Full text will be sent on the next turn.",
         "ready",
       );
     }
@@ -6617,8 +6782,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     inputBox.setSelectionRange(nextCaret, nextCaret);
     return true;
   };
-  // Legacy alias used by selectPaperPickerAttachment
-  const consumeActiveSlashToken = consumeActiveAtToken;
+  // In non-agent mode, '/' also serves as a paper picker token, so consume either
+  const consumeActiveSlashToken = (): boolean =>
+    consumeActiveAtToken() ||
+    (getCurrentRuntimeMode() !== "agent" ? consumeActiveActionToken() : false);
   const consumeActiveActionToken = (): boolean => {
     const token = getActiveActionToken();
     if (!token) return false;
@@ -7175,12 +7342,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     getSelectedTextContextEntries,
     getSelectedPaperContexts: (itemId) =>
       normalizePaperContextEntries(selectedPaperContextCache.get(itemId) || []),
-    getPinnedPaperContexts: (itemId) =>
-      normalizePaperContextEntries(
-        selectedPaperContextCache.get(itemId) || [],
-      ).filter((paperContext) =>
-        isPinnedPaper(pinnedPaperKeys, itemId, paperContext),
-      ),
+    getFullTextPaperContexts: (currentItem, selectedPaperContexts) =>
+      getEffectiveFullTextPaperContexts(currentItem, selectedPaperContexts),
     getSelectedFiles: (itemId) => selectedFileAttachmentCache.get(itemId) || [],
     getSelectedImages: (itemId) => selectedImageCache.get(itemId) || [],
     resolvePromptText,
@@ -7206,6 +7369,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     sendQuestion,
     retainPinnedImageState,
     retainPaperState,
+    consumePaperModeState,
     retainPinnedFileState,
     retainPinnedTextState,
     updatePaperPreviewPreservingScroll,
@@ -7279,8 +7443,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       const selectedPaperContexts = normalizePaperContextEntries(
         selectedPaperContextCache.get(currentItem.id) || [],
       );
-      const pinnedPaperContexts = selectedPaperContexts.filter((paperContext) =>
-        isPinnedPaper(pinnedPaperKeys, currentItem.id, paperContext),
+      const fullTextPaperContexts = getEffectiveFullTextPaperContexts(
+        currentItem,
+        selectedPaperContexts,
       );
       const selectedFiles =
         selectedFileAttachmentCache.get(currentItem.id) || [];
@@ -7305,6 +7470,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       setInlineEditSavedDraft("");
       setInlineEditTarget(null);
       if (newText) {
+        consumePaperModeState(currentItem.id);
+        retainPaperState(currentItem.id);
+        updatePaperPreviewPreservingScroll();
         void editUserTurnAndRetry(
           body,
           currentItem,
@@ -7316,7 +7484,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           selectedTextPaperContexts,
           images,
           selectedPaperContexts,
-          pinnedPaperContexts,
+          fullTextPaperContexts,
           selectedFiles,
           selectedProfile?.model,
           selectedProfile?.apiBase,
@@ -7814,21 +7982,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       e.stopPropagation();
       closeSlashMenu();
       openReferenceSlashFromMenu();
-    });
-  }
-
-  if (slashSendPdfVisualOption) {
-    slashSendPdfVisualOption.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item || !inputBox) return;
-      closeSlashMenu();
-      // Insert a natural-language command that the agent understands as
-      // a whole-document visual request, preserving any existing text prefix.
-      const prefix = inputBox.value.trim();
-      const command = "Send the whole PDF visually and summarise it.";
-      inputBox.value = prefix ? `${prefix}\n${command}` : command;
-      inputBox.focus();
     });
   }
 
@@ -8486,7 +8639,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       ) {
         return;
       }
-      removePinnedPaper(pinnedPaperKeys, item.id, selectedPapers[index]);
+      const removedPaper = selectedPapers[index];
+      if (removedPaper) {
+        paperContextModeOverrides.get(item.id)?.delete(buildPaperKey(removedPaper));
+      }
       const nextPapers = selectedPapers.filter((_, i) => i !== index);
       if (nextPapers.length) {
         selectedPaperContextCache.set(item.id, nextPapers);
@@ -8580,6 +8736,42 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         selectedFilePreviewExpandedCache.set(item.id, false);
       }
       // No full re-render here — DOM classes already toggled above, cache is updated.
+    });
+    paperPreview.addEventListener("contextmenu", (e: Event) => {
+      if (!item) return;
+      const target = e.target as Element | null;
+      if (!target) return;
+      if (target.closest(".llm-paper-context-clear")) return;
+      const paperChip = target.closest(
+        ".llm-paper-context-chip",
+      ) as HTMLDivElement | null;
+      if (!paperChip || !paperPreview.contains(paperChip)) return;
+      const paperContext = resolvePaperContextFromChipElement(paperChip);
+      if (!paperContext) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const nextMode =
+        resolvePaperContextNextSendMode(item.id, paperContext) === "full-sticky"
+          ? "retrieval"
+          : "full-sticky";
+      setPaperModeOverride(item.id, paperContext, nextMode);
+      paperChip.dataset.fullText = isPaperContextFullTextMode(nextMode)
+        ? "true"
+        : "false";
+      paperChip.classList.toggle(
+        "llm-paper-context-chip-full",
+        isPaperContextFullTextMode(nextMode),
+      );
+      closePaperChipMenu();
+      if (status) {
+        setStatus(
+          status,
+          nextMode === "full-sticky"
+            ? "Paper set to always send full text."
+            : "Paper set to retrieval mode.",
+          "ready",
+        );
+      }
     });
   }
 

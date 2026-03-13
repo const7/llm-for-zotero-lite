@@ -6,7 +6,8 @@
       "Bash(grep -v \"node_modules\\\\|\\\\.js$\")",
       "Bash(find /Users/yat-lok/workspace/llm-for-zotero/src -type f \\\\\\( -name \"*.ts\" -o -name \"*.tsx\" \\\\\\) -exec wc -l {} +)",
       "Read(//Users/yat-lok/workspace/llm-for-zotero/**)",
-      "Bash(find /Users/yat-lok/workspace/llm-for-zotero -name *.html -o -name *.xhtml)"
+      "Bash(find /Users/yat-lok/workspace/llm-for-zotero -name *.html -o -name *.xhtml)",
+      "Bash(find /Users/yat-lok/workspace/llm-for-zotero/node_modules -name *.d.ts -path *zotero*)"
     ]
   }
 }

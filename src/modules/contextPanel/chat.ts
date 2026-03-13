@@ -40,6 +40,7 @@ import type {
   SelectedTextContext,
   SelectedTextSource,
   PaperContextRef,
+  PaperContextSendMode,
   ContextAssemblyStrategy,
 } from "./types";
 import {
@@ -51,6 +52,7 @@ import {
   selectedImageCache,
   selectedFileAttachmentCache,
   selectedPaperContextCache,
+  paperContextModeOverrides,
   activeContextPanels,
   activeContextPanelStateSync,
   cancelledRequestId,
@@ -110,6 +112,7 @@ import {
   formatPaperCitationLabel,
   resolvePaperContextRefFromAttachment,
 } from "./paperAttribution";
+import { buildPaperKey } from "./pdfContext";
 import {
   getActiveContextAttachmentFromTabs,
   resolveContextSourceItem,
@@ -677,6 +680,9 @@ function toPanelMessage(message: StoredChatMessage): Message {
     selectedTexts.length,
   );
   const paperContexts = normalizePaperContexts(message.paperContexts);
+  const fullTextPaperContexts = normalizePaperContexts(
+    message.fullTextPaperContexts,
+  );
   return {
     role: message.role,
     text: message.text,
@@ -696,6 +702,9 @@ function toPanelMessage(message: StoredChatMessage): Message {
       : undefined,
     selectedTextExpandedIndex: -1,
     paperContexts: paperContexts.length ? paperContexts : undefined,
+    fullTextPaperContexts: fullTextPaperContexts.length
+      ? fullTextPaperContexts
+      : undefined,
     paperContextsExpanded: false,
     screenshotImages,
     attachments,
@@ -1118,7 +1127,7 @@ async function buildContextPlanForRequest(params: {
   question: string;
   images?: string[];
   paperContexts: PaperContextRef[];
-  pinnedPaperContexts: PaperContextRef[];
+  fullTextPaperContexts: PaperContextRef[];
   recentPaperContexts: PaperContextRef[];
   history: ChatMessage[];
   effectiveRequestConfig: EffectiveRequestConfig;
@@ -1131,7 +1140,7 @@ async function buildContextPlanForRequest(params: {
   strategy: ContextAssemblyStrategy;
   assistantInstruction?: string;
   paperContexts: PaperContextRef[];
-  pinnedPaperContexts: PaperContextRef[];
+  fullTextPaperContexts: PaperContextRef[];
   recentPaperContexts: PaperContextRef[];
 }> {
   const contextSource = resolveContextSourceItem(params.item);
@@ -1148,7 +1157,7 @@ async function buildContextPlanForRequest(params: {
     question: params.question,
     contextPrefix: "",
     paperContexts: params.paperContexts,
-    pinnedPaperContexts: params.pinnedPaperContexts,
+    fullTextPaperContexts: params.fullTextPaperContexts,
     historyPaperContexts: params.recentPaperContexts,
     history: params.history,
     images: params.images,
@@ -1185,7 +1194,7 @@ async function buildContextPlanForRequest(params: {
     strategy: plan.strategy,
     assistantInstruction: plan.assistantInstruction,
     paperContexts: params.paperContexts,
-    pinnedPaperContexts: params.pinnedPaperContexts,
+    fullTextPaperContexts: params.fullTextPaperContexts,
     recentPaperContexts: params.recentPaperContexts,
   };
 }
@@ -1293,7 +1302,7 @@ function reconstructRetryPayload(userMessage: Message): {
   screenshotImages: string[];
   fileAttachments: ChatFileAttachment[];
   paperContexts: PaperContextRef[];
-  pinnedPaperContexts: PaperContextRef[];
+  fullTextPaperContexts: PaperContextRef[];
 } {
   const selectedTexts = getMessageSelectedTexts(userMessage);
   const selectedTextSources = normalizeSelectedTextSources(
@@ -1348,8 +1357,8 @@ function reconstructRetryPayload(userMessage: Message): {
         .slice(0, MAX_SELECTED_IMAGES)
     : [];
   const paperContexts = normalizePaperContexts(userMessage.paperContexts);
-  const pinnedPaperContexts = normalizePaperContexts(
-    userMessage.pinnedPaperContexts,
+  const fullTextPaperContexts = normalizePaperContexts(
+    userMessage.fullTextPaperContexts || userMessage.pinnedPaperContexts,
   );
   const fileAttachmentsForModel: ChatFileAttachment[] = [];
   for (const attachment of fileAttachments) {
@@ -1372,7 +1381,7 @@ function reconstructRetryPayload(userMessage: Message): {
     screenshotImages,
     fileAttachments: fileAttachmentsForModel,
     paperContexts,
-    pinnedPaperContexts,
+    fullTextPaperContexts,
   };
 }
 
@@ -1486,31 +1495,31 @@ function normalizeEditablePaperContexts(
   return normalizePaperContexts(paperContexts);
 }
 
-function normalizeEditablePinnedPaperContexts(
-  pinnedPaperContexts?: PaperContextRef[],
+function normalizeEditableFullTextPaperContexts(
+  fullTextPaperContexts?: PaperContextRef[],
 ): PaperContextRef[] {
-  return normalizePaperContexts(pinnedPaperContexts);
+  return normalizePaperContexts(fullTextPaperContexts);
 }
 
 function includeAutoLoadedPaperContext(
   item: Zotero.Item,
   paperContexts?: PaperContextRef[],
-  pinnedPaperContexts?: PaperContextRef[],
+  fullTextPaperContexts?: PaperContextRef[],
 ): {
   paperContexts: PaperContextRef[];
-  pinnedPaperContexts: PaperContextRef[];
+  fullTextPaperContexts: PaperContextRef[];
 } {
   const normalizedPaperContexts = normalizePaperContexts(paperContexts);
-  const normalizedPinnedPaperContexts =
-    normalizePaperContexts(pinnedPaperContexts);
+  const normalizedFullTextPaperContexts = normalizePaperContexts(
+    fullTextPaperContexts,
+  );
   if (isGlobalPortalItem(item)) {
-    const fallbackPinned =
-      normalizedPinnedPaperContexts.length > 0
-        ? normalizedPinnedPaperContexts
-        : normalizedPaperContexts;
     return {
       paperContexts: normalizedPaperContexts,
-      pinnedPaperContexts: fallbackPinned,
+      fullTextPaperContexts:
+        fullTextPaperContexts === undefined
+          ? normalizedPaperContexts
+          : normalizedFullTextPaperContexts,
     };
   }
   const contextSource = resolveContextSourceItem(item);
@@ -1520,7 +1529,7 @@ function includeAutoLoadedPaperContext(
   if (!autoLoadedPaperContext) {
     return {
       paperContexts: normalizedPaperContexts,
-      pinnedPaperContexts: normalizedPinnedPaperContexts,
+      fullTextPaperContexts: normalizedFullTextPaperContexts,
     };
   }
   return {
@@ -1528,10 +1537,13 @@ function includeAutoLoadedPaperContext(
       autoLoadedPaperContext,
       ...normalizedPaperContexts,
     ]),
-    pinnedPaperContexts: normalizePaperContexts([
-      autoLoadedPaperContext,
-      ...normalizedPinnedPaperContexts,
-    ]),
+    fullTextPaperContexts:
+      fullTextPaperContexts === undefined
+        ? normalizePaperContexts([
+            autoLoadedPaperContext,
+            ...normalizedFullTextPaperContexts,
+          ])
+        : normalizedFullTextPaperContexts,
   };
 }
 
@@ -1580,6 +1592,9 @@ function syncComposeContextForInlineEdit(
   }
 
   const paperContexts = normalizePaperContexts(userMessage.paperContexts);
+  const fullTextPaperContexts = normalizePaperContexts(
+    userMessage.fullTextPaperContexts || userMessage.pinnedPaperContexts,
+  );
   const autoLoadedPaperContext = isGlobalPortalItem(item)
     ? null
     : resolvePaperContextRefFromAttachment(
@@ -1599,6 +1614,15 @@ function syncComposeContextForInlineEdit(
   } else {
     selectedPaperContextCache.delete(item.id);
   }
+  const nextOverrides = new Map<string, PaperContextSendMode>();
+  for (const paperContext of fullTextPaperContexts) {
+    nextOverrides.set(buildPaperKey(paperContext), "full-next");
+  }
+  if (nextOverrides.size) {
+    paperContextModeOverrides.set(item.id, nextOverrides);
+  } else {
+    paperContextModeOverrides.delete(item.id);
+  }
 
   activeContextPanelStateSync.get(body)?.();
 }
@@ -1612,7 +1636,7 @@ export async function editLatestUserMessageAndRetry(
   selectedTextPaperContexts?: (PaperContextRef | undefined)[],
   screenshotImages?: string[],
   paperContexts?: PaperContextRef[],
-  pinnedPaperContexts?: PaperContextRef[],
+  fullTextPaperContexts?: PaperContextRef[],
   attachments?: ChatAttachment[],
   expected?: EditLatestTurnMarker,
   model?: string,
@@ -1655,15 +1679,15 @@ export async function editLatestUserMessageAndRetry(
         .slice(0, MAX_SELECTED_IMAGES)
     : [];
   const normalizedPaperContexts = normalizeEditablePaperContexts(paperContexts);
-  const normalizedPinnedPaperContexts =
-    normalizeEditablePinnedPaperContexts(pinnedPaperContexts);
+  const normalizedFullTextPaperContexts =
+    normalizeEditableFullTextPaperContexts(fullTextPaperContexts);
   const {
     paperContexts: paperContextsForMessage,
-    pinnedPaperContexts: pinnedPaperContextsForMessage,
+    fullTextPaperContexts: fullTextPaperContextsForMessage,
   } = includeAutoLoadedPaperContext(
     item,
     normalizedPaperContexts,
-    normalizedPinnedPaperContexts,
+    normalizedFullTextPaperContexts,
   );
   const attachmentsForMessage = normalizeEditableAttachments(attachments);
   const updatedTimestamp = Date.now();
@@ -1694,9 +1718,9 @@ export async function editLatestUserMessageAndRetry(
   retryPair.userMessage.paperContexts = paperContextsForMessage.length
     ? paperContextsForMessage
     : undefined;
-  retryPair.userMessage.pinnedPaperContexts =
-    pinnedPaperContextsForMessage.length
-      ? pinnedPaperContextsForMessage
+  retryPair.userMessage.fullTextPaperContexts =
+    fullTextPaperContextsForMessage.length
+      ? fullTextPaperContextsForMessage
       : undefined;
   retryPair.userMessage.paperContextsExpanded = false;
   retryPair.userMessage.attachments = attachmentsForMessage.length
@@ -1716,6 +1740,7 @@ export async function editLatestUserMessageAndRetry(
         retryPair.userMessage.selectedTextPaperContexts,
       screenshotImages: retryPair.userMessage.screenshotImages,
       paperContexts: retryPair.userMessage.paperContexts,
+      fullTextPaperContexts: retryPair.userMessage.fullTextPaperContexts,
       attachments: retryPair.userMessage.attachments,
     });
 
@@ -1790,7 +1815,7 @@ export async function retryLatestAssistantResponse(
     screenshotImages,
     fileAttachments,
     paperContexts,
-    pinnedPaperContexts,
+    fullTextPaperContexts,
   } = reconstructRetryPayload(retryPair.userMessage);
   if (!question.trim()) {
     setStatusSafely("Nothing to retry for latest turn", "error");
@@ -1844,7 +1869,7 @@ export async function retryLatestAssistantResponse(
       question,
       images: screenshotImages,
       paperContexts,
-      pinnedPaperContexts,
+      fullTextPaperContexts,
       recentPaperContexts,
       history: llmHistory,
       effectiveRequestConfig,
@@ -1854,9 +1879,9 @@ export async function retryLatestAssistantResponse(
     retryPair.userMessage.paperContexts = contextPlan.paperContexts.length
       ? contextPlan.paperContexts
       : undefined;
-    retryPair.userMessage.pinnedPaperContexts = contextPlan.pinnedPaperContexts
-      .length
-      ? contextPlan.pinnedPaperContexts
+    retryPair.userMessage.fullTextPaperContexts =
+      contextPlan.fullTextPaperContexts.length
+        ? contextPlan.fullTextPaperContexts
       : undefined;
     await updateStoredLatestUserMessage(conversationKey, {
       text: retryPair.userMessage.text,
@@ -1868,6 +1893,7 @@ export async function retryLatestAssistantResponse(
         retryPair.userMessage.selectedTextPaperContexts,
       screenshotImages: retryPair.userMessage.screenshotImages,
       paperContexts: retryPair.userMessage.paperContexts,
+      fullTextPaperContexts: retryPair.userMessage.fullTextPaperContexts,
       attachments: retryPair.userMessage.attachments,
     });
     if (cancelledRequestId >= thisRequestId) {
@@ -2030,7 +2056,7 @@ export async function editUserTurnAndRetry(
   selectedTextPaperContexts?: (PaperContextRef | undefined)[],
   screenshotImages?: string[],
   paperContexts?: PaperContextRef[],
-  pinnedPaperContexts?: PaperContextRef[],
+  fullTextPaperContexts?: PaperContextRef[],
   attachments?: ChatAttachment[],
   model?: string,
   apiBase?: string,
@@ -2110,15 +2136,15 @@ export async function editUserTurnAndRetry(
         .slice(0, MAX_SELECTED_IMAGES)
     : [];
   const normalizedPaperContexts = normalizeEditablePaperContexts(paperContexts);
-  const normalizedPinnedPaperContexts =
-    normalizeEditablePinnedPaperContexts(pinnedPaperContexts);
+  const normalizedFullTextPaperContexts =
+    normalizeEditableFullTextPaperContexts(fullTextPaperContexts);
   const {
     paperContexts: paperContextsForMessage,
-    pinnedPaperContexts: pinnedPaperContextsForMessage,
+    fullTextPaperContexts: fullTextPaperContextsForMessage,
   } = includeAutoLoadedPaperContext(
     item,
     normalizedPaperContexts,
-    normalizedPinnedPaperContexts,
+    normalizedFullTextPaperContexts,
   );
   const attachmentsForMessage = normalizeEditableAttachments(attachments);
   userMsg.selectedText = selectedTextForMessage || undefined;
@@ -2145,8 +2171,8 @@ export async function editUserTurnAndRetry(
   userMsg.paperContexts = paperContextsForMessage.length
     ? paperContextsForMessage
     : undefined;
-  userMsg.pinnedPaperContexts = pinnedPaperContextsForMessage.length
-    ? pinnedPaperContextsForMessage
+  userMsg.fullTextPaperContexts = fullTextPaperContextsForMessage.length
+    ? fullTextPaperContextsForMessage
     : undefined;
   userMsg.paperContextsExpanded = false;
   userMsg.attachments = attachmentsForMessage.length
@@ -2166,6 +2192,7 @@ export async function editUserTurnAndRetry(
       selectedTextPaperContexts: userMsg.selectedTextPaperContexts,
       screenshotImages: userMsg.screenshotImages,
       paperContexts: userMsg.paperContexts,
+      fullTextPaperContexts: userMsg.fullTextPaperContexts,
       attachments: userMsg.attachments,
     });
   } catch (err) {
@@ -2215,7 +2242,7 @@ export type BuildAgentRuntimeRequestParams = {
   userText: string;
   selectedTexts: string[];
   paperContexts: PaperContextRef[];
-  pinnedPaperContexts: PaperContextRef[];
+  fullTextPaperContexts: PaperContextRef[];
   attachments: ChatAttachment[] | undefined;
   screenshots: string[] | undefined;
   effectiveRequestConfig: EffectiveRequestConfig;
@@ -2232,7 +2259,7 @@ function buildAgentRuntimeRequest(
     activeItemId: params.item.id,
     selectedTexts: params.selectedTexts,
     selectedPaperContexts: params.paperContexts,
-    pinnedPaperContexts: params.pinnedPaperContexts,
+    fullTextPaperContexts: params.fullTextPaperContexts,
     attachments: params.attachments,
     screenshots: params.screenshots,
     model: params.effectiveRequestConfig.model,
@@ -2325,13 +2352,13 @@ async function sendAgentQuestion(
   selectedTextSources?: SelectedTextSource[],
   selectedTextPaperContexts?: (PaperContextRef | undefined)[],
   paperContexts?: PaperContextRef[],
-  pinnedPaperContexts?: PaperContextRef[],
+  fullTextPaperContexts?: PaperContextRef[],
   attachments?: ChatAttachment[],
 ): Promise<void> {
   await sendAgentTurn(
     body, item, question, images, model, apiBase, apiKey, reasoning, advanced,
     displayQuestion, selectedTexts, selectedTextSources, selectedTextPaperContexts,
-    paperContexts, pinnedPaperContexts, attachments,
+    paperContexts, fullTextPaperContexts, attachments,
     buildAgentEngineDeps(),
   );
 }
@@ -2351,7 +2378,7 @@ export async function sendQuestion(
   selectedTextSources?: SelectedTextSource[],
   selectedTextPaperContexts?: (PaperContextRef | undefined)[],
   paperContexts?: PaperContextRef[],
-  pinnedPaperContexts?: PaperContextRef[],
+  fullTextPaperContexts?: PaperContextRef[],
   attachments?: ChatAttachment[],
   runtimeMode: ChatRuntimeMode = "chat",
   agentRunId?: string,
@@ -2373,7 +2400,7 @@ export async function sendQuestion(
       selectedTextSources,
       selectedTextPaperContexts,
       paperContexts,
-      pinnedPaperContexts,
+      fullTextPaperContexts,
       attachments,
     );
     return;
@@ -2419,15 +2446,16 @@ export async function sendQuestion(
     );
   const selectedTextForMessage = selectedTextsForMessage[0] || "";
   const normalizedPaperContexts = normalizePaperContexts(paperContexts);
-  const normalizedPinnedPaperContexts =
-    normalizePaperContexts(pinnedPaperContexts);
+  const normalizedFullTextPaperContexts = normalizePaperContexts(
+    fullTextPaperContexts,
+  );
   const {
     paperContexts: paperContextsForMessage,
-    pinnedPaperContexts: pinnedPaperContextsForMessage,
+    fullTextPaperContexts: fullTextPaperContextsForMessage,
   } = includeAutoLoadedPaperContext(
     item,
     normalizedPaperContexts,
-    normalizedPinnedPaperContexts,
+    normalizedFullTextPaperContexts,
   );
   const screenshotImagesForMessage = Array.isArray(images)
     ? images
@@ -2461,8 +2489,8 @@ export async function sendQuestion(
     paperContexts: paperContextsForMessage.length
       ? paperContextsForMessage
       : undefined,
-    pinnedPaperContexts: pinnedPaperContextsForMessage.length
-      ? pinnedPaperContextsForMessage
+    fullTextPaperContexts: fullTextPaperContextsForMessage.length
+      ? fullTextPaperContextsForMessage
       : undefined,
     paperContextsExpanded: false,
     screenshotImages: screenshotImagesForMessage.length
@@ -2484,6 +2512,7 @@ export async function sendQuestion(
     selectedTextSources: userMessage.selectedTextSources,
     selectedTextPaperContexts: userMessage.selectedTextPaperContexts,
     paperContexts: userMessage.paperContexts,
+    fullTextPaperContexts: userMessage.fullTextPaperContexts,
     screenshotImages: userMessage.screenshotImages,
     attachments: userMessage.attachments,
   });
@@ -2546,7 +2575,7 @@ export async function sendQuestion(
       question,
       images,
       paperContexts: paperContextsForMessage,
-      pinnedPaperContexts: pinnedPaperContextsForMessage,
+      fullTextPaperContexts: fullTextPaperContextsForMessage,
       recentPaperContexts,
       history: llmHistory,
       effectiveRequestConfig,
@@ -2556,8 +2585,9 @@ export async function sendQuestion(
     userMessage.paperContexts = contextPlan.paperContexts.length
       ? contextPlan.paperContexts
       : undefined;
-    userMessage.pinnedPaperContexts = contextPlan.pinnedPaperContexts.length
-      ? contextPlan.pinnedPaperContexts
+    userMessage.fullTextPaperContexts =
+      contextPlan.fullTextPaperContexts.length
+        ? contextPlan.fullTextPaperContexts
       : undefined;
     await updateStoredLatestUserMessage(conversationKey, {
       text: userMessage.text,
@@ -2570,6 +2600,7 @@ export async function sendQuestion(
       selectedTextPaperContexts: userMessage.selectedTextPaperContexts,
       screenshotImages: userMessage.screenshotImages,
       paperContexts: userMessage.paperContexts,
+      fullTextPaperContexts: userMessage.fullTextPaperContexts,
       attachments: userMessage.attachments,
     });
 

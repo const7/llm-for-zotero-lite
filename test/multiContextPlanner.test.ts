@@ -211,7 +211,7 @@ describe("multiContextPlanner", function () {
       activeContextItem: null,
       question: "summarize this",
       paperContexts: [],
-      pinnedPaperContexts: [],
+      fullTextPaperContexts: [],
       historyPaperContexts: [],
       history: [],
       model: "gpt-4o-mini",
@@ -223,7 +223,7 @@ describe("multiContextPlanner", function () {
       contextPrefix:
         "Context Result\n- Source: extracted text\n" + "detail ".repeat(400),
       paperContexts: [],
-      pinnedPaperContexts: [],
+      fullTextPaperContexts: [],
       historyPaperContexts: [],
       history: [],
       model: "gpt-4o-mini",
@@ -235,7 +235,7 @@ describe("multiContextPlanner", function () {
     );
   });
 
-  it("uses full paper context by default in paper mode when the active paper fits", async function () {
+  it("uses full paper context in paper mode when the active paper is marked for full text", async function () {
     const paper = registerMockPaper({
       itemId: 10,
       contextItemId: 11,
@@ -252,7 +252,7 @@ describe("multiContextPlanner", function () {
       activeContextItem: buildActiveAttachment(paper.itemId, paper.contextItemId) as any,
       question: "Summarize this paper.",
       paperContexts: [],
-      pinnedPaperContexts: [],
+      fullTextPaperContexts: [paper],
       historyPaperContexts: [],
       history: [],
       model: "gpt-4o-mini",
@@ -267,7 +267,7 @@ describe("multiContextPlanner", function () {
     assert.notInclude(plan.contextText, "Retrieved Evidence:");
   });
 
-  it("forces full paper context on the first paper-mode turn even when the paper is large", async function () {
+  it("forces full paper context when the active paper is explicitly set to full text even if the paper is large", async function () {
     const paper = registerMockPaper({
       itemId: 12,
       contextItemId: 13,
@@ -285,7 +285,7 @@ describe("multiContextPlanner", function () {
       activeContextItem: buildActiveAttachment(paper.itemId, paper.contextItemId) as any,
       question: "Summarize the paper.",
       paperContexts: [],
-      pinnedPaperContexts: [],
+      fullTextPaperContexts: [paper],
       historyPaperContexts: [],
       history: [],
       model: "gpt-4o-mini",
@@ -322,7 +322,7 @@ describe("multiContextPlanner", function () {
       activeContextItem: buildActiveAttachment(paper.itemId, paper.contextItemId) as any,
       question: "What do the results say about recall?",
       paperContexts: [],
-      pinnedPaperContexts: [],
+      fullTextPaperContexts: [],
       historyPaperContexts: [],
       history: [{ role: "user", content: "Summarize this paper." }],
       model: "gpt-4o-mini",
@@ -453,7 +453,7 @@ describe("multiContextPlanner", function () {
       activeContextItem: buildActiveAttachment(paper.itemId, paper.contextItemId) as any,
       question: "Do you have access to the full text or only a few sections?",
       paperContexts: [],
-      pinnedPaperContexts: [],
+      fullTextPaperContexts: [],
       historyPaperContexts: [],
       history: [{ role: "user", content: "Summarize this paper." }],
       model: "gpt-4o-mini",
@@ -463,7 +463,7 @@ describe("multiContextPlanner", function () {
       activeContextItem: buildActiveAttachment(paper.itemId, paper.contextItemId) as any,
       question: "What is the main finding?",
       paperContexts: [],
-      pinnedPaperContexts: [],
+      fullTextPaperContexts: [],
       historyPaperContexts: [],
       history: [{ role: "user", content: "Summarize this paper." }],
       model: "gpt-4o-mini",
@@ -474,7 +474,7 @@ describe("multiContextPlanner", function () {
     assert.isUndefined(unrelated.assistantInstruction);
   });
 
-  it("keeps explicit pinned papers in full context before falling back to retrieval for overflow", async function () {
+  it("keeps explicit full-text papers in full context before falling back to retrieval for overflow", async function () {
     const longChunk = "full-text ".repeat(12000).trim();
     const pinnedA = registerMockPaper({
       itemId: 20,
@@ -495,9 +495,9 @@ describe("multiContextPlanner", function () {
     const plan = await resolveMultiContextPlan({
       conversationMode: "open",
       activeContextItem: null,
-      question: "Compare the two pinned papers.",
+      question: "Compare the two full-text papers.",
       paperContexts: [],
-      pinnedPaperContexts: [pinnedA, pinnedB],
+      fullTextPaperContexts: [pinnedA, pinnedB],
       historyPaperContexts: [],
       history: [],
       model: "gpt-4o-mini",

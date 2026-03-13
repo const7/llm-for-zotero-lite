@@ -66,7 +66,7 @@ type BuildAgentRuntimeRequestParamsShape = {
   userText: string;
   selectedTexts: string[];
   paperContexts: PaperContextRef[];
-  pinnedPaperContexts: PaperContextRef[];
+  fullTextPaperContexts: PaperContextRef[];
   attachments: ChatAttachment[] | undefined;
   screenshots: string[] | undefined;
   effectiveRequestConfig: EffectiveRequestConfigShape;
@@ -83,7 +83,7 @@ type ReconstructedRetryPayload = {
   question: string;
   screenshotImages: string[];
   paperContexts: PaperContextRef[];
-  pinnedPaperContexts: PaperContextRef[];
+  fullTextPaperContexts: PaperContextRef[];
 };
 
 // ---------------------------------------------------------------------------
@@ -157,8 +157,8 @@ export type AgentEngineDeps = {
   includeAutoLoadedPaperContext: (
     item: Zotero.Item,
     paperContexts?: PaperContextRef[],
-    pinnedPaperContexts?: PaperContextRef[],
-  ) => { paperContexts: PaperContextRef[]; pinnedPaperContexts: PaperContextRef[] };
+    fullTextPaperContexts?: PaperContextRef[],
+  ) => { paperContexts: PaperContextRef[]; fullTextPaperContexts: PaperContextRef[] };
   findLatestRetryPair: (history: Message[]) => LatestRetryPairShape | null;
   reconstructRetryPayload: (userMessage: Message) => ReconstructedRetryPayload;
   isReasoningExpandedByDefault: () => boolean;
@@ -200,7 +200,7 @@ export type AgentEngineDeps = {
     selectedTextSources: SelectedTextSource[] | undefined,
     selectedTextPaperContexts: (PaperContextRef | undefined)[] | undefined,
     paperContexts: PaperContextRef[] | undefined,
-    pinnedPaperContexts: PaperContextRef[] | undefined,
+    fullTextPaperContexts: PaperContextRef[] | undefined,
     attachments: ChatAttachment[] | undefined,
     runtimeMode: "agent",
     agentRunId: string | undefined,
@@ -233,7 +233,7 @@ export async function sendAgentTurn(
   selectedTextSources: SelectedTextSource[] | undefined,
   selectedTextPaperContexts: (PaperContextRef | undefined)[] | undefined,
   paperContexts: PaperContextRef[] | undefined,
-  pinnedPaperContexts: PaperContextRef[] | undefined,
+  fullTextPaperContexts: PaperContextRef[] | undefined,
   attachments: ChatAttachment[] | undefined,
   deps: AgentEngineDeps,
 ): Promise<void> {
@@ -251,15 +251,15 @@ export async function sendAgentTurn(
   });
   const selectedTextsForMessage = deps.normalizeSelectedTexts(selectedTexts);
   const normalizedPaperContexts = deps.normalizePaperContexts(paperContexts);
-  const normalizedPinnedPaperContexts =
-    deps.normalizePaperContexts(pinnedPaperContexts);
+  const normalizedFullTextPaperContexts =
+    deps.normalizePaperContexts(fullTextPaperContexts);
   const {
     paperContexts: paperContextsForMessage,
-    pinnedPaperContexts: pinnedPaperContextsForMessage,
+    fullTextPaperContexts: fullTextPaperContextsForMessage,
   } = deps.includeAutoLoadedPaperContext(
     item,
     normalizedPaperContexts,
-    normalizedPinnedPaperContexts,
+    normalizedFullTextPaperContexts,
   );
   const runtimeRequest = deps.buildAgentRuntimeRequest({
     conversationKey,
@@ -267,7 +267,7 @@ export async function sendAgentTurn(
     userText: question,
     selectedTexts: selectedTextsForMessage,
     paperContexts: paperContextsForMessage,
-    pinnedPaperContexts: pinnedPaperContextsForMessage,
+    fullTextPaperContexts: fullTextPaperContextsForMessage,
     attachments,
     screenshots: images,
     effectiveRequestConfig,
@@ -295,7 +295,7 @@ export async function sendAgentTurn(
         selectedTextSources,
         selectedTextPaperContexts,
         paperContexts,
-        pinnedPaperContexts,
+        fullTextPaperContexts,
         attachments,
         "agent",
         fallback.runId,
@@ -351,8 +351,8 @@ export async function sendAgentTurn(
     paperContexts: paperContextsForMessage.length
       ? paperContextsForMessage
       : undefined,
-    pinnedPaperContexts: pinnedPaperContextsForMessage.length
-      ? pinnedPaperContextsForMessage
+    fullTextPaperContexts: fullTextPaperContextsForMessage.length
+      ? fullTextPaperContextsForMessage
       : undefined,
     paperContextsExpanded: false,
     screenshotImages: screenshotImagesForMessage.length
@@ -373,6 +373,7 @@ export async function sendAgentTurn(
     selectedTextSources: userMessage.selectedTextSources,
     selectedTextPaperContexts: userMessage.selectedTextPaperContexts,
     paperContexts: userMessage.paperContexts,
+    fullTextPaperContexts: userMessage.fullTextPaperContexts,
     screenshotImages: userMessage.screenshotImages,
     attachments: userMessage.attachments,
   });
@@ -453,6 +454,7 @@ export async function sendAgentTurn(
           selectedTextPaperContexts: userMessage.selectedTextPaperContexts,
           screenshotImages: userMessage.screenshotImages,
           paperContexts: userMessage.paperContexts,
+          fullTextPaperContexts: userMessage.fullTextPaperContexts,
           attachments: userMessage.attachments,
         });
       },
@@ -592,7 +594,7 @@ export async function retryAgentTurn(
   );
   refreshChatSafely(); // Immediately clear the old trace from view
 
-  const { question, screenshotImages, paperContexts, pinnedPaperContexts } =
+  const { question, screenshotImages, paperContexts, fullTextPaperContexts } =
     deps.reconstructRetryPayload(retryPair.userMessage);
   if (!question.trim()) {
     setStatusSafely("Nothing to retry for latest turn", "error");
@@ -617,7 +619,7 @@ export async function retryAgentTurn(
     userText: question,
     selectedTexts: selectedTextsRaw,
     paperContexts,
-    pinnedPaperContexts,
+    fullTextPaperContexts,
     attachments: retryPair.userMessage.attachments?.filter(
       (a) => a.category !== "image",
     ),

@@ -43,7 +43,10 @@ type SendFlowControllerDeps = {
   closePaperPicker: () => void;
   getSelectedTextContextEntries: (itemId: number) => SelectedTextContext[];
   getSelectedPaperContexts: (itemId: number) => PaperContextRef[];
-  getPinnedPaperContexts: (itemId: number) => PaperContextRef[];
+  getFullTextPaperContexts: (
+    item: Zotero.Item,
+    paperContexts: PaperContextRef[],
+  ) => PaperContextRef[];
   getSelectedFiles: (itemId: number) => ChatAttachment[];
   getSelectedImages: (itemId: number) => string[];
   resolvePromptText: (
@@ -95,7 +98,7 @@ type SendFlowControllerDeps = {
     selectedTextPaperContexts?: (PaperContextRef | undefined)[],
     screenshotImages?: string[],
     paperContexts?: PaperContextRef[],
-    pinnedPaperContexts?: PaperContextRef[],
+    fullTextPaperContexts?: PaperContextRef[],
     attachments?: ChatAttachment[],
     expected?: EditLatestTurnMarker,
     model?: string,
@@ -119,12 +122,13 @@ type SendFlowControllerDeps = {
     selectedTextSources?: SelectedTextSource[],
     selectedTextPaperContexts?: (PaperContextRef | undefined)[],
     paperContexts?: PaperContextRef[],
-    pinnedPaperContexts?: PaperContextRef[],
+    fullTextPaperContexts?: PaperContextRef[],
     attachments?: ChatAttachment[],
     runtimeMode?: "chat" | "agent",
   ) => Promise<void>;
   retainPinnedImageState: (itemId: number) => void;
   retainPaperState: (itemId: number) => void;
+  consumePaperModeState: (itemId: number) => void;
   retainPinnedFileState: (itemId: number) => void;
   retainPinnedTextState: (conversationKey: number) => void;
   updatePaperPreviewPreservingScroll: () => void;
@@ -160,8 +164,12 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     );
     const primarySelectedText = selectedTexts[0] || "";
     const selectedPaperContexts = deps.getSelectedPaperContexts(item.id);
-    const pinnedPaperContexts = deps.getPinnedPaperContexts(item.id);
+    const fullTextPaperContexts = deps.getFullTextPaperContexts(
+      item,
+      selectedPaperContexts,
+    );
     const selectedFiles = deps.getSelectedFiles(item.id);
+    const hasPaperComposeState = selectedPaperContexts.length > 0 || !deps.isGlobalMode();
 
     if (
       !text &&
@@ -274,8 +282,8 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         selectedTexts.length ? selectedTextSources : undefined,
         selectedTexts.length ? selectedTextPaperContexts : undefined,
         images,
-        selectedPaperContexts.length ? selectedPaperContexts : undefined,
-        pinnedPaperContexts.length ? pinnedPaperContexts : undefined,
+        selectedPaperContexts,
+        fullTextPaperContexts,
         selectedFiles.length ? selectedFiles : undefined,
         activeEditSession,
         selectedProfile?.model,
@@ -302,7 +310,8 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       deps.inputBox.value = "";
       deps.persistDraftInput();
       deps.retainPinnedImageState(item.id);
-      if (selectedPaperContexts.length) {
+      if (hasPaperComposeState) {
+        deps.consumePaperModeState(item.id);
         deps.retainPaperState(item.id);
         deps.updatePaperPreviewPreservingScroll();
       }
@@ -324,10 +333,6 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     deps.inputBox.value = "";
     deps.persistDraftInput();
     deps.retainPinnedImageState(item.id);
-    if (selectedPaperContexts.length) {
-      deps.retainPaperState(item.id);
-      deps.updatePaperPreviewPreservingScroll();
-    }
     if (selectedFiles.length) {
       deps.retainPinnedFileState(item.id);
       deps.updateFilePreviewPreservingScroll();
@@ -352,11 +357,16 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       selectedTexts.length ? selectedTexts : undefined,
       selectedTexts.length ? selectedTextSources : undefined,
       selectedTexts.length ? selectedTextPaperContexts : undefined,
-      selectedPaperContexts.length ? selectedPaperContexts : undefined,
-      pinnedPaperContexts.length ? pinnedPaperContexts : undefined,
+      selectedPaperContexts,
+      fullTextPaperContexts,
       selectedFiles.length ? selectedFiles : undefined,
       deps.isAgentMode() ? "agent" : "chat",
     );
+    if (hasPaperComposeState) {
+      deps.consumePaperModeState(item.id);
+      deps.retainPaperState(item.id);
+      deps.updatePaperPreviewPreservingScroll();
+    }
     const win = deps.body.ownerDocument?.defaultView;
     if (win) {
       win.setTimeout(() => {

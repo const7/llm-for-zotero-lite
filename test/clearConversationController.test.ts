@@ -68,9 +68,9 @@ describe("clearConversationController", function () {
     assert.deepEqual(calls, [
       "pending:7001",
       "compose:7001",
-      "preview",
       "history:7001",
       "loaded:7001",
+      "preview",
       "stored:7001",
       "title:7001",
       "refs:7001",

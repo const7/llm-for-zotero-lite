@@ -745,12 +745,12 @@ async function resolvePlannerPaperEntries(params: {
   conversationMode: ConversationMode;
   activeContextItem: Zotero.Item | null;
   paperContexts: PaperContextRef[] | undefined;
-  pinnedPaperContexts: PaperContextRef[] | undefined;
+  fullTextPaperContexts: PaperContextRef[] | undefined;
   historyPaperContexts: PaperContextRef[] | undefined;
 }): Promise<PlannerPaperEntry[]> {
   const selected = normalizePaperContextEntries(params.paperContexts || []);
-  const explicitlyPinned = normalizePaperContextEntries(
-    params.pinnedPaperContexts || [],
+  const explicitFullText = normalizePaperContextEntries(
+    params.fullTextPaperContexts || [],
   );
   const historyPool = normalizePaperContextEntries(
     params.historyPaperContexts || [],
@@ -758,8 +758,8 @@ async function resolvePlannerPaperEntries(params: {
   const orderedRefs: PaperContextRef[] = [];
   const seen = new Set<string>();
 
-  const explicitPinnedKeys = new Set(
-    explicitlyPinned.map((paper) => buildPaperKey(paper)),
+  const explicitFullTextKeys = new Set(
+    explicitFullText.map((paper) => buildPaperKey(paper)),
   );
   const activePaper =
     params.conversationMode === "paper"
@@ -769,7 +769,7 @@ async function resolvePlannerPaperEntries(params: {
   const includeHistoryPool =
     params.conversationMode === "paper" &&
     selected.length === 0 &&
-    explicitlyPinned.length === 0;
+    explicitFullText.length === 0;
 
   const pushRef = (paper: PaperContextRef) => {
     const key = buildPaperKey(paper);
@@ -785,7 +785,7 @@ async function resolvePlannerPaperEntries(params: {
   for (const paper of selected) {
     pushRef(paper);
   }
-  for (const paper of explicitlyPinned) {
+  for (const paper of explicitFullText) {
     pushRef(paper);
   }
   if (includeHistoryPool) {
@@ -802,13 +802,11 @@ async function resolvePlannerPaperEntries(params: {
       await ensurePDFTextCached(contextItem);
     }
     const isActive = Boolean(activeKey && paperKey === activeKey);
-    const pinKind: PlannerPaperEntry["pinKind"] = explicitPinnedKeys.has(
+    const pinKind: PlannerPaperEntry["pinKind"] = explicitFullTextKeys.has(
       paperKey,
     )
       ? "explicit"
-      : isActive && params.conversationMode === "paper"
-        ? "implicit-active"
-        : "none";
+      : "none";
     out.push({
       order: index + 1,
       paperKey,
@@ -828,7 +826,7 @@ export async function resolveMultiContextPlan(params: {
   question: string;
   contextPrefix?: string;
   paperContexts?: PaperContextRef[];
-  pinnedPaperContexts?: PaperContextRef[];
+  fullTextPaperContexts?: PaperContextRef[];
   historyPaperContexts?: PaperContextRef[];
   history?: ChatMessage[];
   images?: string[];
@@ -844,7 +842,7 @@ export async function resolveMultiContextPlan(params: {
     conversationMode: params.conversationMode,
     activeContextItem: params.activeContextItem,
     paperContexts: params.paperContexts,
-    pinnedPaperContexts: params.pinnedPaperContexts,
+    fullTextPaperContexts: params.fullTextPaperContexts,
     historyPaperContexts: params.historyPaperContexts,
   });
   const contextBudget = estimateAvailableContextBudget({
@@ -879,8 +877,10 @@ export async function resolveMultiContextPlan(params: {
     };
   }
 
-  const pinned = papers.filter((paper) => paper.pinKind !== "none");
-  const explicitPinned = papers.filter((paper) => paper.pinKind === "explicit");
+  const fullTextPapers = papers.filter((paper) => paper.pinKind !== "none");
+  const explicitFullTextPapers = papers.filter(
+    (paper) => paper.pinKind === "explicit",
+  );
   const unpinned = papers.filter((paper) => paper.pinKind === "none");
   const relevantUnpinned = rankUnpinnedPapersByQuestion({
     papers: unpinned,
@@ -891,11 +891,11 @@ export async function resolveMultiContextPlan(params: {
     params.conversationMode === "paper" && isFirstPaperTurn(params.history);
 
   if (params.conversationMode === "paper" && activePaper) {
-    if (firstPaperTurn) {
+    if (activePaper.pinKind !== "none") {
       const full = assembleFullMultiPaperContext({ papers: [activePaper] });
       return {
         mode: "full",
-        strategy: "paper-first-full",
+        strategy: firstPaperTurn ? "paper-first-full" : "paper-manual-full",
         contextText: full.contextText,
         contextBudget: adjustedContextBudget,
         usedContextTokens: full.estimatedTokens,
@@ -928,20 +928,25 @@ export async function resolveMultiContextPlan(params: {
     const usedContextTokens = estimateTextTokens(retrieved.contextText);
     return {
       mode: "retrieval",
-      strategy: "paper-followup-retrieval",
+      strategy: firstPaperTurn
+        ? "paper-explicit-retrieval"
+        : "paper-followup-retrieval",
       contextText: retrieved.contextText,
       contextBudget: adjustedContextBudget,
       usedContextTokens,
       selectedPaperCount: retrieved.selectedPaperCount,
       selectedChunkCount: retrieved.selectedChunkCount,
-      assistantInstruction: buildPaperFollowupAssistantInstruction(
-        params.question,
-      ),
+      assistantInstruction:
+        firstPaperTurn
+          ? undefined
+          : buildPaperFollowupAssistantInstruction(params.question),
     };
   }
 
   const fullPreferredPapers =
-    params.conversationMode === "paper" ? pinned : explicitPinned;
+    params.conversationMode === "paper"
+      ? fullTextPapers
+      : explicitFullTextPapers;
 
   if (fullPreferredPapers.length) {
     const full = assembleFullMultiPaperContext({ papers: fullPreferredPapers });
@@ -1056,7 +1061,7 @@ export async function resolveMultiContextPlan(params: {
     }
   }
 
-  const retrievalPapers = [...pinned, ...relevantUnpinned];
+  const retrievalPapers = [...fullTextPapers, ...relevantUnpinned];
   if (!retrievalPapers.length) {
     return {
       mode: "retrieval",

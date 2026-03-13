@@ -45,10 +45,10 @@ export function createClearConversationController(
 
     deps.clearPendingTurnDeletion?.(normalizedConversationKey);
     deps.clearTransientComposeStateForItem(normalizedItemID);
-    deps.resetComposePreviewUI();
     deps.resetConversationHistory(normalizedConversationKey);
     deps.markConversationLoaded(normalizedConversationKey);
     deps.clearAgentToolCaches?.(normalizedConversationKey);
+    deps.resetComposePreviewUI();
 
     try {
       await deps.clearStoredConversation(normalizedConversationKey);

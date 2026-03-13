@@ -31,6 +31,7 @@ describe("sendFlowController", function () {
     let editCalled = 0;
     let retainImageCalled = 0;
     let retainPaperStateCalled = 0;
+    let consumePaperModeStateCalled = 0;
     let retainFileCalled = 0;
     let retainTextCalled = 0;
     let persistDraftInputCalls = 0;
@@ -46,7 +47,7 @@ describe("sendFlowController", function () {
       closePaperPicker: () => undefined,
       getSelectedTextContextEntries: () => selectedTextContexts,
       getSelectedPaperContexts: () => [selectedPaper],
-      getPinnedPaperContexts: () => [selectedPaper],
+      getFullTextPaperContexts: () => [selectedPaper],
       getSelectedFiles: () => [selectedFile],
       getSelectedImages: () => ["data:image/png;base64,AAA"],
       resolvePromptText: () => "ask question",
@@ -84,7 +85,7 @@ describe("sendFlowController", function () {
         _selectedTextPaperContexts?: unknown,
         _screenshotImages?: string[],
         _paperContexts?: PaperContextRef[],
-        _pinnedPaperContexts?: PaperContextRef[],
+        _fullTextPaperContexts?: PaperContextRef[],
         _attachments?: ChatAttachment[],
         _expected?: unknown,
         _model?: string,
@@ -111,7 +112,7 @@ describe("sendFlowController", function () {
         _selectedTextSources?: unknown,
         _selectedTextPaperContexts?: unknown,
         _paperContexts?: PaperContextRef[],
-        _pinnedPaperContexts?: PaperContextRef[],
+        _fullTextPaperContexts?: PaperContextRef[],
         _attachments?: ChatAttachment[],
         runtimeMode?: "chat" | "agent",
       ) => {
@@ -124,6 +125,9 @@ describe("sendFlowController", function () {
       },
       retainPaperState: () => {
         retainPaperStateCalled += 1;
+      },
+      consumePaperModeState: () => {
+        consumePaperModeStateCalled += 1;
       },
       retainPinnedFileState: () => {
         retainFileCalled += 1;
@@ -155,6 +159,7 @@ describe("sendFlowController", function () {
         editCalled,
         retainImageCalled,
         retainPaperStateCalled,
+        consumePaperModeStateCalled,
         retainFileCalled,
         retainTextCalled,
         persistDraftInputCalls,
@@ -177,6 +182,7 @@ describe("sendFlowController", function () {
     assert.equal(counts.sendCalled, 1);
     assert.equal(counts.editCalled, 0);
     assert.equal(counts.retainImageCalled, 1);
+    assert.equal(counts.consumePaperModeStateCalled, 1);
     assert.equal(counts.retainPaperStateCalled, 1);
     assert.equal(counts.retainFileCalled, 1);
     assert.equal(counts.retainTextCalled, 1);
@@ -204,6 +210,7 @@ describe("sendFlowController", function () {
     assert.equal(counts.sendCalled, 0);
     assert.equal(counts.editCalled, 1);
     assert.equal(counts.retainImageCalled, 1);
+    assert.equal(counts.consumePaperModeStateCalled, 1);
     assert.equal(counts.retainPaperStateCalled, 1);
     assert.equal(counts.retainFileCalled, 1);
     assert.equal(counts.retainTextCalled, 1);

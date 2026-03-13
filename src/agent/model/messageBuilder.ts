@@ -66,6 +66,15 @@ function normalizeHistoryMessages(
 }
 
 function buildUserMessage(request: AgentRuntimeRequest): AgentModelMessage {
+  const fullTextPaperKeySet = new Set(
+    (request.fullTextPaperContexts || []).map(
+      (entry) => `${entry.itemId}:${entry.contextItemId}`,
+    ),
+  );
+  const retrievalOnlyPapers = (request.selectedPaperContexts || []).filter(
+    (entry) =>
+      !fullTextPaperKeySet.has(`${entry.itemId}:${entry.contextItemId}`),
+  );
   const contextLines: string[] = [
     "Current Zotero context summary:",
     `- Conversation key: ${request.conversationKey}`,
@@ -79,27 +88,24 @@ function buildUserMessage(request: AgentRuntimeRequest): AgentModelMessage {
       .join("\n\n");
     contextLines.push(selectedTextBlock);
   }
-  if (
-    Array.isArray(request.selectedPaperContexts) &&
-    request.selectedPaperContexts.length
-  ) {
+  if (retrievalOnlyPapers.length) {
     contextLines.push(
-      "Selected paper refs:",
-      ...request.selectedPaperContexts.map(
+      "Retrieval-only paper refs:",
+      ...retrievalOnlyPapers.map(
         (entry, index) =>
-          `- Selected paper ${index + 1}: ${entry.title} [itemId=${entry.itemId}, contextItemId=${entry.contextItemId}]`,
+          `- Retrieval paper ${index + 1}: ${entry.title} [itemId=${entry.itemId}, contextItemId=${entry.contextItemId}]`,
       ),
     );
   }
   if (
-    Array.isArray(request.pinnedPaperContexts) &&
-    request.pinnedPaperContexts.length
+    Array.isArray(request.fullTextPaperContexts) &&
+    request.fullTextPaperContexts.length
   ) {
     contextLines.push(
-      "Pinned paper refs:",
-      ...request.pinnedPaperContexts.map(
+      "Full-text paper refs for this turn:",
+      ...request.fullTextPaperContexts.map(
         (entry, index) =>
-          `- Pinned paper ${index + 1}: ${entry.title} [itemId=${entry.itemId}, contextItemId=${entry.contextItemId}]`,
+          `- Full-text paper ${index + 1}: ${entry.title} [itemId=${entry.itemId}, contextItemId=${entry.contextItemId}]`,
       ),
     );
   }
@@ -165,17 +171,13 @@ function collectGuidanceInstructions(
 }
 
 function buildAutoReadInstruction(request: AgentRuntimeRequest): string {
-  const isFirstTurn = !Array.isArray(request.history) || request.history.length === 0;
-  if (!isFirstTurn) return "";
-  const hasPapers =
-    (request.selectedPaperContexts?.length ?? 0) > 0 ||
-    (request.pinnedPaperContexts?.length ?? 0) > 0;
-  if (!hasPapers) return "";
+  const fullTextPapers = request.fullTextPaperContexts || [];
+  if (!fullTextPapers.length) return "";
   return (
-    "FIRST-TURN RULE: Because this is the start of the conversation and paper(s) are attached, " +
-    "your very first action MUST be to call `inspect_pdf` with operation:`front_matter` to load the title, abstract, " +
-    "and authors. Do this before answering, even if the answer seems obvious. " +
-    "This grounds your response in the actual paper content."
+    "TURN RULE: Because the user marked specific paper(s) for full-text use on this turn, " +
+    "your very first action MUST be to call `inspect_pdf` with operation:`front_matter` and target only those full-text papers. " +
+    "Do this before answering, even if the answer seems obvious. " +
+    "Do not include retrieval-only papers in that mandatory first read."
   );
 }
 

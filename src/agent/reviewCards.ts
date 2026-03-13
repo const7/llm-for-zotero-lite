@@ -151,6 +151,7 @@ function describeMetadataResult(result: Record<string, unknown>): string {
 function getReferencePaperTitle(context: AgentToolContext): string | undefined {
   return (
     context.request.selectedPaperContexts?.[0]?.title ||
+    context.request.fullTextPaperContexts?.[0]?.title ||
     context.request.pinnedPaperContexts?.[0]?.title ||
     context.item?.getDisplayTitle?.() ||
     undefined

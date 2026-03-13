@@ -42,6 +42,7 @@ export interface Message {
   selectedTextExpandedIndex?: number;
   screenshotImages?: string[];
   paperContexts?: PaperContextRef[];
+  fullTextPaperContexts?: PaperContextRef[];
   pinnedPaperContexts?: PaperContextRef[];
   paperContextsExpanded?: boolean;
   attachments?: ChatAttachment[];
@@ -59,6 +60,10 @@ export interface Message {
 }
 
 export type ChatRuntimeMode = "chat" | "agent";
+export type PaperContextSendMode =
+  | "retrieval"
+  | "full-next"
+  | "full-sticky";
 
 export type ReasoningProviderKind =
   | "openai"
@@ -135,6 +140,8 @@ export type PdfChunkMeta = {
 export type ContextAssemblyMode = "full" | "retrieval";
 export type ContextAssemblyStrategy =
   | "paper-first-full"
+  | "paper-manual-full"
+  | "paper-explicit-retrieval"
   | "paper-followup-retrieval"
   | "general-full"
   | "general-retrieval";
