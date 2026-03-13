@@ -2918,12 +2918,12 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       <div class="llm-welcome">
         <div class="llm-welcome-icon">💬</div>
         <div class="llm-welcome-text">
-          <div class="llm-welcome-title">Ask about the current paper, work across papers, or turn on Agent mode.</div>
+          <div class="llm-welcome-title">Start chatting — here's what you can do.</div>
           <ul class="llm-welcome-list">
-            <li><strong>Paper chat</strong> starts with the current paper. <strong>Open chat</strong> is a blank slate for questions across papers and files.</li>
-            <li>Turn on <strong>Agent mode</strong> when you want the assistant to search your library, inspect papers, and handle multi-step tasks.</li>
-            <li>Use <strong>Add Text</strong>, <strong>Screenshots</strong>, or type <strong>/</strong> to attach passages, figures, other papers, or files.</li>
-            <li>Switch between <strong>Paper chat</strong> and <strong>Open chat</strong> with the mode chip. The lock icon keeps one Open chat across paper tabs.</li>
+            <li><strong>Paper chat</strong> answers questions about the currently open PDF. <strong>Open chat</strong> is a free-form workspace for questions across multiple papers and files.</li>
+            <li>Type <strong>/</strong> to open quick actions: attach files, add a reference, send the current PDF page, or send the entire PDF. Type <strong>@</strong> to add a paper from your library as context.</li>
+            <li>Enable <strong>Agent mode</strong> with the toggle in the toolbar to let the assistant autonomously search your library, inspect papers, and complete multi-step research tasks.</li>
+            <li>Add context inline: select text in the PDF reader for <strong>text context</strong>, use the screenshot button for <strong>figure context</strong>, or use <strong>@</strong> for <strong>paper context</strong>. Right-click a paper chip to force sending its full text; right-click again to dismiss it.</li>
           </ul>
         </div>
       </div>
