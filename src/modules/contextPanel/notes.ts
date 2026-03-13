@@ -28,8 +28,66 @@ import type { ChatAttachment, Message, SelectedTextSource } from "./types";
 import {
   isGlobalPortalItem,
   isPaperPortalItem,
+  resolveNoteParentItem,
+  resolveNoteTitle,
   resolvePaperPortalBaseItem,
 } from "./portalScope";
+
+export type NoteSnapshot = {
+  noteId: number;
+  title: string;
+  html: string;
+  text: string;
+  libraryID: number;
+  parentItemId?: number;
+  noteKind: "item" | "standalone";
+};
+
+export function stripNoteHtml(html: string): string {
+  if (!html) return "";
+  let text = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, "");
+  text = text.replace(/<\/(p|div|h[1-6]|li|tr|blockquote)>/gi, "\n");
+  text = text.replace(/<br\s*\/?>/gi, "\n");
+  text = text.replace(/<[^>]+>/g, "");
+  text = text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+  return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+export function renderRawNoteHtml(contentText: string): string {
+  const raw = sanitizeText(contentText || "").trim();
+  if (!raw) return "<p></p>";
+  try {
+    return renderMarkdownForNote(raw);
+  } catch (err) {
+    ztoolkit.log("Note markdown render error:", err);
+    return escapeNoteHtml(raw).replace(/\n/g, "<br/>");
+  }
+}
+
+export function readNoteSnapshot(
+  item: Zotero.Item | null | undefined,
+): NoteSnapshot | null {
+  if (!(item as any)?.isNote?.()) return null;
+  const noteId = Number(item?.id);
+  if (!Number.isFinite(noteId) || noteId <= 0) return null;
+  const html = String((item as any).getNote?.() || "");
+  const parentItem = resolveNoteParentItem(item);
+  return {
+    noteId: Math.floor(noteId),
+    title: resolveNoteTitle(item),
+    html,
+    text: stripNoteHtml(html),
+    libraryID: Number(item?.libraryID) || 0,
+    parentItemId: parentItem?.id,
+    noteKind: parentItem ? "item" : "standalone",
+  };
+}
 
 function resolveParentItemForNote(item: Zotero.Item): Zotero.Item | null {
   if (isGlobalPortalItem(item)) {
@@ -37,6 +95,13 @@ function resolveParentItemForNote(item: Zotero.Item): Zotero.Item | null {
   }
   if (isPaperPortalItem(item)) {
     return resolvePaperPortalBaseItem(item);
+  }
+  const noteParentItem = resolveNoteParentItem(item);
+  if (noteParentItem) {
+    return noteParentItem;
+  }
+  if ((item as any).isNote?.()) {
+    return null;
   }
   if (item.isAttachment() && item.parentID) {
     return Zotero.Items.get(item.parentID) || null;
@@ -51,28 +116,15 @@ function buildAssistantNoteHtml(
   const response = sanitizeText(contentText || "").trim();
   const source = modelName.trim() || "unknown";
   const timestamp = getCurrentLocalTimestamp();
-  let responseHtml = "";
-  try {
-    // Use Zotero note-editor native math format so that note.setNote()
-    // loads math correctly through ProseMirror's schema parser.
-    responseHtml = renderMarkdownForNote(response);
-  } catch (err) {
-    ztoolkit.log("Note markdown render error:", err);
-    responseHtml = escapeNoteHtml(response).replace(/\n/g, "<br/>");
-  }
+  const responseHtml = renderRawNoteHtml(response);
   return `<p><strong>${escapeNoteHtml(timestamp)}</strong></p><p><strong>${escapeNoteHtml(source)}:</strong></p><div>${responseHtml}</div><hr/><p>Written by LLM-for-Zotero plugin</p>`;
 }
 
 function renderChatMessageHtmlForNote(text: string): string {
   const safeText = sanitizeText(text || "").trim();
   if (!safeText) return "";
-  try {
-    // Reuse the same markdown-to-note rendering path as single-response save.
-    return renderMarkdownForNote(safeText);
-  } catch (err) {
-    ztoolkit.log("Chat history markdown render error:", err);
-    return escapeNoteHtml(safeText).replace(/\n/g, "<br/>");
-  }
+  // Reuse the same markdown-to-note rendering path as single-response save.
+  return renderRawNoteHtml(safeText);
 }
 
 function normalizeScreenshotImagesForNote(images: unknown): string[] {

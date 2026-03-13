@@ -13,6 +13,7 @@ import { MAX_SELECTED_TEXT_CONTEXTS } from "./constants";
 import {
   selectedTextCache,
   selectedTextPreviewExpandedCache,
+  selectedNotePreviewExpandedCache,
   recentReaderSelectionCache,
   pinnedSelectedTextKeys,
 } from "./state";
@@ -23,7 +24,10 @@ import type {
   SelectedTextSource,
   PaperContextRef,
 } from "./types";
-import { isGlobalPortalItem } from "./portalScope";
+import {
+  isGlobalPortalItem,
+  resolveActiveNoteSession,
+} from "./portalScope";
 import { formatPaperCitationLabel } from "./paperAttribution";
 import {
   getFirstSelectionFromReader,
@@ -35,6 +39,7 @@ import {
   isPinnedSelectedText,
   prunePinnedSelectedTextKeys,
 } from "./setupHandlers/controllers/pinnedContextController";
+import { readNoteSnapshot } from "./notes";
 
 type SelectedTextPageLocation = {
   contextItemId?: number;
@@ -276,22 +281,43 @@ export function resolveContextSourceItem(
     };
   }
 
+  const activeNoteSession = resolveActiveNoteSession(panelItem);
+  if (activeNoteSession?.noteKind === "standalone") {
+    return {
+      contextItem: null,
+      statusText: `Using note: ${activeNoteSession.title}`,
+    };
+  }
+  if (activeNoteSession?.noteKind === "item" && activeNoteSession.parentItemId) {
+    const activeItem = getActiveContextAttachmentFromTabs();
+    if (activeItem?.parentID === activeNoteSession.parentItemId) {
+      const label = getContextItemLabel(activeItem);
+      return {
+        contextItem: activeItem,
+        statusText: `Using note: ${activeNoteSession.title} with parent paper context ${label}`,
+      };
+    }
+    const parentItem = Zotero.Items.get(activeNoteSession.parentItemId) || null;
+    const firstPdfChild = getFirstPdfChildAttachment(parentItem);
+    if (firstPdfChild) {
+      const label = getContextItemLabel(firstPdfChild);
+      return {
+        contextItem: firstPdfChild,
+        statusText: `Using note: ${activeNoteSession.title} with parent paper context ${label}`,
+      };
+    }
+    return {
+      contextItem: null,
+      statusText: `Using note: ${activeNoteSession.title}; parent item has no PDF context`,
+    };
+  }
+
   const activeItem = getActiveContextAttachmentFromTabs();
   if (activeItem) {
     const label = getContextItemLabel(activeItem);
     return {
       contextItem: activeItem,
       statusText: `Using context: ${label} (active tab)`,
-    };
-  }
-
-  if ((panelItem as any).isNote?.()) {
-    const title =
-      sanitizeText((panelItem as any).getNoteTitle?.() || "").trim() ||
-      `Note ${panelItem.id}`;
-    return {
-      contextItem: panelItem,
-      statusText: `using note: ${title} as context`,
     };
   }
 
@@ -624,6 +650,21 @@ export function setSelectedTextExpandedIndex(
   selectedTextPreviewExpandedCache.set(itemId, Math.floor(index));
 }
 
+export function isNoteContextExpanded(itemId: number): boolean {
+  return selectedNotePreviewExpandedCache.get(itemId) === true;
+}
+
+export function setNoteContextExpanded(
+  itemId: number,
+  expanded: boolean | null,
+): void {
+  if (expanded !== true) {
+    selectedNotePreviewExpandedCache.delete(itemId);
+    return;
+  }
+  selectedNotePreviewExpandedCache.set(itemId, true);
+}
+
 type AddSelectedTextContextOptions = {
   noSelectionStatusText?: string;
   successStatusText?: string;
@@ -682,11 +723,29 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
   if (!previewList) return;
 
   const selectedContexts = getSelectedTextContextEntries(itemId);
+  const panelRoot = body.querySelector("#llm-main") as HTMLDivElement | null;
+  const activeNoteChipData = (() => {
+    if (!panelRoot) return null;
+    const noteId = Number(panelRoot.dataset.noteId || 0);
+    if (!Number.isFinite(noteId) || noteId <= 0) return null;
+    const noteItem = Zotero.Items.get(Math.floor(noteId)) || null;
+    const snapshot = readNoteSnapshot(noteItem);
+    const title = `${snapshot?.title || panelRoot.dataset.noteTitle || ""}`.trim();
+    if (snapshot?.title) {
+      panelRoot.dataset.noteTitle = snapshot.title;
+    }
+    return {
+      noteId: Math.floor(noteId),
+      title,
+      text: snapshot?.text || "",
+    };
+  })();
   prunePinnedSelectedTextKeys(pinnedSelectedTextKeys, itemId, selectedContexts);
-  if (!selectedContexts.length) {
+  if (!selectedContexts.length && !activeNoteChipData) {
     previewList.style.display = "none";
     previewList.innerHTML = "";
     selectedTextPreviewExpandedCache.delete(itemId);
+    selectedNotePreviewExpandedCache.delete(itemId);
     if (selectTextBtn) {
       selectTextBtn.classList.remove("llm-action-btn-active");
     }
@@ -700,10 +759,56 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
     itemId,
     selectedContexts.length,
   );
-  const panelRoot = body.querySelector("#llm-main") as HTMLDivElement | null;
+  const isNoteExpanded = isNoteContextExpanded(itemId);
   const isGlobalConversation = panelRoot?.dataset.conversationKind === "global";
   previewList.style.display = "contents";
   previewList.innerHTML = "";
+
+  if (activeNoteChipData) {
+    const noteChip = ownerDoc.createElement("div");
+    noteChip.className =
+      "llm-selected-context llm-note-context-chip llm-selected-context-pinned";
+    noteChip.dataset.noteChip = "true";
+    noteChip.dataset.noteId = `${activeNoteChipData.noteId}`;
+    noteChip.dataset.pinned = "true";
+    noteChip.classList.toggle("expanded", isNoteExpanded);
+    noteChip.classList.toggle("collapsed", !isNoteExpanded);
+
+    const noteHeader = ownerDoc.createElement("div");
+    noteHeader.className =
+      "llm-image-preview-header llm-selected-context-header";
+
+    const noteMeta = ownerDoc.createElement("button");
+    noteMeta.type = "button";
+    noteMeta.className =
+      "llm-image-preview-meta llm-selected-context-meta llm-note-context-meta";
+    noteMeta.setAttribute(
+      "aria-label",
+      `Current note context: Note ${activeNoteChipData.noteId}`,
+    );
+    noteMeta.setAttribute("aria-expanded", isNoteExpanded ? "true" : "false");
+    const noteIcon = ownerDoc.createElement("span");
+    noteIcon.className = "llm-note-context-icon";
+    noteIcon.textContent = "📝";
+    const noteLabel = ownerDoc.createElement("span");
+    noteLabel.className = "llm-note-context-label";
+    noteLabel.textContent = `Note ${activeNoteChipData.noteId}`;
+    noteMeta.append(noteIcon, noteLabel);
+    noteHeader.appendChild(noteMeta);
+
+    const noteExpanded = ownerDoc.createElement("div");
+    noteExpanded.className =
+      "llm-image-preview-expanded llm-selected-context-expanded";
+    noteExpanded.hidden = false;
+    noteExpanded.style.display = "flex";
+    const noteBody = ownerDoc.createElement("div");
+    noteBody.className = "llm-selected-context-text llm-note-context-text";
+    noteBody.textContent = activeNoteChipData.text || "Empty note";
+    noteExpanded.appendChild(noteBody);
+
+    noteChip.append(noteHeader, noteExpanded);
+    previewList.appendChild(noteChip);
+  }
 
   for (const [index, selectedContext] of selectedContexts.entries()) {
     const selectedText = selectedContext.text;
@@ -833,7 +938,55 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
   }
 
   if (selectTextBtn) {
-    selectTextBtn.classList.add("llm-action-btn-active");
+    selectTextBtn.classList.toggle(
+      "llm-action-btn-active",
+      selectedContexts.length > 0,
+    );
+  }
+}
+
+export function refreshActiveNoteChipPreview(body: Element): void {
+  const panelRoot = body.querySelector("#llm-main") as HTMLDivElement | null;
+  const previewList = body.querySelector(
+    "#llm-selected-context-list",
+  ) as HTMLDivElement | null;
+  if (!panelRoot || !previewList) return;
+  const noteChip = previewList.querySelector(
+    "[data-note-chip='true']",
+  ) as HTMLDivElement | null;
+  if (!noteChip) return;
+  const noteId = Number(panelRoot.dataset.noteId || noteChip.dataset.noteId || 0);
+  if (!Number.isFinite(noteId) || noteId <= 0) return;
+  const noteItem = Zotero.Items.get(Math.floor(noteId)) || null;
+  const snapshot = readNoteSnapshot(noteItem);
+  if (!snapshot) return;
+  panelRoot.dataset.noteTitle = snapshot.title;
+  noteChip.dataset.noteId = `${snapshot.noteId}`;
+  const noteMeta = noteChip.querySelector(
+    ".llm-note-context-meta",
+  ) as HTMLButtonElement | null;
+  if (noteMeta) {
+    noteMeta.removeAttribute("title");
+    noteMeta.setAttribute(
+      "aria-label",
+      `Current note context: Note ${snapshot.noteId}`,
+    );
+    noteMeta.setAttribute(
+      "aria-expanded",
+      isNoteContextExpanded(snapshot.noteId) ? "true" : "false",
+    );
+    const noteLabel = noteMeta.querySelector(
+      ".llm-note-context-label",
+    ) as HTMLSpanElement | null;
+    if (noteLabel) {
+      noteLabel.textContent = `Note ${snapshot.noteId}`;
+    }
+  }
+  const bodyEl = noteChip.querySelector(
+    ".llm-note-context-text",
+  ) as HTMLDivElement | null;
+  if (bodyEl) {
+    bodyEl.textContent = snapshot.text || "Empty note";
   }
 }
 

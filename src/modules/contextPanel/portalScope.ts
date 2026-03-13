@@ -8,7 +8,7 @@ import {
   getLockedGlobalConversationKey,
 } from "./prefHelpers";
 import { activePaperConversationByPaper } from "./state";
-import type { GlobalPortalItem, PaperPortalItem } from "./types";
+import type { ActiveNoteSession, GlobalPortalItem, PaperPortalItem } from "./types";
 
 export function resolveActiveLibraryID(): number | null {
   try {
@@ -147,6 +147,131 @@ export function resolvePaperPortalBaseItem(
   return resolved?.isRegularItem?.() ? resolved : null;
 }
 
+export function resolveNoteParentItem(
+  item: Zotero.Item | null | undefined,
+): Zotero.Item | null {
+  if (!(item as any)?.isNote?.()) return null;
+  const parentID = normalizePositiveInt(item?.parentID);
+  if (!parentID) return null;
+  const parentItem = Zotero.Items.get(parentID) || null;
+  return parentItem?.isRegularItem?.() ? parentItem : null;
+}
+
+function resolveActiveTabTitleForNote(
+  item: Zotero.Item | null | undefined,
+): string {
+  const noteId = normalizePositiveInt(item?.id);
+  if (!noteId) return "";
+  const tabsCandidates = [
+    (Zotero as unknown as { Tabs?: unknown }).Tabs,
+    (Zotero.getMainWindow?.() as { Zotero?: { Tabs?: unknown } } | undefined)
+      ?.Zotero?.Tabs,
+    (Zotero.getActiveZoteroPane?.() as { document?: Document } | undefined)
+      ?.document?.defaultView &&
+      (
+        (
+          Zotero.getActiveZoteroPane?.() as { document?: Document } | undefined
+        )?.document?.defaultView as { Zotero?: { Tabs?: unknown } }
+      ).Zotero?.Tabs,
+  ];
+  for (const candidate of tabsCandidates) {
+    const tabs = candidate as
+      | {
+          selectedID?: string | number;
+          _tabs?: Array<Record<string, unknown>>;
+        }
+      | undefined;
+    const selectedId =
+      tabs?.selectedID === undefined || tabs?.selectedID === null
+        ? ""
+        : `${tabs.selectedID}`;
+    const activeTab = Array.isArray(tabs?._tabs)
+      ? tabs!._tabs!.find((tab) => `${tab?.id || ""}` === selectedId)
+      : null;
+    if (!activeTab) continue;
+    const data = (activeTab.data || {}) as Record<string, unknown>;
+    const candidateItemId = normalizePositiveInt(
+      data.itemID || data.itemId || data.id,
+    );
+    if (candidateItemId && candidateItemId !== noteId) continue;
+    const titleCandidates = [
+      activeTab.title,
+      activeTab.label,
+      activeTab.name,
+      data.title,
+      data.label,
+      data.name,
+      data.noteTitle,
+      data.itemTitle,
+    ];
+    for (const raw of titleCandidates) {
+      const title = typeof raw === "string" ? raw.trim() : "";
+      if (title) return title;
+    }
+  }
+  return "";
+}
+
+export function resolveNoteTitle(
+  item: Zotero.Item | null | undefined,
+): string {
+  if (!(item as any)?.isNote?.()) return "";
+  const activeTabTitle = resolveActiveTabTitleForNote(item);
+  if (activeTabTitle) return activeTabTitle;
+  try {
+    const raw = String((item as any).getDisplayTitle?.() || "").trim();
+    if (raw) return raw;
+  } catch (_err) {
+    void _err;
+  }
+  try {
+    const raw = String((item as any).getField?.("title") || "").trim();
+    if (raw) return raw;
+  } catch (_err) {
+    void _err;
+  }
+  try {
+    const raw = String((item as any).getNoteTitle?.() || "").trim();
+    if (raw) return raw;
+  } catch (_err) {
+    void _err;
+  }
+  return "";
+}
+
+export function resolveActiveNoteSession(
+  item: Zotero.Item | null | undefined,
+): ActiveNoteSession | null {
+  if (!(item as any)?.isNote?.()) return null;
+  const noteId = normalizePositiveInt(item?.id);
+  if (!noteId) return null;
+  const parentItem = resolveNoteParentItem(item);
+  return {
+    noteKind: parentItem ? "item" : "standalone",
+    noteId,
+    title: resolveNoteTitle(item),
+    parentItemId: parentItem?.id,
+    displayConversationKind: parentItem ? "paper" : "global",
+    capabilities: {
+      showModeSwitch: false,
+      showNewConversation: false,
+      showHistory: false,
+      showOpenLock: false,
+    },
+  };
+}
+
+export function resolveDisplayConversationKind(
+  item: Zotero.Item | null | undefined,
+): "global" | "paper" | null {
+  const noteSession = resolveActiveNoteSession(item);
+  if (noteSession) {
+    return noteSession.displayConversationKind;
+  }
+  if (!item) return null;
+  return isGlobalPortalItem(item) ? "global" : "paper";
+}
+
 export function resolveConversationBaseItem(
   targetItem: Zotero.Item | null | undefined,
 ): Zotero.Item | null {
@@ -154,6 +279,10 @@ export function resolveConversationBaseItem(
   if (isGlobalPortalItem(targetItem)) return null;
   if (isPaperPortalItem(targetItem)) {
     return resolvePaperPortalBaseItem(targetItem);
+  }
+  const noteParentItem = resolveNoteParentItem(targetItem);
+  if (noteParentItem) {
+    return noteParentItem;
   }
   if ((targetItem as any).isNote?.()) {
     return targetItem;
@@ -184,6 +313,16 @@ export function resolveInitialPanelItemState(
   basePaperItem: Zotero.Item | null;
 } {
   let item = initialItem || null;
+  const noteSession = resolveActiveNoteSession(item);
+  if (noteSession) {
+    return {
+      item,
+      basePaperItem:
+        noteSession.noteKind === "item" && noteSession.parentItemId
+          ? Zotero.Items.get(noteSession.parentItemId) || null
+          : null,
+    };
+  }
   const basePaperItem = resolveConversationBaseItem(item);
   if (!basePaperItem) {
     return { item, basePaperItem: null };

@@ -189,4 +189,58 @@ describe("AgentToolRegistry", function () {
     assert.equal(result.execution.result.ok, true);
     assert.deepEqual(result.execution.result.content, { applied: 1 });
   });
+
+  it("filters request-scoped tools when they are unavailable", async function () {
+    const registry = new AgentToolRegistry();
+    registry.register({
+      spec: {
+        name: "edit_current_note",
+        description: "edit the active note",
+        inputSchema: { type: "object" },
+        mutability: "write",
+        requiresConfirmation: true,
+      },
+      isAvailable: (request) => Boolean(request.activeNoteContext),
+      validate: () => ({ ok: true, value: {} }),
+      createPendingAction: () => ({
+        toolName: "edit_current_note",
+        title: "Edit note?",
+        confirmLabel: "Apply",
+        cancelLabel: "Cancel",
+        fields: [],
+      }),
+      execute: async () => ({ status: "updated" }),
+    });
+
+    assert.deepEqual(registry.listToolsForRequest(baseContext.request), []);
+    assert.lengthOf(
+      registry.listToolsForRequest({
+        ...baseContext.request,
+        activeNoteContext: {
+          noteId: 5,
+          title: "Draft",
+          noteKind: "standalone",
+          noteText: "Current body",
+        },
+      }),
+      1,
+    );
+
+    const result = await registry.prepareExecution(
+      {
+        id: "call-3",
+        name: "edit_current_note",
+        arguments: {},
+      },
+      baseContext,
+    );
+
+    assert.equal(result.kind, "result");
+    if (result.kind !== "result") return;
+    assert.equal(result.execution.result.ok, false);
+    assert.include(
+      String((result.execution.result.content as { error?: string }).error),
+      "not available",
+    );
+  });
 });

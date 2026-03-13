@@ -41,6 +41,28 @@ export type PaperContextRef = {
   year?: string;
 };
 
+export type ActiveNoteSession = {
+  noteKind: "item" | "standalone";
+  noteId: number;
+  title: string;
+  parentItemId?: number;
+  displayConversationKind: "paper" | "global";
+  capabilities: {
+    showModeSwitch: boolean;
+    showNewConversation: boolean;
+    showHistory: boolean;
+    showOpenLock: boolean;
+  };
+};
+
+export type ActiveNoteContext = {
+  noteId: number;
+  title: string;
+  noteKind: "item" | "standalone";
+  parentItemId?: number;
+  noteText: string;
+};
+
 export type GlobalConversationSummary = {
   conversationKey: number;
   libraryID: number;

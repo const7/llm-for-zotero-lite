@@ -12,6 +12,8 @@ import {
   getPaperPortalBaseItemID,
   isGlobalPortalItem,
   isPaperPortalItem,
+  resolveActiveNoteSession,
+  resolveDisplayConversationKind,
 } from "./portalScope";
 
 function createActionDropdown(doc: Document, spec: ActionDropdownSpec) {
@@ -38,8 +40,10 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   body.textContent = "";
   const doc = body.ownerDocument!;
   const hasItem = Boolean(item);
-  const isGlobalMode = Boolean(item && isGlobalPortalItem(item));
-  const isPaperMode = Boolean(item && !isGlobalMode);
+  const activeNoteSession = resolveActiveNoteSession(item);
+  const displayConversationKind = resolveDisplayConversationKind(item);
+  const isGlobalMode = displayConversationKind === "global";
+  const isPaperMode = displayConversationKind === "paper";
   const conversationItemId =
     hasItem && item
       ? item.isAttachment() && item.parentID
@@ -48,13 +52,14 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       : 0;
   const basePaperItemId =
     hasItem && item
-      ? isPaperPortalItem(item)
+      ? activeNoteSession?.parentItemId ||
+        (isPaperPortalItem(item)
         ? getPaperPortalBaseItemID(item) || 0
         : item.isAttachment() && item.parentID
           ? item.parentID
           : isPaperMode
             ? item.id
-            : 0
+            : 0)
       : 0;
   const hasPaperContext = basePaperItemId > 0;
 
@@ -84,6 +89,14 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     : "";
   container.dataset.basePaperItemId =
     basePaperItemId > 0 ? `${basePaperItemId}` : "";
+  container.dataset.noteKind = activeNoteSession?.noteKind || "";
+  container.dataset.noteId = activeNoteSession?.noteId
+    ? `${activeNoteSession.noteId}`
+    : "";
+  container.dataset.noteTitle = activeNoteSession?.title || "";
+  container.dataset.noteParentItemId = activeNoteSession?.parentItemId
+    ? `${activeNoteSession.parentItemId}`
+    : "";
 
   // Header section
   const header = createElement(doc, "div", "llm-header");
@@ -114,6 +127,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     title: "Start a new chat",
   });
   historyNewBtn.setAttribute("aria-label", "Start a new chat");
+  historyNewBtn.style.display = activeNoteSession ? "none" : "";
 
   // History toggle button (clock icon)
   const historyToggle = createElement(doc, "button", "llm-history-toggle", {
@@ -124,6 +138,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   historyToggle.setAttribute("aria-label", "Conversation history");
   historyToggle.setAttribute("aria-haspopup", "menu");
   historyToggle.setAttribute("aria-expanded", "false");
+  historyToggle.style.display = activeNoteSession ? "none" : "";
 
   // Mode chip: single pill showing current mode + lock
   const modeSwitchWrap = createElement(doc, "div", "llm-mode-switch", {
@@ -136,11 +151,23 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     type: "button",
     textContent: hasItem && isGlobalMode ? "Open chat" : "Paper chat",
     title:
-      hasItem && isGlobalMode ? "Switch to paper chat" : "Switch to open chat",
+      activeNoteSession
+        ? hasItem && isGlobalMode
+          ? "Open chat"
+          : "Paper chat"
+        : hasItem && isGlobalMode
+          ? "Switch to paper chat"
+          : "Switch to open chat",
   });
   modeChipBtn.setAttribute(
     "aria-label",
-    hasItem && isGlobalMode ? "Switch to paper chat" : "Switch to open chat",
+    activeNoteSession
+      ? hasItem && isGlobalMode
+        ? "Open chat"
+        : "Paper chat"
+      : hasItem && isGlobalMode
+        ? "Switch to paper chat"
+        : "Switch to open chat",
   );
 
   // Lock button, right of chip (only visible in open-chat mode)
@@ -151,7 +178,8 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   });
   modeLockBtn.dataset.locked = "false";
   modeLockBtn.setAttribute("aria-label", "Lock open chat as default");
-  modeLockBtn.style.visibility = hasItem && isGlobalMode ? "visible" : "hidden";
+  modeLockBtn.style.visibility =
+    hasItem && isGlobalMode && !activeNoteSession ? "visible" : "hidden";
 
   modeSwitchWrap.append(modeChipBtn, modeLockBtn);
 
