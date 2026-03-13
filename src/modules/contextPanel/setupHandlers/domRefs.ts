@@ -40,6 +40,8 @@ export type PanelDomRefs = {
   slashMenu: HTMLDivElement | null;
   slashUploadOption: HTMLButtonElement | null;
   slashReferenceOption: HTMLButtonElement | null;
+  slashPdfPageOption: HTMLButtonElement | null;
+  slashFullPdfOption: HTMLButtonElement | null;
   imagePreview: HTMLDivElement | null;
   selectedContextList: HTMLDivElement | null;
   previewStrip: HTMLDivElement | null;
@@ -180,6 +182,12 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     ) as HTMLButtonElement | null,
     slashReferenceOption: body.querySelector(
       "#llm-slash-reference-option",
+    ) as HTMLButtonElement | null,
+    slashPdfPageOption: body.querySelector(
+      "#llm-slash-pdf-page-option",
+    ) as HTMLButtonElement | null,
+    slashFullPdfOption: body.querySelector(
+      "#llm-slash-full-pdf-option",
     ) as HTMLButtonElement | null,
     imagePreview: body.querySelector(
       "#llm-image-preview",

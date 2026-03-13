@@ -3863,7 +3863,24 @@ label.llm-search-results-item:hover {
 }
 
 .llm-slash-menu {
-  min-width: calc(140px * var(--llm-font-scale, 1));
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  max-height: min(40vh, 280px);
+  overflow-y: auto;
+  border-radius: 12px;
+  border: 1px solid var(--stroke-secondary, rgba(120, 120, 120, 0.35));
+  background: var(--material-background, #fff);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+  padding: 0;
+  min-width: unset;
+}
+
+#llm-main[data-runtime-mode="agent"] #llm-slash-pdf-page-option,
+#llm-main[data-runtime-mode="agent"] #llm-slash-full-pdf-option {
+  display: none;
 }
 
 .llm-select-text-btn.llm-action-icon-only::before {

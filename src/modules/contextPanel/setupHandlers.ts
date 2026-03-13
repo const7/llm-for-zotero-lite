@@ -25,6 +25,7 @@ import {
   ACTION_LAYOUT_MODEL_FULL_MAX_LINES,
   GLOBAL_HISTORY_LIMIT,
   PREFERENCES_PANE_ID,
+  MAX_UPLOAD_PDF_SIZE_BYTES,
 } from "./constants";
 import {
   selectedModelCache,
@@ -144,6 +145,7 @@ import {
 import { resolvePaperContextRefFromAttachment } from "./paperAttribution";
 import { buildPaperKey } from "./pdfContext";
 import { captureScreenshotSelection, optimizeImageDataUrl } from "./screenshot";
+import { captureCurrentPdfPage } from "./pdfPageCapture";
 import {
   createNoteFromAssistantText,
   createNoteFromChatHistory,
@@ -152,6 +154,7 @@ import {
 } from "./notes";
 import {
   persistAttachmentBlob,
+  readAttachmentBytes,
   extractManagedBlobHash,
   isManagedBlobPath,
   removeAttachmentFile,
@@ -335,6 +338,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashMenu,
     slashUploadOption,
     slashReferenceOption,
+    slashPdfPageOption,
+    slashFullPdfOption,
     imagePreview,
     selectedContextList,
     previewStrip,
@@ -771,6 +776,12 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     closeHistoryRowMenu();
   };
   const closeSlashMenu = () => {
+    slashMenuActiveIndex = -1;
+    if (slashMenu) {
+      Array.from(slashMenu.querySelectorAll(".llm-action-picker-item")).forEach(
+        (el) => (el as HTMLButtonElement).removeAttribute("aria-selected"),
+      );
+    }
     setFloatingMenuOpen(slashMenu, SLASH_MENU_OPEN_CLASS, false);
     if (uploadBtn) {
       uploadBtn.setAttribute("aria-expanded", "false");
@@ -6217,10 +6228,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         : inputBox.value.length;
     return parseAtSearchToken(inputBox.value, caretEnd);
   };
-  // In non-agent mode, '/' also triggers the paper picker, so check both tokens
   const getActiveSlashToken = (): ActiveSlashToken | null =>
-    getActiveAtToken() ??
-    (getCurrentRuntimeMode() !== "agent" ? getActiveActionToken() : null);
+    getActiveAtToken();
   const getActiveActionToken = (): ActiveSlashToken | null => {
     const caretEnd =
       typeof inputBox.selectionStart === "number"
@@ -6241,6 +6250,42 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       paperPickerList.innerHTML = "";
     }
   };
+  // ── Slash menu keyboard navigation ────────────────────────────────────────
+  let slashMenuActiveIndex = -1;
+  const getVisibleSlashItems = (): HTMLButtonElement[] => {
+    if (!slashMenu) return [];
+    const win = body.ownerDocument?.defaultView;
+    return Array.from(
+      slashMenu.querySelectorAll(".llm-action-picker-item"),
+    ).filter((el) => {
+      const style = win?.getComputedStyle(el as Element);
+      return style ? style.display !== "none" : true;
+    }) as HTMLButtonElement[];
+  };
+  const updateSlashMenuSelection = () => {
+    const items = getVisibleSlashItems();
+    items.forEach((item, idx) => {
+      item.setAttribute(
+        "aria-selected",
+        idx === slashMenuActiveIndex ? "true" : "false",
+      );
+    });
+    if (slashMenuActiveIndex >= 0 && items[slashMenuActiveIndex]) {
+      items[slashMenuActiveIndex].scrollIntoView({ block: "nearest" });
+    }
+  };
+  const openSlashMenuWithSelection = () => {
+    slashMenuActiveIndex = 0;
+    setFloatingMenuOpen(slashMenu, SLASH_MENU_OPEN_CLASS, true);
+    updateSlashMenuSelection();
+  };
+  const selectActiveSlashMenuItem = () => {
+    const items = getVisibleSlashItems();
+    if (slashMenuActiveIndex >= 0 && items[slashMenuActiveIndex]) {
+      items[slashMenuActiveIndex].click();
+    }
+  };
+
   // ── Action picker ─────────────────────────────────────────────────────────
   type ActionPickerItem = { name: string; description: string; inputSchema: object };
   let actionPickerItems: ActionPickerItem[] = [];
@@ -6300,6 +6345,22 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     }
     if (getCurrentRuntimeMode() !== "agent") {
       closeActionPicker();
+      const token = getActiveActionToken();
+      if (token && slashMenu) {
+        if (!isFloatingMenuOpen(slashMenu)) {
+          closeRetryModelMenu();
+          closeModelMenu();
+          closeReasoningMenu();
+          closeHistoryNewMenu();
+          closeHistoryMenu();
+          closeResponseMenu();
+          closePromptMenu();
+          closeExportMenu();
+          openSlashMenuWithSelection();
+        }
+      } else {
+        closeSlashMenu();
+      }
       return;
     }
     const token = getActiveActionToken();
@@ -6782,10 +6843,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     inputBox.setSelectionRange(nextCaret, nextCaret);
     return true;
   };
-  // In non-agent mode, '/' also serves as a paper picker token, so consume either
   const consumeActiveSlashToken = (): boolean =>
-    consumeActiveAtToken() ||
-    (getCurrentRuntimeMode() !== "agent" ? consumeActiveActionToken() : false);
+    consumeActiveAtToken();
   const consumeActiveActionToken = (): boolean => {
     const token = getActiveActionToken();
     if (!token) return false;
@@ -7532,6 +7591,41 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   // Enter key (Shift+Enter for newline)
   inputBox.addEventListener("keydown", (e: Event) => {
     const ke = e as KeyboardEvent;
+    if (isFloatingMenuOpen(slashMenu)) {
+      if (ke.key === "ArrowDown") {
+        e.preventDefault();
+        e.stopPropagation();
+        const items = getVisibleSlashItems();
+        if (items.length) {
+          slashMenuActiveIndex = (slashMenuActiveIndex + 1) % items.length;
+          updateSlashMenuSelection();
+        }
+        return;
+      }
+      if (ke.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopPropagation();
+        const items = getVisibleSlashItems();
+        if (items.length) {
+          slashMenuActiveIndex =
+            (slashMenuActiveIndex - 1 + items.length) % items.length;
+          updateSlashMenuSelection();
+        }
+        return;
+      }
+      if (ke.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeSlashMenu();
+        return;
+      }
+      if (ke.key === "Enter" || ke.key === "Tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        selectActiveSlashMenuItem();
+        return;
+      }
+    }
     if (isActionPickerOpen()) {
       if (ke.key === "ArrowDown") {
         e.preventDefault();
@@ -7954,8 +8048,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       closeResponseMenu();
       closePromptMenu();
       closeExportMenu();
-      positionFloatingMenu(body, slashMenu, uploadBtn);
-      setFloatingMenuOpen(slashMenu, SLASH_MENU_OPEN_CLASS, true);
+      openSlashMenuWithSelection();
       uploadBtn.setAttribute("aria-expanded", "true");
     });
     uploadInput.addEventListener("change", async () => {
@@ -7971,6 +8064,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       e.preventDefault();
       e.stopPropagation();
       if (!item) return;
+      consumeActiveActionToken();
       closeSlashMenu();
       uploadInput.click();
     });
@@ -7980,8 +8074,95 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashReferenceOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
+      consumeActiveActionToken();
       closeSlashMenu();
       openReferenceSlashFromMenu();
+    });
+  }
+
+  if (slashFullPdfOption) {
+    slashFullPdfOption.addEventListener("click", async (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!item) return;
+      consumeActiveActionToken();
+      closeSlashMenu();
+      const attachment = getActiveContextAttachmentFromTabs();
+      if (!attachment) {
+        if (status) setStatus(status, "No PDF open — open a PDF in the reader first", "error");
+        return;
+      }
+      const filePath =
+        typeof (attachment as { getFilePath?: () => string | undefined }).getFilePath === "function"
+          ? (attachment as { getFilePath: () => string | undefined }).getFilePath()
+          : (attachment as unknown as { attachmentPath?: string }).attachmentPath;
+      if (!filePath) {
+        if (status) setStatus(status, "Could not locate the PDF file", "error");
+        return;
+      }
+      if (status) setStatus(status, "Loading PDF...", "sending");
+      try {
+        const bytes = await readAttachmentBytes(filePath);
+        if (bytes.byteLength > MAX_UPLOAD_PDF_SIZE_BYTES) {
+          if (status) setStatus(status, `PDF too large (max ${Math.round(MAX_UPLOAD_PDF_SIZE_BYTES / 1024 / 1024)} MB)`, "error");
+          return;
+        }
+        const fileName = filePath.split(/[\\/]/).pop() || "document.pdf";
+        const file = new File([bytes], fileName, { type: "application/pdf" });
+        await processIncomingFiles([file]);
+        if (status) setStatus(status, "PDF added to context", "ready");
+      } catch (err) {
+        ztoolkit.log("Full PDF load error:", err);
+        if (status) setStatus(status, "Failed to load PDF", "error");
+      }
+    });
+  }
+
+  if (slashPdfPageOption) {
+    slashPdfPageOption.addEventListener("click", async (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!item) return;
+      consumeActiveActionToken();
+      closeSlashMenu();
+      const { currentModel } = getSelectedModelInfo();
+      if (isScreenshotUnsupportedModel(currentModel)) {
+        if (status) setStatus(status, getScreenshotDisabledHint(currentModel), "error");
+        return;
+      }
+      const currentImages = selectedImageCache.get(item.id) || [];
+      if (currentImages.length >= MAX_SELECTED_IMAGES) {
+        if (status) setStatus(status, `Maximum ${MAX_SELECTED_IMAGES} images allowed`, "error");
+        return;
+      }
+      if (status) setStatus(status, "Capturing PDF page...", "sending");
+      try {
+        const dataUrl = await captureCurrentPdfPage();
+        if (dataUrl) {
+          const win =
+            body.ownerDocument?.defaultView ||
+            (Zotero.getMainWindow?.() as Window | null);
+          const optimized = win ? await optimizeImageDataUrl(win, dataUrl) : dataUrl;
+          const existingImages = selectedImageCache.get(item.id) || [];
+          const nextImages = [...existingImages, optimized].slice(0, MAX_SELECTED_IMAGES);
+          selectedImageCache.set(item.id, nextImages);
+          const expandedBefore = selectedImagePreviewExpandedCache.get(item.id);
+          selectedImagePreviewExpandedCache.set(
+            item.id,
+            typeof expandedBefore === "boolean" ? expandedBefore : false,
+          );
+          selectedImagePreviewActiveIndexCache.set(item.id, nextImages.length - 1);
+          updateImagePreviewPreservingScroll();
+          if (status) setStatus(status, `Page captured (${nextImages.length}/${MAX_SELECTED_IMAGES})`, "ready");
+        } else {
+          if (status) setStatus(status, "No PDF page found — open a PDF in the reader first", "error");
+          updateImagePreviewPreservingScroll();
+        }
+      } catch (err) {
+        ztoolkit.log("PDF page capture error:", err);
+        if (status) setStatus(status, "PDF page capture failed", "error");
+        updateImagePreviewPreservingScroll();
+      }
     });
   }
 

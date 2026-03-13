@@ -380,28 +380,44 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     },
   );
   slashMenu.style.display = "none";
-  const slashUploadBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-upload-option",
+  const slashList = createElement(doc, "div", "llm-action-picker-list", {});
+  const makeSlashItem = (id: string, title: string, desc: string) => {
+    const btn = createElement(doc, "button", "llm-action-picker-item", {
+      id,
       type: "button",
-      textContent: "Upload files",
-    },
+    });
+    const titleEl = createElement(doc, "span", "llm-action-picker-title", {
+      textContent: title,
+    });
+    const descEl = createElement(doc, "span", "llm-action-picker-description", {
+      textContent: desc,
+    });
+    btn.append(titleEl, descEl);
+    return btn;
+  };
+  const slashUploadBtn = makeSlashItem(
+    "llm-slash-upload-option",
+    "Upload files",
+    "Add documents or images",
   );
-  const slashReferenceBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-reference-option",
-      type: "button",
-      textContent: "Select references",
-    },
+  const slashReferenceBtn = makeSlashItem(
+    "llm-slash-reference-option",
+    "Select references",
+    "Add papers from your library",
   );
-  slashMenu.append(slashUploadBtn, slashReferenceBtn);
-  container.appendChild(slashMenu);
+  const slashPdfPageBtn = makeSlashItem(
+    "llm-slash-pdf-page-option",
+    "Send current PDF page",
+    "Capture the visible page as an image",
+  );
+  const slashFullPdfBtn = makeSlashItem(
+    "llm-slash-full-pdf-option",
+    "Send current entire PDF",
+    "Add the open PDF file to context",
+  );
+  slashList.append(slashUploadBtn, slashReferenceBtn, slashPdfPageBtn, slashFullPdfBtn);
+  slashMenu.append(slashList);
+  // slashMenu is appended to composeArea below (after composeArea is created)
 
   // Retry model menu (opened from latest assistant retry action)
   const retryModelMenu = createElement(doc, "div", "llm-model-menu", {
@@ -610,6 +626,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   actionPickerList.setAttribute("role", "listbox");
   actionPicker.appendChild(actionPickerList);
   composeArea.appendChild(actionPicker);
+  composeArea.appendChild(slashMenu);
 
   const actionHitlPanel = createElement(doc, "div", "llm-action-hitl-panel", {
     id: "llm-action-hitl-panel",
