@@ -153,6 +153,26 @@ export function formatOpenChatTextContextLabel(
   return `${formatPaperCitationLabel(paperContext)} - Text Context`;
 }
 
+export function resolvePaperContextRefFromNote(
+  noteItem: Zotero.Item | null | undefined,
+): PaperContextRef | null {
+  if (!noteItem || !(noteItem as any).isNote?.()) return null;
+  const noteItemId = Math.floor(Number(noteItem.id));
+  if (!noteItemId || noteItemId <= 0) return null;
+  let title = "";
+  try {
+    title = normalizeText((noteItem as any).getNoteTitle?.() || "");
+  } catch (_err) {
+    void _err;
+  }
+  if (!title) title = `Note ${noteItemId}`;
+  return {
+    itemId: noteItemId,
+    contextItemId: noteItemId,
+    title,
+  };
+}
+
 export function resolvePaperContextRefFromAttachment(
   contextItem: Zotero.Item | null | undefined,
 ): PaperContextRef | null {

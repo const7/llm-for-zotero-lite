@@ -54,7 +54,7 @@ import {
   appendSelectedTextContextForItem,
   applySelectedTextPreview,
 } from "./contextResolution";
-import { ensurePDFTextCached } from "./pdfContext";
+import { ensurePDFTextCached, ensureNoteTextCached } from "./pdfContext";
 import { resolveCurrentSelectionPageLocationFromReader } from "./livePdfSelectionLocator";
 import {
   getFirstSelectionFromReader,
@@ -103,26 +103,21 @@ export function registerReaderContextPanel() {
       icon: `chrome://${config.addonRef}/content/icons/icon-20.png`,
     },
     onInit: ({ setEnabled, tabType }) => {
-      const enabled = tabType === "reader" || tabType === "library";
-      setEnabled(enabled);
-      ztoolkit.log(`LLM: panel init tabType=${tabType} enabled=${enabled}`);
+      setEnabled(true);
+      ztoolkit.log(`LLM: panel init tabType=${tabType}`);
     },
     onItemChange: ({ setEnabled, tabType }) => {
-      const enabled = tabType === "reader" || tabType === "library";
-      setEnabled(enabled);
-      ztoolkit.log(
-        `LLM: panel itemChange tabType=${tabType} enabled=${enabled}`,
-      );
+      setEnabled(true);
+      ztoolkit.log(`LLM: panel itemChange tabType=${tabType}`);
       return true;
     },
     onRender: ({ body, item }) => {
       buildUI(body, item);
     },
     onAsyncRender: async ({ body, item, setEnabled, tabType }) => {
-      const enabled = tabType === "reader" || tabType === "library";
-      setEnabled(enabled);
+      setEnabled(true);
       ztoolkit.log(
-        `LLM: panel asyncRender tabType=${tabType} enabled=${enabled} hasItem=${Boolean(item)}`,
+        `LLM: panel asyncRender tabType=${tabType} hasItem=${Boolean(item)}`,
       );
 
       buildUI(body, item);
@@ -133,10 +128,12 @@ export function registerReaderContextPanel() {
       await renderShortcuts(body, resolvedItem);
       setupHandlers(body, item);
       refreshChat(body, resolvedItem);
-      // Defer PDF extraction so the panel becomes interactive sooner.
+      // Defer content extraction so the panel becomes interactive sooner.
       const activeContextItem = getActiveContextAttachmentFromTabs();
       if (activeContextItem) {
         void ensurePDFTextCached(activeContextItem);
+      } else if (item && (item as any).isNote?.()) {
+        void ensureNoteTextCached(item);
       }
     },
   });

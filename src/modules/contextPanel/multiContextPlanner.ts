@@ -10,13 +10,17 @@ import {
   RETRIEVAL_TOP_K_PER_PAPER,
 } from "./constants";
 import { normalizePaperContextRefs } from "./normalizers";
-import { resolvePaperContextRefFromAttachment } from "./paperAttribution";
+import {
+  resolvePaperContextRefFromAttachment,
+  resolvePaperContextRefFromNote,
+} from "./paperAttribution";
 import {
   buildFullPaperContext,
   buildTruncatedFullPaperContext,
   buildPaperKey,
   buildPaperRetrievalCandidates,
   ensurePDFTextCached,
+  ensureNoteTextCached,
   renderEvidencePack,
 } from "./pdfContext";
 import { pdfTextCache } from "./state";
@@ -130,7 +134,13 @@ function resolveContextItem(ref: PaperContextRef): Zotero.Item | null {
   ) {
     return direct;
   }
+  if (direct && (direct as any).isNote?.()) {
+    return direct;
+  }
   const item = Zotero.Items.get(ref.itemId);
+  if (item && (item as any).isNote?.()) {
+    return item;
+  }
   return getFirstPdfChildAttachment(item);
 }
 
@@ -141,6 +151,9 @@ function normalizePaperContextEntries(value: unknown): PaperContextRef[] {
 function buildPaperRefFromContextItem(
   contextItem: Zotero.Item | null | undefined,
 ): PaperContextRef | null {
+  if ((contextItem as any)?.isNote?.()) {
+    return resolvePaperContextRefFromNote(contextItem);
+  }
   return resolvePaperContextRefFromAttachment(contextItem);
 }
 
@@ -799,7 +812,11 @@ async function resolvePlannerPaperEntries(params: {
     const paperKey = buildPaperKey(paperContext);
     const contextItem = resolveContextItem(paperContext);
     if (contextItem) {
-      await ensurePDFTextCached(contextItem);
+      if ((contextItem as any).isNote?.()) {
+        await ensureNoteTextCached(contextItem);
+      } else {
+        await ensurePDFTextCached(contextItem);
+      }
     }
     const isActive = Boolean(activeKey && paperKey === activeKey);
     const pinKind: PlannerPaperEntry["pinKind"] = explicitFullTextKeys.has(

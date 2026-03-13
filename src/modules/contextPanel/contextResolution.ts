@@ -285,6 +285,16 @@ export function resolveContextSourceItem(
     };
   }
 
+  if ((panelItem as any).isNote?.()) {
+    const title =
+      sanitizeText((panelItem as any).getNoteTitle?.() || "").trim() ||
+      `Note ${panelItem.id}`;
+    return {
+      contextItem: panelItem,
+      statusText: `using note: ${title} as context`,
+    };
+  }
+
   if (
     panelItem.isAttachment() &&
     panelItem.attachmentContentType === "application/pdf"

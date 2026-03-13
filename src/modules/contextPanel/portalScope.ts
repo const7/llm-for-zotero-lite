@@ -155,6 +155,9 @@ export function resolveConversationBaseItem(
   if (isPaperPortalItem(targetItem)) {
     return resolvePaperPortalBaseItem(targetItem);
   }
+  if ((targetItem as any).isNote?.()) {
+    return targetItem;
+  }
   if (targetItem.isAttachment() && targetItem.parentID) {
     const parent = Zotero.Items.get(targetItem.parentID) || null;
     return parent?.isRegularItem?.() ? parent : null;

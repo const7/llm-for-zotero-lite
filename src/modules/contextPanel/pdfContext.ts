@@ -111,6 +111,88 @@ export async function ensurePDFTextCached(item: Zotero.Item): Promise<void> {
   await task;
 }
 
+function stripNoteHtml(html: string): string {
+  if (!html) return "";
+  let text = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, "");
+  text = text.replace(/<\/(p|div|h[1-6]|li|tr|blockquote)>/gi, "\n");
+  text = text.replace(/<br\s*\/?>/gi, "\n");
+  text = text.replace(/<[^>]+>/g, "");
+  text = text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+  return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+async function cacheNoteText(item: Zotero.Item) {
+  if (pdfTextCache.has(item.id)) return;
+  try {
+    const html = (item as any).getNote?.() || "";
+    const text = stripNoteHtml(html);
+    const rawTitle = (item as any).getNoteTitle?.() || "";
+    const title = sanitizePdfText(rawTitle || text.split("\n")[0] || "").slice(0, 120);
+    if (text) {
+      const chunks = splitIntoChunks(text, CHUNK_TARGET_LENGTH);
+      const chunkMeta = buildChunkMetadata(chunks);
+      const { chunkStats, docFreq, avgChunkLength } = buildChunkIndex(chunks);
+      pdfTextCache.set(item.id, {
+        title,
+        chunks,
+        chunkMeta,
+        chunkStats,
+        docFreq,
+        avgChunkLength,
+        fullLength: text.length,
+        embeddingFailed: false,
+      });
+    } else {
+      pdfTextCache.set(item.id, {
+        title,
+        chunks: [],
+        chunkMeta: [],
+        chunkStats: [],
+        docFreq: {},
+        avgChunkLength: 0,
+        fullLength: 0,
+        embeddingFailed: false,
+      });
+    }
+  } catch (e) {
+    ztoolkit.log("Error caching note:", e);
+    pdfTextCache.set(item.id, {
+      title: "",
+      chunks: [],
+      chunkMeta: [],
+      chunkStats: [],
+      docFreq: {},
+      avgChunkLength: 0,
+      fullLength: 0,
+      embeddingFailed: false,
+    });
+  }
+}
+
+export async function ensureNoteTextCached(item: Zotero.Item): Promise<void> {
+  if (pdfTextCache.has(item.id)) return;
+  const existingTask = pdfTextLoadingTasks.get(item.id);
+  if (existingTask) {
+    await existingTask;
+    return;
+  }
+  const task = (async () => {
+    try {
+      await cacheNoteText(item);
+    } finally {
+      pdfTextLoadingTasks.delete(item.id);
+    }
+  })();
+  pdfTextLoadingTasks.set(item.id, task);
+  await task;
+}
+
 function splitIntoChunks(text: string, targetLength: number): string[] {
   if (!text) return [];
   const normalized = text.replace(/\r\n?/g, "\n").trim();
