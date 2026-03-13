@@ -111,6 +111,7 @@ import { resolveMultiContextPlan } from "./multiContextPlanner";
 import {
   formatPaperCitationLabel,
   resolvePaperContextRefFromAttachment,
+  resolvePaperContextRefFromItem,
 } from "./paperAttribution";
 import { buildPaperKey } from "./pdfContext";
 import {
@@ -118,8 +119,12 @@ import {
   resolveContextSourceItem,
   setSelectedTextContextEntries,
 } from "./contextResolution";
-import { isGlobalPortalItem } from "./portalScope";
-import { buildChatHistoryNotePayload } from "./notes";
+import {
+  isGlobalPortalItem,
+  resolveActiveNoteSession,
+  resolveDisplayConversationKind,
+} from "./portalScope";
+import { buildChatHistoryNotePayload, readNoteSnapshot } from "./notes";
 import { extractManagedBlobHash } from "./attachmentStorage";
 import { buildContextPlanSystemMessages } from "./requestSystemMessages";
 import { canEditUserPromptTurn } from "./editability";
@@ -284,6 +289,54 @@ function normalizeSelectedTextPaperContextsByIndex(
 
 function normalizePaperContexts(paperContexts: unknown): PaperContextRef[] {
   return normalizePaperContextRefs(paperContexts, { sanitizeText });
+}
+
+function resolveAutoLoadedPaperContextForItem(
+  item: Zotero.Item,
+): PaperContextRef | null {
+  const activeNoteSession = resolveActiveNoteSession(item);
+  if (activeNoteSession?.noteKind === "standalone") {
+    return null;
+  }
+  if (activeNoteSession?.noteKind === "item" && activeNoteSession.parentItemId) {
+    const parentItem = Zotero.Items.get(activeNoteSession.parentItemId) || null;
+    if (!parentItem?.isRegularItem?.()) return null;
+    const activeContextItem = getActiveContextAttachmentFromTabs();
+    if (activeContextItem?.parentID === activeNoteSession.parentItemId) {
+      return resolvePaperContextRefFromAttachment(activeContextItem);
+    }
+    return resolvePaperContextRefFromItem(parentItem);
+  }
+  if (resolveDisplayConversationKind(item) === "global") {
+    return null;
+  }
+  const contextSource = resolveContextSourceItem(item);
+  return resolvePaperContextRefFromAttachment(contextSource.contextItem);
+}
+
+function buildActiveNoteContextBlock(
+  item: Zotero.Item | null | undefined,
+): string {
+  const snapshot = readNoteSnapshot(item);
+  if (!snapshot || !snapshot.text.trim()) {
+    return snapshot
+      ? [
+          "Current active Zotero note:",
+          `Title: ${snapshot.title}`,
+          "Note content is currently empty.",
+        ].join("\n")
+      : "";
+  }
+  const parentLine = snapshot.parentItemId
+    ? `Parent item ID: ${snapshot.parentItemId}`
+    : "Standalone note";
+  return [
+    "Current active Zotero note:",
+    `Title: ${snapshot.title}`,
+    parentLine,
+    "Note content:",
+    `"""\n${snapshot.text}\n"""`,
+  ].join("\n");
 }
 
 function collectRecentPaperContexts(history: Message[]): PaperContextRef[] {
@@ -1146,9 +1199,10 @@ async function buildContextPlanForRequest(params: {
   const contextSource = resolveContextSourceItem(params.item);
   params.setStatusSafely(contextSource.statusText, "sending");
   const activeContextItem = contextSource.contextItem;
-  const conversationMode: "open" | "paper" = isGlobalPortalItem(params.item)
-    ? "open"
-    : "paper";
+  const conversationMode: "open" | "paper" =
+    resolveDisplayConversationKind(params.item) === "global"
+      ? "open"
+      : "paper";
   const systemPrompt = getStringPref("systemPrompt") || undefined;
 
   const plan = await resolveMultiContextPlan({
@@ -1188,9 +1242,11 @@ async function buildContextPlanForRequest(params: {
     contextBudgetTokens: plan.contextBudget.contextBudgetTokens,
     usedContextTokens: plan.usedContextTokens,
   });
+  const noteContext = buildActiveNoteContextBlock(params.item).trim();
   const planContext = sanitizeText(plan.contextText || "").trim();
+  const combinedContext = [noteContext, planContext].filter(Boolean).join("\n\n");
   return {
-    combinedContext: planContext,
+    combinedContext,
     strategy: plan.strategy,
     assistantInstruction: plan.assistantInstruction,
     paperContexts: params.paperContexts,
@@ -1513,7 +1569,7 @@ function includeAutoLoadedPaperContext(
   const normalizedFullTextPaperContexts = normalizePaperContexts(
     fullTextPaperContexts,
   );
-  if (isGlobalPortalItem(item)) {
+  if (resolveDisplayConversationKind(item) === "global") {
     return {
       paperContexts: normalizedPaperContexts,
       fullTextPaperContexts:
@@ -1522,10 +1578,7 @@ function includeAutoLoadedPaperContext(
           : normalizedFullTextPaperContexts,
     };
   }
-  const contextSource = resolveContextSourceItem(item);
-  const autoLoadedPaperContext = resolvePaperContextRefFromAttachment(
-    contextSource.contextItem,
-  );
+  const autoLoadedPaperContext = resolveAutoLoadedPaperContextForItem(item);
   if (!autoLoadedPaperContext) {
     return {
       paperContexts: normalizedPaperContexts,
@@ -1595,11 +1648,7 @@ function syncComposeContextForInlineEdit(
   const fullTextPaperContexts = normalizePaperContexts(
     userMessage.fullTextPaperContexts || userMessage.pinnedPaperContexts,
   );
-  const autoLoadedPaperContext = isGlobalPortalItem(item)
-    ? null
-    : resolvePaperContextRefFromAttachment(
-        resolveContextSourceItem(item).contextItem,
-      );
+  const autoLoadedPaperContext = resolveAutoLoadedPaperContextForItem(item);
   const selectedPaperContexts = autoLoadedPaperContext
     ? paperContexts.filter(
         (paperContext) =>
@@ -2249,6 +2298,22 @@ export type BuildAgentRuntimeRequestParams = {
   history: ChatMessage[];
 };
 
+function buildActiveNoteRuntimeContext(
+  item: Zotero.Item,
+): AgentRuntimeRequest["activeNoteContext"] {
+  const noteSession = resolveActiveNoteSession(item);
+  if (!noteSession) return undefined;
+  const snapshot = readNoteSnapshot(item);
+  if (!snapshot) return undefined;
+  return {
+    noteId: noteSession.noteId,
+    title: noteSession.title,
+    noteKind: noteSession.noteKind,
+    parentItemId: noteSession.parentItemId,
+    noteText: snapshot.text,
+  };
+}
+
 function buildAgentRuntimeRequest(
   params: BuildAgentRuntimeRequestParams,
 ): AgentRuntimeRequest {
@@ -2274,6 +2339,7 @@ function buildAgentRuntimeRequest(
     systemPrompt: getStringPref("systemPrompt") || undefined,
     modelProviderLabel: params.effectiveRequestConfig.modelProviderLabel,
     libraryID: params.item.libraryID,
+    activeNoteContext: buildActiveNoteRuntimeContext(params.item),
   };
 }
 

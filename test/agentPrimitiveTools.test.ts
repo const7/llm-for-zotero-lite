@@ -4,6 +4,7 @@ import { EDITABLE_ARTICLE_METADATA_FIELDS } from "../src/agent/services/zoteroGa
 import { clearUndoStack, peekUndoEntry } from "../src/agent/store/undoStore";
 import { createQueryLibraryTool } from "../src/agent/tools/read/queryLibrary";
 import { createReadLibraryTool } from "../src/agent/tools/read/readLibrary";
+import { createEditCurrentNoteTool } from "../src/agent/tools/write/editCurrentNote";
 import { createMutateLibraryTool } from "../src/agent/tools/write/mutateLibrary";
 import type { AgentToolContext } from "../src/agent/types";
 
@@ -605,5 +606,128 @@ describe("primitive agent tools", function () {
       systemText,
       "let the confirmation card collect the target folders",
     );
+  });
+
+  it("edit_current_note confirms, updates the active note, and records undo", async function () {
+    let restoredHtml: { noteId: number; html: string } | null = null;
+    const tool = createEditCurrentNoteTool({
+      getActiveNoteSnapshot: () => ({
+        noteId: 55,
+        title: "Draft Note",
+        html: "<p>Original body</p>",
+        text: "Original body",
+        libraryID: 1,
+        noteKind: "standalone",
+      }),
+      replaceCurrentNote: async ({
+        content,
+        expectedOriginalHtml,
+      }: {
+        content: string;
+        expectedOriginalHtml?: string;
+      }) => {
+        assert.equal(expectedOriginalHtml, "<p>Original body</p>");
+        return {
+          noteId: 55,
+          title: "Draft Note",
+          previousHtml: "<p>Original body</p>",
+          previousText: "Original body",
+          nextText: content,
+        };
+      },
+      restoreNoteHtml: async (params: { noteId: number; html: string }) => {
+        restoredHtml = params;
+      },
+    } as never);
+    const noteRequest = {
+      ...baseContext.request,
+      activeNoteContext: {
+        noteId: 55,
+        title: "Draft Note",
+        noteKind: "standalone" as const,
+        noteText: "Original body",
+      },
+    };
+
+    assert.isFalse(Boolean(tool.isAvailable?.(baseContext.request)));
+    assert.isTrue(Boolean(tool.isAvailable?.(noteRequest)));
+
+    const validated = tool.validate({
+      content: "Rewritten body",
+    });
+    assert.isTrue(validated.ok);
+    if (!validated.ok) return;
+
+    const pending = tool.createPendingAction?.(validated.value, {
+      ...baseContext,
+      request: noteRequest,
+    });
+    assert.exists(pending);
+    assert.deepEqual(
+      pending?.fields.map((field) => field.type),
+      ["text", "review_table", "textarea"],
+    );
+    const reviewField = pending?.fields[1] as Extract<
+      NonNullable<typeof pending>["fields"][number],
+      { type: "review_table" }
+    >;
+    assert.equal(reviewField.rows[0]?.before, "Original body");
+    assert.equal(reviewField.rows[0]?.after, "Rewritten body");
+
+    const confirmed = tool.applyConfirmation?.(
+      validated.value,
+      { content: "Approved final note text" },
+      {
+        ...baseContext,
+        request: noteRequest,
+      },
+    );
+    assert.isTrue(confirmed?.ok);
+    if (!confirmed?.ok) return;
+
+    const result = await tool.execute(confirmed.value, {
+      ...baseContext,
+      request: noteRequest,
+    });
+    assert.deepEqual(result, {
+      status: "updated",
+      noteId: 55,
+      title: "Draft Note",
+      noteText: "Approved final note text",
+    });
+
+    const undoEntry = peekUndoEntry(baseContext.request.conversationKey);
+    assert.exists(undoEntry);
+    await undoEntry?.revert();
+    assert.deepEqual(restoredHtml, {
+      noteId: 55,
+      html: "<p>Original body</p>",
+    });
+  });
+
+  it("includes the active note content in agent prompts", async function () {
+    const messages = await buildAgentInitialMessages(
+      {
+        conversationKey: 7,
+        mode: "agent",
+        userText: "Revise the note",
+        activeItemId: 55,
+        activeNoteContext: {
+          noteId: 55,
+          title: "Draft Note",
+          noteKind: "item",
+          parentItemId: 9,
+          noteText: "Current note body",
+        },
+      },
+      [],
+    );
+    const userMessage = messages[messages.length - 1];
+    const userText =
+      typeof userMessage?.content === "string" ? userMessage.content : "";
+    assert.include(userText, "Active note: Draft Note");
+    assert.include(userText, "Active note parent item ID: 9");
+    assert.include(userText, "Current note content for this turn");
+    assert.include(userText, "Current note body");
   });
 });

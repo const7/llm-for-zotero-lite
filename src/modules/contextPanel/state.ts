@@ -107,6 +107,7 @@ export const activeConversationModeByLibrary = new Map<
 export const draftInputCache = new Map<number, string>();
 export const selectedTextCache = new Map<number, SelectedTextContext[]>();
 export const selectedTextPreviewExpandedCache = new Map<number, number>();
+export const selectedNotePreviewExpandedCache = new Map<number, boolean>();
 export const selectedImagePreviewExpandedCache = new Map<number, boolean>();
 export const selectedImagePreviewActiveIndexCache = new Map<number, number>();
 export const pinnedSelectedTextKeys = new Map<number, Set<string>>();

@@ -3,6 +3,7 @@ import type { ModelProviderAuthMode } from "../utils/modelProviders";
 import type { ProviderProtocol } from "../utils/providerProtocol";
 import type {
   AdvancedModelParams,
+  ActiveNoteContext,
   ChatAttachment,
   PaperContextRef,
 } from "../shared/types";
@@ -322,6 +323,7 @@ export type AgentRuntimeRequest = AgentRequest & {
   customInstructions?: string;
   modelProviderLabel?: string;
   libraryID?: number;
+  activeNoteContext?: ActiveNoteContext;
 };
 
 export type AgentRuntimeOutcome =
@@ -470,6 +472,7 @@ export type AgentToolPresentation = {
 
 export type AgentToolDefinition<TInput = unknown, TResult = unknown> = {
   spec: ToolSpec;
+  isAvailable?: (request: AgentRuntimeRequest) => boolean;
   guidance?: AgentToolGuidance;
   presentation?: AgentToolPresentation;
   validate: (args: unknown) => AgentToolInputValidation<TInput>;

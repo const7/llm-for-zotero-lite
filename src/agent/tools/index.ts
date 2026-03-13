@@ -10,6 +10,7 @@ import {
 } from "./read/inspectPdf";
 import { createSearchLiteratureOnlineTool } from "./read/searchLiteratureOnline";
 import { createMutateLibraryTool } from "./write/mutateLibrary";
+import { createEditCurrentNoteTool } from "./write/editCurrentNote";
 import { createUndoLastActionTool } from "./write/undoLastAction";
 import { PdfPageService } from "../services/pdfPageService";
 
@@ -36,6 +37,7 @@ export function createBuiltInToolRegistry(
   );
   registry.register(createSearchLiteratureOnlineTool(deps.zoteroGateway));
   registry.register(createMutateLibraryTool(deps.zoteroGateway));
+  registry.register(createEditCurrentNoteTool(deps.zoteroGateway));
   registry.register(createUndoLastActionTool());
   return registry;
 }

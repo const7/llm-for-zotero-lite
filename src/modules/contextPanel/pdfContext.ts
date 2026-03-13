@@ -14,6 +14,7 @@ import {
   formatPaperCitationLabel,
   formatPaperSourceLabel,
 } from "./paperAttribution";
+import { readNoteSnapshot } from "./notes";
 import { pdfTextCache, pdfTextLoadingTasks } from "./state";
 import type {
   PdfContext,
@@ -111,29 +112,12 @@ export async function ensurePDFTextCached(item: Zotero.Item): Promise<void> {
   await task;
 }
 
-function stripNoteHtml(html: string): string {
-  if (!html) return "";
-  let text = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, "");
-  text = text.replace(/<\/(p|div|h[1-6]|li|tr|blockquote)>/gi, "\n");
-  text = text.replace(/<br\s*\/?>/gi, "\n");
-  text = text.replace(/<[^>]+>/g, "");
-  text = text
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'");
-  return text.replace(/\n{3,}/g, "\n\n").trim();
-}
-
 async function cacheNoteText(item: Zotero.Item) {
   if (pdfTextCache.has(item.id)) return;
   try {
-    const html = (item as any).getNote?.() || "";
-    const text = stripNoteHtml(html);
-    const rawTitle = (item as any).getNoteTitle?.() || "";
-    const title = sanitizePdfText(rawTitle || text.split("\n")[0] || "").slice(0, 120);
+    const snapshot = readNoteSnapshot(item);
+    const text = snapshot?.text || "";
+    const title = sanitizePdfText(snapshot?.title || text.split("\n")[0] || "").slice(0, 120);
     if (text) {
       const chunks = splitIntoChunks(text, CHUNK_TARGET_LENGTH);
       const chunkMeta = buildChunkMetadata(chunks);
@@ -191,6 +175,13 @@ export async function ensureNoteTextCached(item: Zotero.Item): Promise<void> {
   })();
   pdfTextLoadingTasks.set(item.id, task);
   await task;
+}
+
+export function invalidateCachedContextText(itemId: number): void {
+  if (!Number.isFinite(itemId) || itemId <= 0) return;
+  const normalizedItemId = Math.floor(itemId);
+  pdfTextCache.delete(normalizedItemId);
+  pdfTextLoadingTasks.delete(normalizedItemId);
 }
 
 function splitIntoChunks(text: string, targetLength: number): string[] {

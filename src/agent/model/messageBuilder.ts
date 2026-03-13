@@ -82,6 +82,16 @@ function buildUserMessage(request: AgentRuntimeRequest): AgentModelMessage {
   if (request.activeItemId) {
     contextLines.push(`- Active item ID: ${request.activeItemId}`);
   }
+  if (request.activeNoteContext) {
+    const note = request.activeNoteContext;
+    contextLines.push(
+      `- Active note: ${note.title} [noteId=${note.noteId}, kind=${note.noteKind}]`,
+    );
+    if (note.parentItemId) {
+      contextLines.push(`- Active note parent item ID: ${note.parentItemId}`);
+    }
+    contextLines.push(`Current note content for this turn:\n"""\n${note.noteText}\n"""`);
+  }
   if (Array.isArray(request.selectedTexts) && request.selectedTexts.length) {
     const selectedTextBlock = request.selectedTexts
       .map((entry, index) => `Selected text ${index + 1}:\n"""\n${entry}\n"""`)

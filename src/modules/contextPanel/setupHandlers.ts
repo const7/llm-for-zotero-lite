@@ -135,7 +135,10 @@ import {
   getSelectedTextContexts,
   getSelectedTextExpandedIndex,
   includeSelectedTextFromReader,
+  isNoteContextExpanded,
+  refreshActiveNoteChipPreview,
   resolveContextSourceItem,
+  setNoteContextExpanded,
   setSelectedTextContextEntries,
   setSelectedTextContexts,
   setSelectedTextExpandedIndex,
@@ -143,12 +146,16 @@ import {
 import {
   flashPageInLivePdfReader,
 } from "./livePdfSelectionLocator";
-import { resolvePaperContextRefFromAttachment } from "./paperAttribution";
+import {
+  resolvePaperContextRefFromAttachment,
+  resolvePaperContextRefFromItem,
+} from "./paperAttribution";
 import { buildPaperKey } from "./pdfContext";
 import { captureScreenshotSelection, optimizeImageDataUrl } from "./screenshot";
 import { captureCurrentPdfPage } from "./pdfPageCapture";
 import {
   createNoteFromAssistantText,
+  createStandaloneNoteFromAssistantText,
   createNoteFromChatHistory,
   createStandaloneNoteFromChatHistory,
   buildChatHistoryNotePayload,
@@ -222,6 +229,8 @@ import {
   createPaperPortalItem,
   getPaperPortalBaseItemID,
   isGlobalPortalItem,
+  resolveActiveNoteSession,
+  resolveDisplayConversationKind,
   resolveConversationBaseItem,
   resolveInitialPanelItemState,
   resolveActiveLibraryID,
@@ -431,8 +440,12 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   panelRoot.tabIndex = 0;
   applyPanelFontScale(panelRoot);
 
-  const isGlobalMode = () => Boolean(item && isGlobalPortalItem(item));
-  const isPaperMode = () => Boolean(item && !isGlobalPortalItem(item));
+  const resolveCurrentNoteSession = () => resolveActiveNoteSession(item);
+  const isNoteSession = () => Boolean(resolveCurrentNoteSession());
+  const isGlobalMode = () =>
+    resolveDisplayConversationKind(item) === "global";
+  const isPaperMode = () =>
+    resolveDisplayConversationKind(item) === "paper";
   const getCurrentLibraryID = (): number => {
     const fromItem =
       item && Number.isFinite(item.libraryID) && item.libraryID > 0
@@ -482,10 +495,27 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     selectedRuntimeModeCache.set(getConversationKey(item), mode);
     updateRuntimeModeButton();
   };
+  const resolveCurrentNoteParentItem = (): Zotero.Item | null => {
+    const noteSession = resolveCurrentNoteSession();
+    if (!noteSession?.parentItemId) return null;
+    const parentItem = Zotero.Items.get(noteSession.parentItemId) || null;
+    return parentItem?.isRegularItem?.() ? parentItem : null;
+  };
   const resolveCurrentPaperBaseItem = (): Zotero.Item | null => {
+    const noteSession = resolveCurrentNoteSession();
+    if (noteSession?.noteKind === "item") {
+      const parentItem = resolveCurrentNoteParentItem();
+      if (parentItem) {
+        basePaperItem = parentItem;
+        return parentItem;
+      }
+    }
+    if (noteSession) {
+      return null;
+    }
     if (basePaperItem?.isRegularItem?.()) return basePaperItem;
     const resolvedFromItem = resolveConversationBaseItem(item);
-    if (resolvedFromItem) {
+    if (resolvedFromItem?.isRegularItem?.()) {
       basePaperItem = resolvedFromItem;
       return resolvedFromItem;
     }
@@ -513,10 +543,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         : "";
     const libraryID = getCurrentLibraryID();
     panelRoot.dataset.libraryId = libraryID > 0 ? `${libraryID}` : "";
+    const noteSession = resolveCurrentNoteSession();
     const mode: "global" | "paper" | null = item
-      ? isGlobalMode()
-        ? "global"
-        : "paper"
+      ? resolveDisplayConversationKind(item)
       : null;
     panelRoot.dataset.conversationKind = mode || "";
     const currentBasePaperItemID =
@@ -525,7 +554,21 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       Number.isFinite(currentBasePaperItemID) && currentBasePaperItemID > 0
         ? `${Math.floor(currentBasePaperItemID)}`
         : "";
-    if (item && libraryID > 0 && mode) {
+    panelRoot.dataset.noteKind = noteSession?.noteKind || "";
+    panelRoot.dataset.noteId = noteSession?.noteId
+      ? `${noteSession.noteId}`
+      : "";
+    panelRoot.dataset.noteTitle = noteSession?.title || "";
+    panelRoot.dataset.noteParentItemId = noteSession?.parentItemId
+      ? `${noteSession.parentItemId}`
+      : "";
+    if (historyNewBtn) {
+      historyNewBtn.style.display = noteSession ? "none" : "";
+    }
+    if (historyToggleBtn) {
+      historyToggleBtn.style.display = noteSession ? "none" : "";
+    }
+    if (item && libraryID > 0 && mode && !noteSession) {
       activeConversationModeByLibrary.set(libraryID, mode);
       if (mode === "global") {
         activeGlobalConversationByLibrary.set(libraryID, item.id);
@@ -557,21 +600,29 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     }
     // Update mode capsule data-active state
     if (modeCapsule) {
-      modeCapsule.dataset.mode = isGlobalMode() ? "global" : "paper";
+      modeCapsule.dataset.mode = mode || "";
     }
     if (modeChipBtn) {
-      modeChipBtn.textContent = isGlobalMode() ? "Open chat" : "Paper chat";
-      modeChipBtn.title = isGlobalMode()
-        ? "Switch to paper chat"
-        : "Switch to open chat";
+      const currentLabel = mode === "global" ? "Open chat" : "Paper chat";
+      modeChipBtn.textContent = currentLabel;
+      modeChipBtn.title = noteSession
+        ? currentLabel
+        : mode === "global"
+          ? "Switch to paper chat"
+          : "Switch to open chat";
       modeChipBtn.setAttribute(
         "aria-label",
-        isGlobalMode() ? "Switch to paper chat" : "Switch to open chat",
+        noteSession
+          ? currentLabel
+          : mode === "global"
+            ? "Switch to paper chat"
+            : "Switch to open chat",
       );
     }
     // Lock button: visible only in open-chat mode; reflect lock state
     if (modeLockBtn) {
-      modeLockBtn.style.visibility = isGlobalMode() ? "visible" : "hidden";
+      modeLockBtn.style.visibility =
+        mode === "global" && !noteSession ? "visible" : "hidden";
       const libraryID = getCurrentLibraryID();
       const lockedKey =
         libraryID > 0 ? getLockedGlobalConversationKey(libraryID) : null;
@@ -1136,19 +1187,20 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           return;
         }
         try {
-          if (isGlobalPortalItem(targetItem)) {
+          const targetNoteSession = resolveActiveNoteSession(targetItem);
+          if (
+            isGlobalPortalItem(targetItem) ||
+            targetNoteSession?.noteKind === "standalone"
+          ) {
             const libraryID =
               Number.isFinite(targetItem.libraryID) && targetItem.libraryID > 0
                 ? Math.floor(targetItem.libraryID)
                 : getCurrentLibraryID();
-            await createStandaloneNoteFromChatHistory(libraryID, [
-              {
-                role: "assistant",
-                text: contentText,
-                timestamp: Date.now(),
-                modelName,
-              },
-            ]);
+            await createStandaloneNoteFromAssistantText(
+              libraryID,
+              contentText,
+              modelName,
+            );
             if (status) {
               setStatus(status, "Created a new note", "ready");
             }
@@ -1485,6 +1537,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   const clearSelectedTextState = (itemId: number) => {
     setSelectedTextContexts(itemId, []);
     setSelectedTextExpandedIndex(itemId, null);
+    setNoteContextExpanded(itemId, null);
     clearPinnedContextOwner(pinnedSelectedTextKeys, itemId);
   };
   const setDraftInputForConversation = (
@@ -1597,6 +1650,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     );
     setSelectedTextContextEntries(itemId, retained);
     setSelectedTextExpandedIndex(itemId, null);
+    setNoteContextExpanded(itemId, null);
   };
   const clearTransientComposeStateForItem = (itemId: number) => {
     clearDraftInputState(itemId);
@@ -1621,9 +1675,27 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   };
 
   const resolveAutoLoadedPaperContext = (): PaperContextRef | null => {
-    if (!item || isGlobalMode()) return null;
+    if (!item) return null;
+    const noteSession = resolveCurrentNoteSession();
+    if (noteSession?.noteKind === "standalone") return null;
+    if (noteSession?.noteKind === "item") {
+      const parentItem = resolveCurrentNoteParentItem();
+      if (!parentItem) return null;
+      const activeReaderAttachment = getActiveContextAttachmentFromTabs();
+      if (activeReaderAttachment?.parentID === parentItem.id) {
+        return (
+          resolvePaperContextRefFromAttachment(activeReaderAttachment) ||
+          resolvePaperContextRefFromItem(parentItem)
+        );
+      }
+      return resolvePaperContextRefFromItem(parentItem);
+    }
+    if (isGlobalMode()) return null;
     const contextSource = resolveContextSourceItem(item);
-    return resolvePaperContextRefFromAttachment(contextSource.contextItem);
+    return (
+      resolvePaperContextRefFromAttachment(contextSource.contextItem) ||
+      resolvePaperContextRefFromItem(resolveCurrentPaperBaseItem())
+    );
   };
 
   let paperChipMenu: HTMLDivElement | null = null;
@@ -3490,6 +3562,27 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       hideHistoryUndoToast();
       return;
     }
+    if (isNoteSession()) {
+      titleStatic.style.display = "none";
+      historyBar.style.display = "inline-flex";
+      if (historyNewBtn) {
+        historyNewBtn.style.display = "none";
+        historyNewBtn.setAttribute("aria-expanded", "false");
+      }
+      if (historyToggleBtn) {
+        historyToggleBtn.style.display = "none";
+        historyToggleBtn.setAttribute("aria-expanded", "false");
+      }
+      if (historyMenu) {
+        historyMenu.style.display = "none";
+        historyMenu.textContent = "";
+      }
+      latestConversationHistory = [];
+      closeHistoryNewMenu();
+      closeHistoryMenu();
+      hideHistoryUndoToast();
+      return;
+    }
     const libraryID = getCurrentLibraryID();
     const requestId = ++globalHistoryLoadSeq;
     const paperEntries: ConversationHistoryEntry[] = [];
@@ -3726,7 +3819,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   };
 
   const switchGlobalConversation = async (nextConversationKey: number) => {
-    if (!item) return;
+    if (!item || isNoteSession()) return;
     persistDraftInputForCurrentConversation();
     const libraryID = getCurrentLibraryID();
     if (!libraryID) return;
@@ -3761,7 +3854,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   };
 
   const switchPaperConversation = async (nextConversationKey?: number) => {
-    if (!item) return;
+    if (!item || isNoteSession()) return;
     persistDraftInputForCurrentConversation();
     const paperItem = resolveCurrentPaperBaseItem();
     if (!paperItem) return;
@@ -4497,7 +4590,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   };
 
   const createAndSwitchGlobalConversation = async () => {
-    if (!item) return;
+    if (!item || isNoteSession()) return;
     if (
       currentAbortController ||
       historyNewBtn?.disabled ||
@@ -4597,7 +4690,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   };
 
   const createAndSwitchPaperConversation = async () => {
-    if (!item) return;
+    if (!item || isNoteSession()) return;
     if (
       currentAbortController ||
       historyNewBtn?.disabled ||
@@ -4728,7 +4821,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     historyNewBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!item) return;
+      if (!item || isNoteSession()) return;
       if (
         currentAbortController ||
         historyNewBtn.disabled ||
@@ -4764,6 +4857,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     historyNewOpenBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
+      if (isNoteSession()) return;
       closeHistoryNewMenu();
       void createAndSwitchGlobalConversation();
     });
@@ -4773,6 +4867,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     historyNewPaperBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
+      if (isNoteSession()) return;
       if (historyNewPaperBtn.disabled) return;
       closeHistoryNewMenu();
       void createAndSwitchPaperConversation();
@@ -4796,7 +4891,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     modeChipBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!item) return;
+      if (!item || isNoteSession()) return;
       if (currentAbortController || inputBox?.disabled) {
         if (status) {
           setStatus(
@@ -4847,7 +4942,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     modeLockBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!item || !isGlobalMode()) return;
+      if (!item || isNoteSession() || !isGlobalMode()) return;
       const libraryID = getCurrentLibraryID();
       if (!libraryID) return;
       const currentKey =
@@ -4868,7 +4963,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     historyToggleBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!item) return;
+      if (!item || isNoteSession()) return;
       if (
         currentAbortController ||
         historyToggleBtn.disabled ||
@@ -6022,7 +6117,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   updateSelectedTextPreviewPreservingScroll();
   syncModelFromPrefs();
   restoreDraftInputForCurrentConversation();
-  if (isPaperMode()) {
+  if (isNoteSession()) {
+    void refreshGlobalHistoryHeader();
+  } else if (isPaperMode()) {
     void switchPaperConversation().catch((err) => {
       ztoolkit.log("LLM: Failed to restore paper conversation session", err);
     });
@@ -8719,6 +8816,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         const textContextKey = getTextContextConversationKey();
         if (textContextKey) {
           setSelectedTextExpandedIndex(textContextKey, null);
+          setNoteContextExpanded(textContextKey, null);
         }
         selectedPaperPreviewExpandedCache.set(item.id, false);
         selectedFilePreviewExpandedCache.set(item.id, false);
@@ -8755,6 +8853,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         const textContextKey = getTextContextConversationKey();
         if (textContextKey) {
           setSelectedTextExpandedIndex(textContextKey, null);
+          setNoteContextExpanded(textContextKey, null);
         }
         selectedImagePreviewExpandedCache.set(item.id, false);
         selectedPaperPreviewExpandedCache.set(item.id, false);
@@ -9012,6 +9111,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         const textContextKey = getTextContextConversationKey();
         if (textContextKey) {
           setSelectedTextExpandedIndex(textContextKey, null);
+          setNoteContextExpanded(textContextKey, null);
         }
         selectedImagePreviewExpandedCache.set(item.id, false);
         selectedFilePreviewExpandedCache.set(item.id, false);
@@ -9186,10 +9286,50 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   };
 
   if (selectedContextList) {
+    selectedContextList.addEventListener("mouseover", (e: Event) => {
+      const target = e.target as Element | null;
+      if (!target?.closest("[data-note-chip='true']")) {
+        return;
+      }
+      refreshActiveNoteChipPreview(body);
+    });
+    selectedContextList.addEventListener("focusin", (e: Event) => {
+      const target = e.target as Element | null;
+      if (!target?.closest("[data-note-chip='true']")) {
+        return;
+      }
+      refreshActiveNoteChipPreview(body);
+    });
     selectedContextList.addEventListener("click", (e: Event) => {
       if (!item) return;
       const target = e.target as Element | null;
       if (!target) return;
+      const noteMetaBtn = target.closest(
+        ".llm-note-context-meta",
+      ) as HTMLButtonElement | null;
+      if (noteMetaBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const textContextKey = getTextContextConversationKey();
+        if (!textContextKey) return;
+        refreshActiveNoteChipPreview(body);
+        const nextExpanded = !isNoteContextExpanded(textContextKey);
+        setNoteContextExpanded(textContextKey, nextExpanded);
+        if (nextExpanded) {
+          setSelectedTextExpandedIndex(textContextKey, null);
+          selectedImagePreviewExpandedCache.set(item.id, false);
+          selectedPaperPreviewExpandedCache.set(item.id, false);
+          selectedFilePreviewExpandedCache.set(item.id, false);
+        }
+        updatePaperPreviewPreservingScroll();
+        updateFilePreviewPreservingScroll();
+        updateImagePreviewPreservingScroll();
+        updateSelectedTextPreviewPreservingScroll();
+        return;
+      }
+      if (target.closest("[data-note-chip='true']")) {
+        return;
+      }
 
       const clearBtn = target.closest(
         ".llm-selected-context-clear",
@@ -9282,6 +9422,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       const nextExpandedIndex = expandedIndex === index ? null : index;
       setSelectedTextExpandedIndex(textContextKey, nextExpandedIndex);
       if (nextExpandedIndex !== null) {
+        setNoteContextExpanded(textContextKey, null);
         selectedImagePreviewExpandedCache.set(item.id, false);
         selectedPaperPreviewExpandedCache.set(item.id, false);
         selectedFilePreviewExpandedCache.set(item.id, false);
@@ -9295,6 +9436,14 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       if (!item) return;
       const target = e.target as Element | null;
       if (!target) return;
+      if (target.closest("[data-note-chip='true']")) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (status) {
+          setStatus(status, "Note context is always pinned in note mode", "ready");
+        }
+        return;
+      }
       const selectedContext = target.closest(
         ".llm-selected-context",
       ) as HTMLDivElement | null;
@@ -9376,14 +9525,17 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         textContextKey,
         getSelectedTextContexts(textContextKey).length,
       ) >= 0;
+    const notePinned = isNoteContextExpanded(textContextKey);
     const figurePinned =
       selectedImagePreviewExpandedCache.get(item.id) === true;
     const paperPinned =
       typeof selectedPaperPreviewExpandedCache.get(item.id) === "number";
     const filePinned = selectedFilePreviewExpandedCache.get(item.id) === true;
-    if (!textPinned && !figurePinned && !paperPinned && !filePinned) return;
+    if (!textPinned && !notePinned && !figurePinned && !paperPinned && !filePinned)
+      return;
 
     setSelectedTextExpandedIndex(textContextKey, null);
+    setNoteContextExpanded(textContextKey, null);
     selectedImagePreviewExpandedCache.set(item.id, false);
     selectedPaperPreviewExpandedCache.set(item.id, false);
     selectedFilePreviewExpandedCache.set(item.id, false);

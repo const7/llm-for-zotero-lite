@@ -69,6 +69,14 @@ function normalizeExecutionOutput(
 export class AgentToolRegistry {
   private readonly tools = new Map<string, AgentToolDefinition<any, any>>();
 
+  private filterToolsForRequest(
+    request: AgentRuntimeRequest,
+  ): AgentToolDefinition<any, any>[] {
+    return Array.from(this.tools.values()).filter(
+      (tool) => tool.isAvailable?.(request) !== false,
+    );
+  }
+
   register<TInput, TResult>(tool: AgentToolDefinition<TInput, TResult>): void {
     this.tools.set(tool.spec.name, tool);
   }
@@ -85,14 +93,14 @@ export class AgentToolRegistry {
     return Array.from(this.tools.values());
   }
 
-  listToolsForRequest(_request: AgentRuntimeRequest): ToolSpec[] {
-    return this.listTools();
+  listToolsForRequest(request: AgentRuntimeRequest): ToolSpec[] {
+    return this.filterToolsForRequest(request).map((tool) => tool.spec);
   }
 
   listToolDefinitionsForRequest(
-    _request: AgentRuntimeRequest,
+    request: AgentRuntimeRequest,
   ): AgentToolDefinition<any, any>[] {
-    return this.listToolDefinitions();
+    return this.filterToolsForRequest(request);
   }
 
   getTool(name: string): AgentToolDefinition<any, any> | undefined {
@@ -107,6 +115,12 @@ export class AgentToolRegistry {
     const tool = this.tools.get(call.name);
     if (!tool) {
       return createSyntheticErrorResult(call, `Unknown tool: ${call.name}`);
+    }
+    if (tool.isAvailable?.(context.request) === false) {
+      return createSyntheticErrorResult(
+        call,
+        `${call.name} is not available for this request`,
+      );
     }
     const validation = tool.validate(call.arguments);
     if (!validation.ok) {

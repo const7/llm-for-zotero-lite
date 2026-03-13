@@ -3604,6 +3604,10 @@ label.llm-search-results-item:hover {
   pointer-events: auto;
 }
 
+.llm-note-context-chip .llm-selected-context-expanded {
+  max-height: min(20vh, 140px);
+}
+
 .llm-selected-context-text {
   font-size: var(--llm-fs-12);
   line-height: 1.4;
@@ -4366,6 +4370,32 @@ label.llm-search-results-item:hover {
 
 .llm-paper-context-meta::before {
   content: "📚";
+}
+
+.llm-note-context-meta::before {
+  content: none;
+}
+
+.llm-note-context-meta {
+  min-width: 0;
+  max-width: min(220px, 30vw);
+  overflow: hidden;
+  gap: 6px;
+}
+
+.llm-note-context-icon {
+  flex: 0 0 auto;
+  line-height: 1;
+}
+
+.llm-note-context-label {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .llm-image-preview-meta:hover {

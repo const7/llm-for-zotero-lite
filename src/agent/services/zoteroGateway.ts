@@ -9,12 +9,15 @@ import {
 import {
   createNoteFromAssistantText,
   createStandaloneNoteFromAssistantText,
+  readNoteSnapshot,
+  renderRawNoteHtml,
 } from "../../modules/contextPanel/notes";
 import {
   getActiveContextAttachmentFromTabs,
   resolveContextSourceItem,
 } from "../../modules/contextPanel/contextResolution";
 import { resolvePaperContextRefFromAttachment } from "../../modules/contextPanel/paperAttribution";
+import { invalidateCachedContextText } from "../../modules/contextPanel/pdfContext";
 import type { AgentRuntimeRequest } from "../types";
 import type { PaperContextRef } from "../../shared/types";
 import {
@@ -613,6 +616,86 @@ export class ZoteroGateway {
     item: Zotero.Item | null | undefined,
   ): PaperContextRef | null {
     return resolvePaperContextRefFromAttachment(this.getActiveContextItem(item));
+  }
+
+  resolveActiveNoteItem(params: {
+    request?: AgentRuntimeRequest;
+    item?: Zotero.Item | null;
+  }): Zotero.Item | null {
+    const requestNoteId = Number(params.request?.activeNoteContext?.noteId || 0);
+    if (Number.isFinite(requestNoteId) && requestNoteId > 0) {
+      const noteItem = this.getItem(Math.floor(requestNoteId));
+      if ((noteItem as any)?.isNote?.()) {
+        return noteItem;
+      }
+    }
+    const candidate =
+      params.item ||
+      params.request?.item ||
+      this.getItem(params.request?.activeItemId);
+    return (candidate as any)?.isNote?.() ? candidate : null;
+  }
+
+  getActiveNoteSnapshot(params: {
+    request?: AgentRuntimeRequest;
+    item?: Zotero.Item | null;
+  }) {
+    return readNoteSnapshot(this.resolveActiveNoteItem(params));
+  }
+
+  async replaceCurrentNote(params: {
+    request?: AgentRuntimeRequest;
+    item?: Zotero.Item | null;
+    content: string;
+    expectedOriginalHtml?: string;
+  }): Promise<{
+    noteId: number;
+    title: string;
+    previousHtml: string;
+    previousText: string;
+    nextText: string;
+  }> {
+    const noteItem = this.resolveActiveNoteItem(params);
+    if (!noteItem) {
+      throw new Error("No active note is available to edit");
+    }
+    const snapshot = readNoteSnapshot(noteItem);
+    if (!snapshot) {
+      throw new Error("Could not read the active note");
+    }
+    if (
+      typeof params.expectedOriginalHtml === "string" &&
+      snapshot.html !== params.expectedOriginalHtml
+    ) {
+      throw new Error(
+        "The active note changed before this edit was applied. Refresh and try again.",
+      );
+    }
+    const nextText =
+      typeof params.content === "string" ? params.content : String(params.content || "");
+    noteItem.setNote(renderRawNoteHtml(nextText));
+    await noteItem.saveTx();
+    invalidateCachedContextText(snapshot.noteId);
+    return {
+      noteId: snapshot.noteId,
+      title: snapshot.title,
+      previousHtml: snapshot.html,
+      previousText: snapshot.text,
+      nextText,
+    };
+  }
+
+  async restoreNoteHtml(params: {
+    noteId: number;
+    html: string;
+  }): Promise<void> {
+    const noteItem = this.getItem(params.noteId);
+    if (!noteItem || !(noteItem as any).isNote?.()) {
+      throw new Error("Note not found for undo");
+    }
+    noteItem.setNote(typeof params.html === "string" ? params.html : "");
+    await noteItem.saveTx();
+    invalidateCachedContextText(Math.floor(params.noteId));
   }
 
   getEditableArticleMetadata(

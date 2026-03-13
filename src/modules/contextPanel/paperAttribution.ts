@@ -233,3 +233,36 @@ export function resolvePaperContextRefFromAttachment(
     year: year || undefined,
   };
 }
+
+export function resolvePaperContextRefFromItem(
+  item: Zotero.Item | null | undefined,
+): PaperContextRef | null {
+  if (!item) return null;
+  if (item.isAttachment?.()) {
+    return resolvePaperContextRefFromAttachment(item);
+  }
+  if (!(item as any).isRegularItem?.()) return null;
+  const itemId = Number(item.id);
+  if (!Number.isFinite(itemId) || itemId <= 0) return null;
+  const normalizedItemId = Math.floor(itemId);
+  const title = normalizeText(
+    String(item.getField("title") || `Paper ${normalizedItemId}`),
+  );
+  const citationKey = normalizeText(String(item.getField("citationKey") || ""));
+  const firstCreator = normalizeText(
+    String(item.getField("firstCreator") || (item as Zotero.Item).firstCreator || ""),
+  );
+  const year = normalizeText(
+    String(
+      item.getField("year") || item.getField("date") || item.getField("issued") || "",
+    ),
+  );
+  return {
+    itemId: normalizedItemId,
+    contextItemId: normalizedItemId,
+    title: title || `Paper ${normalizedItemId}`,
+    citationKey: citationKey || undefined,
+    firstCreator: firstCreator || undefined,
+    year: year || undefined,
+  };
+}
