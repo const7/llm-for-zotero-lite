@@ -3,6 +3,7 @@ import type { ProviderProtocol } from "../../../../utils/providerProtocol";
 import type {
   AdvancedModelParams,
   ChatAttachment,
+  ChatRuntimeMode,
   PaperContextRef,
   SelectedTextContext,
 } from "../../types";
@@ -100,6 +101,7 @@ type SendFlowControllerDeps = {
     paperContexts?: PaperContextRef[],
     fullTextPaperContexts?: PaperContextRef[],
     attachments?: ChatAttachment[],
+    targetRuntimeMode?: ChatRuntimeMode,
     expected?: EditLatestTurnMarker,
     model?: string,
     apiBase?: string,
@@ -213,6 +215,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
           composedQuestionBase,
           selectedFiles,
         );
+    const runtimeMode: ChatRuntimeMode = deps.isAgentMode() ? "agent" : "chat";
     const displayQuestion = primarySelectedText
       ? resolvedPromptText
       : text || resolvedPromptText;
@@ -285,6 +288,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         selectedPaperContexts,
         fullTextPaperContexts,
         selectedFiles.length ? selectedFiles : undefined,
+        runtimeMode,
         activeEditSession,
         selectedProfile?.model,
         selectedProfile?.apiBase,
@@ -360,7 +364,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       selectedPaperContexts,
       fullTextPaperContexts,
       selectedFiles.length ? selectedFiles : undefined,
-      deps.isAgentMode() ? "agent" : "chat",
+      runtimeMode,
     );
     if (hasPaperComposeState) {
       deps.consumePaperModeState(item.id);

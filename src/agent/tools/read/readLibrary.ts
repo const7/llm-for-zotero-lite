@@ -142,7 +142,7 @@ export function createReadLibraryTool(
     execute: async (input, context) => {
       return {
         sections: input.sections,
-        results: readService.readItems({
+        results: await readService.readItems({
           request: context.request,
           itemIds: input.itemIds,
           paperContexts: input.paperContexts,

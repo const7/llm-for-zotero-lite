@@ -37,7 +37,8 @@ type InspectPdfOperation =
   | "render_pages"
   | "capture_active_view"
   | "attach_file"
-  | "read_attachment";
+  | "read_attachment"
+  | "index_attachment";
 
 type InspectPdfInput = {
   operation: InspectPdfOperation;
@@ -281,7 +282,7 @@ export function createInspectPdfTool(
     spec: {
       name: "inspect_pdf",
       description:
-        "Inspect local PDFs and any Zotero attachments through one general tool. Use operations to read front matter, retrieve evidence, read chunks, locate pages, render pages, capture the active reader view, attach a file for the model, or read the content of any Zotero attachment (HTML snapshots, text files, images, etc.) by contextItemId.",
+        "Inspect local PDFs and any Zotero attachments through one general tool. Use operations to read front matter, retrieve evidence, read chunks, locate pages, render pages, capture the active reader view, attach a file for the model, read the content of any Zotero attachment (HTML snapshots, text files, images, etc.) by contextItemId, or trigger PDF full-text indexing (index_attachment) so that retrieve_evidence and search_pages work.",
       inputSchema: {
         type: "object",
         required: ["operation"],
@@ -298,6 +299,7 @@ export function createInspectPdfTool(
               "capture_active_view",
               "attach_file",
               "read_attachment",
+              "index_attachment",
             ],
           },
           target: {
@@ -348,7 +350,19 @@ export function createInspectPdfTool(
             args && typeof args === "object"
               ? String((args as { operation?: unknown }).operation || "inspect")
               : "inspect";
-          return `Inspecting PDF (${operation})`;
+          const operationLabel =
+            {
+              front_matter: "front matter",
+              retrieve_evidence: "retrieve evidence",
+              read_chunks: "read chunks",
+              search_pages: "search pages",
+              render_pages: "render pages",
+              capture_active_view: "capture active view",
+              attach_file: "attach file",
+              read_attachment: "read attachment",
+              index_attachment: "index attachment",
+            }[operation] || operation;
+          return `Inspecting PDF (${operationLabel})`;
         },
         onPending: "Waiting for your approval before sending document content",
         onApproved: "Approval received - sending document content",
@@ -358,6 +372,12 @@ export function createInspectPdfTool(
             content && typeof content === "object"
               ? String((content as { operation?: unknown }).operation || "")
               : "";
+          const results =
+            content && typeof content === "object"
+              ? Array.isArray((content as { results?: unknown }).results)
+                ? ((content as { results: unknown[] }).results)
+                : []
+              : [];
           if (operation === "capture_active_view") {
             return "Captured the current reader page";
           }
@@ -371,6 +391,41 @@ export function createInspectPdfTool(
                   pageCount === 1 ? "" : "s"
                 }`
               : "Prepared PDF content";
+          }
+          if (operation === "front_matter") {
+            return results.length > 1
+              ? `Read front matter for ${results.length} PDFs`
+              : "Read PDF front matter";
+          }
+          if (operation === "retrieve_evidence") {
+            return results.length > 0
+              ? `Retrieved ${results.length} evidence passage${
+                  results.length === 1 ? "" : "s"
+                }`
+              : "No evidence found in the PDF";
+          }
+          if (operation === "read_chunks") {
+            return results.length > 0
+              ? `Read ${results.length} PDF chunk${
+                  results.length === 1 ? "" : "s"
+                }`
+              : "No PDF chunks read";
+          }
+          if (operation === "search_pages") {
+            return results.length > 0
+              ? `Found ${results.length} relevant PDF page${
+                  results.length === 1 ? "" : "s"
+                }`
+              : "No matching PDF pages found";
+          }
+          if (operation === "attach_file") {
+            return "Prepared the file for direct reading";
+          }
+          if (operation === "read_attachment") {
+            return "Read attachment content";
+          }
+          if (operation === "index_attachment") {
+            return "Started PDF indexing";
           }
           return "Completed the PDF inspection";
         },
@@ -388,7 +443,8 @@ export function createInspectPdfTool(
         args.operation === "render_pages" ||
         args.operation === "capture_active_view" ||
         args.operation === "attach_file" ||
-        args.operation === "read_attachment"
+        args.operation === "read_attachment" ||
+        args.operation === "index_attachment"
           ? (args.operation as InspectPdfOperation)
           : null;
       if (!operation) {
@@ -858,6 +914,15 @@ export function createInspectPdfTool(
             operation: input.operation,
             ...result,
           };
+        }
+        case "index_attachment": {
+          const contextItemId = input.target?.contextItemId;
+          if (!contextItemId) {
+            throw new Error(
+              "index_attachment requires target.contextItemId — the PDF attachment item ID to index",
+            );
+          }
+          return zoteroGateway.indexPdfAttachment({ attachmentId: contextItemId });
         }
       }
     },

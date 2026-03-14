@@ -110,4 +110,80 @@ describe("agentTrace render", function () {
       showsFooterExecuteButton: true,
     });
   });
+
+  it("removes repetitive filler chatter between tool steps", function () {
+    const events: AgentRunEventRecord[] = [
+      {
+        runId: "run-1",
+        seq: 1,
+        eventType: "tool_call",
+        payload: {
+          type: "tool_call",
+          callId: "call-1",
+          name: "inspect_pdf",
+          args: { operation: "front_matter" },
+        },
+        createdAt: 1,
+      },
+      {
+        runId: "run-1",
+        seq: 2,
+        eventType: "tool_result",
+        payload: {
+          type: "tool_result",
+          callId: "call-1",
+          name: "inspect_pdf",
+          ok: true,
+          content: { operation: "front_matter", results: [{}] },
+        },
+        createdAt: 2,
+      },
+      {
+        runId: "run-1",
+        seq: 3,
+        eventType: "tool_call",
+        payload: {
+          type: "tool_call",
+          callId: "call-2",
+          name: "inspect_pdf",
+          args: { operation: "retrieve_evidence" },
+        },
+        createdAt: 3,
+      },
+      {
+        runId: "run-1",
+        seq: 4,
+        eventType: "message_delta",
+        payload: {
+          type: "message_delta",
+          text: "Answer text",
+        },
+        createdAt: 4,
+      },
+    ];
+
+    const items = buildAgentTraceDisplayItems(events, null);
+    const messageTexts = items
+      .filter(
+        (item): item is Extract<(typeof items)[number], { type: "message" }> =>
+          item.type === "message",
+      )
+      .map((item) => item.text);
+    const actionTexts = items
+      .filter(
+        (item): item is Extract<(typeof items)[number], { type: "action" }> =>
+          item.type === "action",
+      )
+      .map((item) => item.row.text);
+
+    assert.notInclude(
+      messageTexts.join("\n"),
+      "I'm ready for the next step, so I'm using",
+    );
+    assert.notInclude(
+      messageTexts.join("\n"),
+      "I have enough grounded information now",
+    );
+    assert.include(actionTexts, "Drafting answer");
+  });
 });

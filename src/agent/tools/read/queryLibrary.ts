@@ -114,6 +114,10 @@ function normalizeFilters(value: unknown): QueryLibraryFilters | undefined {
       typeof value.itemType === "string" && value.itemType.trim()
         ? value.itemType.trim()
         : undefined,
+    tag:
+      typeof value.tag === "string" && value.tag.trim()
+        ? value.tag.trim()
+        : undefined,
   };
 }
 
@@ -154,8 +158,8 @@ export function createQueryLibraryTool(
         properties: {
           entity: {
             type: "string",
-            enum: ["items", "collections", "notes"],
-            description: "What to query: 'items' for any library item, 'collections' for folders, 'notes' to search/list notes. With mode:'search', finds all notes (both standalone and child notes attached to papers). With mode:'list', lists standalone top-level notes only.",
+            enum: ["items", "collections", "notes", "tags", "libraries"],
+            description: "What to query: 'items' for any library item, 'collections' for folders, 'notes' to search/list notes (mode:'search' finds all notes including child notes, mode:'list' lists standalone notes only), 'tags' to list/search all tags in the library, 'libraries' to enumerate all libraries (personal + group).",
           },
           mode: {
             type: "string",
@@ -197,6 +201,10 @@ export function createQueryLibraryTool(
               itemType: {
                 type: "string",
                 description: "Filter by Zotero item type, e.g. 'book', 'note', 'webpage', 'journalArticle', 'conferencePaper'. Only used with entity:'items'.",
+              },
+              tag: {
+                type: "string",
+                description: "Filter by exact tag name (e.g. 'machine learning'). Only items with this tag are returned.",
               },
             },
           },
@@ -282,7 +290,11 @@ export function createQueryLibraryTool(
         return fail("Expected an object");
       }
       const entity =
-        args.entity === "items" || args.entity === "collections" || args.entity === "notes"
+        args.entity === "items" ||
+        args.entity === "collections" ||
+        args.entity === "notes" ||
+        args.entity === "tags" ||
+        args.entity === "libraries"
           ? (args.entity as QueryLibraryEntity)
           : null;
       const mode =
@@ -300,6 +312,12 @@ export function createQueryLibraryTool(
       }
       if (entity === "notes" && !["list", "search"].includes(mode)) {
         return fail("notes only support mode:'list' or mode:'search'");
+      }
+      if (entity === "tags" && !["list", "search"].includes(mode)) {
+        return fail("tags only support mode:'list' or mode:'search'");
+      }
+      if (entity === "libraries" && mode !== "list") {
+        return fail("libraries only support mode:'list'");
       }
       if ((entity === "items" || entity === "notes") && mode === "search") {
         const text = typeof args.text === "string" ? args.text.trim() : "";
@@ -363,6 +381,24 @@ export function createQueryLibraryTool(
           warnings: result.warnings,
         };
       }
+      if (input.entity === "libraries") {
+        const results = zoteroGateway.listAllLibraries();
+        return { entity: input.entity, mode: input.mode, results };
+      }
+      if (input.entity === "tags") {
+        const result = await queryService.queryTags({
+          libraryID,
+          query: input.mode === "search" ? input.text : undefined,
+          limit: input.limit,
+        });
+        return {
+          entity: input.entity,
+          mode: input.mode,
+          results: result.results,
+          totalCount: result.results.length,
+          warnings: result.warnings,
+        };
+      }
       if (input.entity === "collections") {
         if (input.mode === "list" && input.view === "tree") {
           const tree = await queryService.browseCollectionTree({ libraryID });
@@ -390,6 +426,7 @@ export function createQueryLibraryTool(
         const result = await queryService.searchItems({
           libraryID,
           text: input.text || "",
+          filters: input.filters,
           limit: input.limit,
           include: input.include,
           excludeContextItemId:

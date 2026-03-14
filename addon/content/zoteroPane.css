@@ -3093,7 +3093,7 @@ label.llm-search-results-item:hover {
 
 .llm-paper-context-chip.llm-paper-context-chip-full:hover
   .llm-paper-context-chip-label {
-  color: var(--fill-primary);
+  color: var(--color-primary);
 }
 
 .llm-paper-context-chip.llm-paper-context-chip-full

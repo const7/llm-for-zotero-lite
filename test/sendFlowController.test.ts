@@ -38,6 +38,7 @@ describe("sendFlowController", function () {
     let setActiveEditSessionCalls = 0;
     let lastSentQuestion = "";
     let lastRuntimeMode = "";
+    let lastEditRuntimeMode = "";
 
     const deps = {
       body: {} as Element,
@@ -87,6 +88,7 @@ describe("sendFlowController", function () {
         _paperContexts?: PaperContextRef[],
         _fullTextPaperContexts?: PaperContextRef[],
         _attachments?: ChatAttachment[],
+        targetRuntimeMode?: "chat" | "agent",
         _expected?: unknown,
         _model?: string,
         _apiBase?: string,
@@ -95,6 +97,7 @@ describe("sendFlowController", function () {
         _advanced?: unknown,
       ) => {
         editCalled += 1;
+        lastEditRuntimeMode = targetRuntimeMode || "";
         return "ok" as const;
       },
       sendQuestion: async (
@@ -170,6 +173,7 @@ describe("sendFlowController", function () {
         lastSentQuestion,
         lastRuntimeMode,
       }),
+      getLastEditRuntimeMode: () => lastEditRuntimeMode,
     };
   }
 
@@ -189,7 +193,7 @@ describe("sendFlowController", function () {
   });
 
   it("uses retain-pinned callbacks for edit-latest flow", async function () {
-    const { controller, inputBox, getCounts } = createBaseDeps({
+    const { controller, inputBox, getCounts, getLastEditRuntimeMode } = createBaseDeps({
       getActiveEditSession: () => ({
         conversationKey: item.id,
         userTimestamp: 10,
@@ -215,6 +219,29 @@ describe("sendFlowController", function () {
     assert.equal(counts.retainFileCalled, 1);
     assert.equal(counts.retainTextCalled, 1);
     assert.isAtLeast(counts.setActiveEditSessionCalls, 1);
+    assert.equal(getLastEditRuntimeMode(), "chat");
+  });
+
+  it("passes the current runtime mode into latest-turn edit retries", async function () {
+    const { controller, getLastEditRuntimeMode } = createBaseDeps({
+      isAgentMode: () => true,
+      getActiveEditSession: () => ({
+        conversationKey: item.id,
+        userTimestamp: 10,
+        assistantTimestamp: 20,
+      }),
+      getLatestEditablePair: async () => ({
+        conversationKey: item.id,
+        pair: {
+          userMessage: { timestamp: 10 },
+          assistantMessage: { timestamp: 20, streaming: false },
+        },
+      }),
+    });
+
+    await controller.doSend();
+
+    assert.equal(getLastEditRuntimeMode(), "agent");
   });
 
   it("persists the cleared draft before preview sync in normal send flow", async function () {

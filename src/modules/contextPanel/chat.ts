@@ -1687,6 +1687,7 @@ export async function editLatestUserMessageAndRetry(
   paperContexts?: PaperContextRef[],
   fullTextPaperContexts?: PaperContextRef[],
   attachments?: ChatAttachment[],
+  targetRuntimeMode?: ChatRuntimeMode,
   expected?: EditLatestTurnMarker,
   model?: string,
   apiBase?: string,
@@ -1700,6 +1701,9 @@ export async function editLatestUserMessageAndRetry(
   const retryPair = findLatestRetryPair(history);
   if (!retryPair) return "missing";
   if (retryPair.assistantMessage.streaming) return "stale";
+  const retryRuntimeMode: ChatRuntimeMode =
+    targetRuntimeMode ||
+    (retryPair.assistantMessage.runMode === "agent" ? "agent" : "chat");
   if (
     expected &&
     (expected.conversationKey !== conversationKey ||
@@ -1744,6 +1748,8 @@ export async function editLatestUserMessageAndRetry(
 
   retryPair.userMessage.text = nextDisplayQuestion;
   retryPair.userMessage.timestamp = updatedTimestamp;
+  retryPair.userMessage.runMode = retryRuntimeMode;
+  retryPair.userMessage.agentRunId = undefined;
   retryPair.userMessage.selectedText = selectedTextForMessage || undefined;
   retryPair.userMessage.selectedTextExpanded = false;
   retryPair.userMessage.selectedTexts = selectedTextsForMessage.length
@@ -1782,6 +1788,8 @@ export async function editLatestUserMessageAndRetry(
     await updateStoredLatestUserMessage(conversationKey, {
       text: retryPair.userMessage.text,
       timestamp: retryPair.userMessage.timestamp,
+      runMode: retryPair.userMessage.runMode,
+      agentRunId: retryPair.userMessage.agentRunId,
       selectedText: retryPair.userMessage.selectedText,
       selectedTexts: retryPair.userMessage.selectedTexts,
       selectedTextSources: retryPair.userMessage.selectedTextSources,
@@ -1809,15 +1817,27 @@ export async function editLatestUserMessageAndRetry(
     return "persist-failed";
   }
 
-  await retryLatestAssistantResponse(
-    body,
-    item,
-    model,
-    apiBase,
-    apiKey,
-    reasoning,
-    advanced,
-  );
+  if (retryRuntimeMode === "agent") {
+    await retryLatestAgentResponse(
+      body,
+      item,
+      model,
+      apiBase,
+      apiKey,
+      reasoning,
+      advanced,
+    );
+  } else {
+    await retryLatestAssistantResponse(
+      body,
+      item,
+      model,
+      apiBase,
+      apiKey,
+      reasoning,
+      advanced,
+    );
+  }
   return "ok";
 }
 
@@ -1850,6 +1870,8 @@ export async function retryLatestAssistantResponse(
   assistantMessage.reasoningSummary = undefined;
   assistantMessage.reasoningDetails = undefined;
   assistantMessage.reasoningOpen = isReasoningExpandedByDefault();
+  assistantMessage.runMode = "chat";
+  assistantMessage.agentRunId = undefined;
   assistantMessage.streaming = true;
   const { refreshChatSafely, setStatusSafely } = createPanelUpdateHelpers(
     body,
@@ -1901,6 +1923,8 @@ export async function retryLatestAssistantResponse(
     await updateStoredLatestAssistantMessage(conversationKey, {
       text: assistantMessage.text,
       timestamp: assistantMessage.timestamp,
+      runMode: assistantMessage.runMode,
+      agentRunId: assistantMessage.agentRunId,
       modelName: assistantMessage.modelName,
       modelEntryId: assistantMessage.modelEntryId,
       modelProviderLabel: assistantMessage.modelProviderLabel,
@@ -1935,6 +1959,8 @@ export async function retryLatestAssistantResponse(
     await updateStoredLatestUserMessage(conversationKey, {
       text: retryPair.userMessage.text,
       timestamp: retryPair.userMessage.timestamp,
+      runMode: retryPair.userMessage.runMode,
+      agentRunId: retryPair.userMessage.agentRunId,
       selectedText: retryPair.userMessage.selectedText,
       selectedTexts: retryPair.userMessage.selectedTexts,
       selectedTextSources: retryPair.userMessage.selectedTextSources,
@@ -2053,6 +2079,8 @@ export async function retryLatestAssistantResponse(
     await updateStoredLatestAssistantMessage(conversationKey, {
       text: assistantMessage.text,
       timestamp: assistantMessage.timestamp,
+      runMode: assistantMessage.runMode,
+      agentRunId: assistantMessage.agentRunId,
       modelName: assistantMessage.modelName,
       modelEntryId: assistantMessage.modelEntryId,
       modelProviderLabel: assistantMessage.modelProviderLabel,
@@ -2107,6 +2135,7 @@ export async function editUserTurnAndRetry(
   paperContexts?: PaperContextRef[],
   fullTextPaperContexts?: PaperContextRef[],
   attachments?: ChatAttachment[],
+  targetRuntimeMode?: ChatRuntimeMode,
   model?: string,
   apiBase?: string,
   apiKey?: string,
@@ -2136,6 +2165,9 @@ export async function editUserTurnAndRetry(
     ztoolkit.log("LLM: editUserTurnAndRetry — assistant is still streaming");
     return;
   }
+  const retryRuntimeMode: ChatRuntimeMode =
+    targetRuntimeMode ||
+    (history[assistantIndex]?.runMode === "agent" ? "agent" : "chat");
 
   // Collect subsequent pairs for persistence deletion
   const subsequentPairs: Array<{ userTs: number; assistantTs: number }> = [];
@@ -2166,6 +2198,8 @@ export async function editUserTurnAndRetry(
   const userMsg = history[userIndex]!;
   userMsg.text = sanitizeText(newText) || newText;
   userMsg.timestamp = Date.now();
+  userMsg.runMode = retryRuntimeMode;
+  userMsg.agentRunId = undefined;
   const selectedTextsForMessage = normalizeSelectedTexts(selectedTexts);
   const selectedTextSourcesForMessage = normalizeSelectedTextSources(
     selectedTextSources,
@@ -2235,6 +2269,8 @@ export async function editUserTurnAndRetry(
     await updateStoredLatestUserMessage(conversationKey, {
       text: userMsg.text,
       timestamp: userMsg.timestamp,
+      runMode: userMsg.runMode,
+      agentRunId: userMsg.agentRunId,
       selectedText: userMsg.selectedText,
       selectedTexts: userMsg.selectedTexts,
       selectedTextSources: userMsg.selectedTextSources,
@@ -2261,7 +2297,7 @@ export async function editUserTurnAndRetry(
 
   // Route agent-mode retries through the agent runtime so tools are available
   // and the old trace is properly cleared before the new run starts.
-  const isAgentRetry = history[assistantIndex]?.runMode === "agent";
+  const isAgentRetry = retryRuntimeMode === "agent";
   if (isAgentRetry) {
     await retryLatestAgentResponse(
       body,
@@ -2989,7 +3025,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
             <li><strong>Paper chat</strong> answers questions about the currently open PDF. <strong>Open chat</strong> is a free-form workspace for questions across multiple papers and files.</li>
             <li>Type <strong>/</strong> to open quick actions: attach files, add a reference, send the current PDF page, or send the entire PDF. Type <strong>@</strong> to add a paper from your library as context.</li>
             <li>Enable <strong>Agent mode</strong> with the toggle in the toolbar to let the assistant autonomously search your library, inspect papers, and complete multi-step research tasks.</li>
-            <li>Add context inline: select text in the PDF reader for <strong>text context</strong>, use the screenshot button for <strong>figure context</strong>, or use <strong>@</strong> for <strong>paper context</strong>. Right-click a paper chip to force sending its full text; right-click again to dismiss it.</li>
+            <li>Add context inline: select text in the PDF reader for <strong>text context</strong>, use the screenshot button for <strong>figure context</strong>, or use <strong>@</strong> for <strong>paper context</strong>. Right-click a paper chip to force sending its full text; right-click again to switch it back to retrieval mode.</li>
           </ul>
         </div>
       </div>

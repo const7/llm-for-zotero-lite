@@ -1,6 +1,7 @@
 import type { ZoteroGateway } from "../../services/zoteroGateway";
 import { pushUndoEntry } from "../../store/undoStore";
 import type { AgentToolDefinition } from "../../types";
+import { normalizeNoteSourceText } from "../../../modules/contextPanel/notes";
 import { ok, fail, validateObject } from "../shared";
 
 type EditCurrentNoteInput = {
@@ -17,7 +18,7 @@ export function createEditCurrentNoteTool(
     spec: {
       name: "edit_current_note",
       description:
-        "Replace the full content of the current open Zotero note after confirmation. Only available when a note is active.",
+        "Replace the full content of the current open Zotero note after confirmation. Pass plain text or Markdown only; do not send raw HTML tags. Only available when a note is active.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -25,7 +26,8 @@ export function createEditCurrentNoteTool(
         properties: {
           content: {
             type: "string",
-            description: "The final full text that should replace the current active note.",
+            description:
+              "The final full note body as plain text or Markdown. Do not include raw HTML.",
           },
         },
       },
@@ -36,7 +38,7 @@ export function createEditCurrentNoteTool(
     guidance: {
       matches: (request) => Boolean(request.activeNoteContext),
       instruction:
-        "When the user asks you to edit, rewrite, or update the current open note, call `edit_current_note` with the final full replacement note content instead of stopping with a prose draft.",
+        "When the user asks you to edit, rewrite, or update the current open note, call `edit_current_note` with the final full replacement note content in plain text or Markdown, never raw HTML, instead of stopping with a prose draft.",
     },
     presentation: {
       label: "Edit Current Note",
@@ -62,7 +64,7 @@ export function createEditCurrentNoteTool(
         return fail("content must be a string");
       }
       return ok({
-        content: args.content,
+        content: normalizeNoteSourceText(args.content),
       });
     },
     createPendingAction: (input, context) => {
@@ -73,13 +75,15 @@ export function createEditCurrentNoteTool(
       if (!snapshot) {
         throw new Error("No active note is available to edit");
       }
+      const normalizedContent = normalizeNoteSourceText(input.content);
       input.expectedOriginalHtml = snapshot.html;
       input.noteId = snapshot.noteId;
-      input.noteTitle = snapshot.title;
+      input.noteTitle = snapshot.title || "Untitled note";
+      input.content = normalizedContent;
       return {
         toolName: "edit_current_note",
         title: `Review note update`,
-        description: `Review the current note content and edit the final replacement text for "${snapshot.title}" before applying it.`,
+        description: `Review the current note content and edit the final replacement text for "${input.noteTitle}" before applying it.`,
         confirmLabel: "Apply edit",
         cancelLabel: "Cancel",
         fields: [
@@ -87,7 +91,7 @@ export function createEditCurrentNoteTool(
             type: "text",
             id: "noteTitle",
             label: "Current note",
-            value: snapshot.title,
+            value: input.noteTitle,
           },
           {
             type: "review_table",
@@ -98,7 +102,7 @@ export function createEditCurrentNoteTool(
                 key: "content",
                 label: "Note content",
                 before: snapshot.text,
-                after: input.content,
+                after: normalizedContent,
                 multiline: true,
               },
             ],
@@ -107,7 +111,7 @@ export function createEditCurrentNoteTool(
             type: "textarea",
             id: "content",
             label: "Final note content",
-            value: input.content,
+            value: normalizedContent,
           },
         ],
       };
@@ -120,7 +124,7 @@ export function createEditCurrentNoteTool(
         ...input,
         content:
           typeof resolutionData.content === "string"
-            ? resolutionData.content
+            ? normalizeNoteSourceText(resolutionData.content)
             : input.content,
       });
     },

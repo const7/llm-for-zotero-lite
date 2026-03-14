@@ -227,4 +227,44 @@ describe("inspect_pdf tool", function () {
       ).btoa = restoreBtoa;
     }
   });
+
+  it("uses operation-specific presentation summaries", function () {
+    const tool = createInspectPdfTool(
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        listPaperContexts: () => [],
+      } as never,
+    );
+
+    const onCall = tool.presentation?.summaries?.onCall;
+    const onSuccess = tool.presentation?.summaries?.onSuccess;
+    assert.equal(
+      typeof onCall === "function" ? onCall({ args: { operation: "retrieve_evidence" } as never }) : "",
+      "Inspecting PDF (retrieve evidence)",
+    );
+    assert.equal(
+      typeof onSuccess === "function"
+        ? onSuccess({
+            content: {
+              operation: "retrieve_evidence",
+              results: [{}, {}],
+            },
+          } as never)
+        : "",
+      "Retrieved 2 evidence passages",
+    );
+    assert.equal(
+      typeof onSuccess === "function"
+        ? onSuccess({
+            content: {
+              operation: "search_pages",
+              results: [{}],
+            },
+          } as never)
+        : "",
+      "Found 1 relevant PDF page",
+    );
+  });
 });

@@ -42,7 +42,6 @@ import {
   pinnedSelectedTextKeys,
   pinnedImageKeys,
   pinnedFileKeys,
-  pinnedPaperKeys,
   setCancelledRequestId,
   currentAbortController,
   panelFontScalePercent,
@@ -281,7 +280,6 @@ import {
   retainPinnedSelectedTextContexts,
   togglePinnedFile,
   togglePinnedImage,
-  togglePinnedPaper,
   togglePinnedSelectedText,
 } from "./setupHandlers/controllers/pinnedContextController";
 import {
@@ -7685,6 +7683,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         : selectedImages;
       const selectedReasoning = getSelectedReasoning();
       const advancedParams = getAdvancedModelParams(selectedProfile?.entryId);
+      const targetRuntimeMode = getCurrentRuntimeMode();
       inlineEditCleanup?.();
       setInlineEditCleanup(null);
       setInlineEditInputSection(null, null, null);
@@ -7707,6 +7706,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           selectedPaperContexts,
           fullTextPaperContexts,
           selectedFiles,
+          targetRuntimeMode,
           selectedProfile?.model,
           selectedProfile?.apiBase,
           selectedProfile?.apiKey,
@@ -9016,26 +9016,30 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         ".llm-paper-context-chip",
       ) as HTMLDivElement | null;
       if (!paperChip || !paperPreview.contains(paperChip)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (paperChip.dataset.autoLoaded === "true") {
-        if (status) {
-          setStatus(status, "Default paper context is always pinned", "ready");
-        }
-        return;
-      }
+      if (target.closest(".llm-paper-context-clear")) return;
       const paperContext = resolvePaperContextFromChipElement(paperChip);
       if (!paperContext) return;
-      const nextPinned = togglePinnedPaper(
-        pinnedPaperKeys,
-        item.id,
-        paperContext,
+      e.preventDefault();
+      e.stopPropagation();
+      const nextMode =
+        resolvePaperContextNextSendMode(item.id, paperContext) === "full-sticky"
+          ? "retrieval"
+          : "full-sticky";
+      setPaperModeOverride(item.id, paperContext, nextMode);
+      paperChip.dataset.fullText = isPaperContextFullTextMode(nextMode)
+        ? "true"
+        : "false";
+      paperChip.classList.toggle(
+        "llm-paper-context-chip-full",
+        isPaperContextFullTextMode(nextMode),
       );
-      updatePaperPreviewPreservingScroll();
+      closePaperChipMenu();
       if (status) {
         setStatus(
           status,
-          nextPinned ? "Paper pinned for next sends" : "Paper unpinned",
+          nextMode === "full-sticky"
+            ? "Paper set to always send full text."
+            : "Paper set to retrieval mode.",
           "ready",
         );
       }
@@ -9117,42 +9121,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         selectedFilePreviewExpandedCache.set(item.id, false);
       }
       // No full re-render here — DOM classes already toggled above, cache is updated.
-    });
-    paperPreview.addEventListener("contextmenu", (e: Event) => {
-      if (!item) return;
-      const target = e.target as Element | null;
-      if (!target) return;
-      if (target.closest(".llm-paper-context-clear")) return;
-      const paperChip = target.closest(
-        ".llm-paper-context-chip",
-      ) as HTMLDivElement | null;
-      if (!paperChip || !paperPreview.contains(paperChip)) return;
-      const paperContext = resolvePaperContextFromChipElement(paperChip);
-      if (!paperContext) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const nextMode =
-        resolvePaperContextNextSendMode(item.id, paperContext) === "full-sticky"
-          ? "retrieval"
-          : "full-sticky";
-      setPaperModeOverride(item.id, paperContext, nextMode);
-      paperChip.dataset.fullText = isPaperContextFullTextMode(nextMode)
-        ? "true"
-        : "false";
-      paperChip.classList.toggle(
-        "llm-paper-context-chip-full",
-        isPaperContextFullTextMode(nextMode),
-      );
-      closePaperChipMenu();
-      if (status) {
-        setStatus(
-          status,
-          nextMode === "full-sticky"
-            ? "Paper set to always send full text."
-            : "Paper set to retrieval mode.",
-          "ready",
-        );
-      }
     });
   }
 

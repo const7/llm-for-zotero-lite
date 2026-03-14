@@ -10,8 +10,10 @@ import {
 import {
   createNoteFromAssistantText,
   createStandaloneNoteFromAssistantText,
+  normalizeNoteSourceText,
   readNoteSnapshot,
   renderRawNoteHtml,
+  stripNoteHtml,
 } from "../../modules/contextPanel/notes";
 import {
   getActiveContextAttachmentFromTabs,
@@ -92,6 +94,8 @@ export type LibraryItemTargetAttachment = {
   contextItemId: number;
   title: string;
   contentType: string;
+  /** For PDF attachments: Zotero full-text indexing state. Omitted for non-PDFs. */
+  indexingState?: "indexed" | "partial" | "unindexed" | "queued" | "unavailable";
 };
 
 export type LibraryItemTarget = {
@@ -579,6 +583,59 @@ function buildItemTargets(
   return results;
 }
 
+// ── Zotero.Search-backed listing helpers ──────────────────────────────────────
+
+export type AgentLibraryFilters = {
+  collectionId?: number;
+  unfiled?: boolean;
+  itemType?: string;
+  author?: string;
+  yearFrom?: number;
+  yearTo?: number;
+  tag?: string;
+};
+
+function buildAgentLibrarySearch(
+  libraryID: number,
+  filters: AgentLibraryFilters,
+): Zotero.Search {
+  const search = new Zotero.Search({ libraryID });
+  if (filters.collectionId) {
+    search.addCondition("collectionID", "is", filters.collectionId);
+  }
+  if (filters.unfiled) {
+    search.addCondition("unfiled", "true", "");
+  }
+  if (filters.itemType) {
+    search.addCondition("itemType", "is", filters.itemType);
+  }
+  if (filters.author) {
+    search.addCondition("blockStart");
+    search.addCondition("author", "contains", filters.author);
+    search.addCondition("editor", "contains", filters.author);
+    search.addCondition("bookAuthor", "contains", filters.author);
+    search.addCondition("blockEnd");
+  }
+  if (filters.yearFrom != null) {
+    search.addCondition("year", "isGreaterThan", String(filters.yearFrom - 1));
+  }
+  if (filters.yearTo != null) {
+    search.addCondition("year", "isLessThan", String(filters.yearTo + 1));
+  }
+  if (filters.tag) {
+    search.addCondition("tag", "is", filters.tag);
+  }
+  return search;
+}
+
+const FULLTEXT_INDEX_STATE_MAP: Record<number, LibraryItemTargetAttachment["indexingState"]> = {
+  0: "unavailable",
+  1: "unindexed",
+  2: "partial",
+  3: "indexed",
+  4: "queued",
+};
+
 export class ZoteroGateway {
   getItem(itemId: number | undefined): Zotero.Item | null {
     if (!Number.isFinite(itemId) || !itemId || itemId <= 0) return null;
@@ -659,15 +716,31 @@ export class ZoteroGateway {
       );
   }
 
-  getAllChildAttachmentInfos(itemId: number): LibraryItemTargetAttachment[] {
+  async getAllChildAttachmentInfos(itemId: number): Promise<LibraryItemTargetAttachment[]> {
     const item = this.getItem(itemId);
     if (!item) return [];
     const allAtts = getAllChildAttachments(item.isRegularItem?.() ? item : (this.resolveBibliographicItem(item) || item));
-    return allAtts.map((att, index, list) => ({
-      contextItemId: att.id,
-      title: resolveAnyAttachmentTitle(att, index, list.length),
-      contentType: normalizeText(att.attachmentContentType) || "application/octet-stream",
-    }));
+    const results: LibraryItemTargetAttachment[] = [];
+    for (let i = 0; i < allAtts.length; i++) {
+      const att = allAtts[i];
+      const contentType = normalizeText(att.attachmentContentType) || "application/octet-stream";
+      let indexingState: LibraryItemTargetAttachment["indexingState"];
+      if (contentType === "application/pdf") {
+        try {
+          const stateNum = await Zotero.Fulltext.getIndexedState(att);
+          indexingState = FULLTEXT_INDEX_STATE_MAP[stateNum] ?? "unavailable";
+        } catch {
+          indexingState = "unavailable";
+        }
+      }
+      results.push({
+        contextItemId: att.id,
+        title: resolveAnyAttachmentTitle(att, i, allAtts.length),
+        contentType,
+        indexingState,
+      });
+    }
+    return results;
   }
 
   async listLibraryPaperTargets(params: {
@@ -803,14 +876,18 @@ export class ZoteroGateway {
     }
     if (
       typeof params.expectedOriginalHtml === "string" &&
-      snapshot.html !== params.expectedOriginalHtml
+      normalizeText(snapshot.text) !==
+        normalizeText(stripNoteHtml(params.expectedOriginalHtml))
     ) {
       throw new Error(
         "The active note changed before this edit was applied. Refresh and try again.",
       );
     }
-    const nextText =
-      typeof params.content === "string" ? params.content : String(params.content || "");
+    const nextText = normalizeNoteSourceText(
+      typeof params.content === "string"
+        ? params.content
+        : String(params.content || ""),
+    );
     noteItem.setNote(renderRawNoteHtml(nextText));
     await noteItem.saveTx();
     invalidateCachedContextText(snapshot.noteId);
@@ -1111,6 +1188,75 @@ export class ZoteroGateway {
     return { items, totalCount: items.length };
   }
 
+  async listItemsByFilters(params: {
+    libraryID: number;
+    filters?: AgentLibraryFilters;
+    limit?: number;
+  }): Promise<{ items: LibraryItemTarget[]; totalCount: number }> {
+    const libraryID = Number.isFinite(params.libraryID) ? Math.floor(params.libraryID) : 0;
+    if (!libraryID) throw new Error("No active library available");
+    const normalizedLimit = Number.isFinite(params.limit) ? Math.max(1, Math.floor(params.limit as number)) : undefined;
+    try {
+      const search = buildAgentLibrarySearch(libraryID, params.filters || {});
+      const rawIds: number[] = await search.search();
+      // Drop child items (child notes, annotations, attachments)
+      const topIds: number[] = [];
+      for (const id of rawIds) {
+        const item = Zotero.Items.get(id);
+        if (item && !item.parentID && !item.isAnnotation?.()) topIds.push(id);
+      }
+      const limited = normalizedLimit ? topIds.slice(0, normalizedLimit) : topIds;
+      const items: LibraryItemTarget[] = [];
+      for (const id of limited) {
+        const raw = this.getItem(id);
+        if (!raw) continue;
+        const target = buildItemTargetFromItem(raw);
+        if (target) items.push(target);
+      }
+      return { items, totalCount: topIds.length };
+    } catch (_error) {
+      void _error;
+      return this._listItemsByFiltersInMemory(params);
+    }
+  }
+
+  private async _listItemsByFiltersInMemory(params: {
+    libraryID: number;
+    filters?: AgentLibraryFilters;
+    limit?: number;
+  }): Promise<{ items: LibraryItemTarget[]; totalCount: number }> {
+    const filters = params.filters || {};
+    const rawItems = await getAllLibraryItems(params.libraryID);
+    let filtered = rawItems;
+    if (filters.collectionId) {
+      filtered = filtered.filter(item => getCollectionIDs(item).includes(filters.collectionId as number));
+    } else if (filters.unfiled) {
+      filtered = filtered.filter(item => getCollectionIDs(item).length === 0);
+    }
+    if (filters.author) {
+      const q = filters.author.toLowerCase();
+      filtered = filtered.filter(item => normalizeText(item.getField?.("firstCreator")).toLowerCase().includes(q));
+    }
+    if (filters.yearFrom != null || filters.yearTo != null) {
+      filtered = filtered.filter(item => {
+        const y = parseInt(normalizeText(item.getField?.("year")), 10);
+        if (isNaN(y)) return false;
+        if (filters.yearFrom != null && y < filters.yearFrom) return false;
+        if (filters.yearTo != null && y > filters.yearTo) return false;
+        return true;
+      });
+    }
+    if (filters.tag) {
+      const tagName = filters.tag;
+      filtered = filtered.filter(item => {
+        const tags: Array<{ tag: string }> = (item as any).getTags?.() || [];
+        return tags.some(t => t.tag === tagName);
+      });
+    }
+    const items = buildItemTargets(filtered, { itemType: filters.itemType, limit: params.limit });
+    return { items, totalCount: items.length };
+  }
+
   async listStandaloneNotes(params: {
     libraryID: number;
     limit?: number;
@@ -1186,6 +1332,7 @@ export class ZoteroGateway {
   async searchAllLibraryItems(params: {
     libraryID: number;
     query: string;
+    filters?: AgentLibraryFilters;
     limit?: number;
   }): Promise<LibraryItemTarget[]> {
     const libraryID = Number.isFinite(params.libraryID) ? Math.floor(params.libraryID) : 0;
@@ -1194,7 +1341,9 @@ export class ZoteroGateway {
       ? Math.max(1, Math.floor(params.limit as number))
       : 50;
     try {
-      const search = new Zotero.Search({ libraryID });
+      const search = params.filters
+        ? buildAgentLibrarySearch(libraryID, params.filters)
+        : new Zotero.Search({ libraryID });
       search.addCondition("quicksearch-everything", "contains", params.query.trim());
       const rawIds: number[] = await search.search();
       // Resolve child items (notes/attachments) to their top-level parent, de-duplicate
@@ -1338,6 +1487,51 @@ export class ZoteroGateway {
       }
     }
     return results;
+  }
+
+  async indexPdfAttachment(params: { attachmentId: number }): Promise<{
+    attachmentId: number;
+    indexingState: string;
+    triggered: boolean;
+  }> {
+    const item = this.getItem(params.attachmentId);
+    if (!item?.isAttachment?.()) throw new Error("Not an attachment item");
+    if (!(item as any).isPDFAttachment?.()) throw new Error("Not a PDF attachment");
+    await Zotero.Fulltext.indexItems([params.attachmentId]);
+    let indexingState = "unavailable";
+    try {
+      const stateNum = await Zotero.Fulltext.getIndexedState(item);
+      indexingState = FULLTEXT_INDEX_STATE_MAP[stateNum] ?? "unavailable";
+    } catch {
+      // ignore
+    }
+    return { attachmentId: params.attachmentId, indexingState, triggered: true };
+  }
+
+  async listLibraryTags(params: {
+    libraryID: number;
+    query?: string;
+    limit?: number;
+  }): Promise<{ name: string; type: number }[]> {
+    const libraryID = Number.isFinite(params.libraryID) ? Math.floor(params.libraryID) : 0;
+    if (!libraryID) throw new Error("No active library available");
+    const raw = await Zotero.Tags.getAll(libraryID);
+    let tags = raw.map((t) => ({ name: t.tag, type: t.type ?? 0 }));
+    if (params.query) {
+      const q = params.query.toLowerCase();
+      tags = tags.filter((t) => t.name.toLowerCase().includes(q));
+    }
+    const normalizedLimit = Number.isFinite(params.limit) ? Math.max(1, Math.floor(params.limit as number)) : undefined;
+    return normalizedLimit ? tags.slice(0, normalizedLimit) : tags;
+  }
+
+  listAllLibraries(): { libraryID: number; name: string; type: string; editable: boolean }[] {
+    return Zotero.Libraries.getAll().map((lib) => ({
+      libraryID: lib.libraryID,
+      name: lib.name,
+      type: Zotero.Libraries.getType(lib.libraryID),
+      editable: Zotero.Libraries.isEditable(lib.libraryID),
+    }));
   }
 
   async applyTagAssignments(params: {

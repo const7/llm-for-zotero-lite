@@ -41,13 +41,17 @@ describe("primitive agent tools", function () {
   it("query_library searches items and enriches requested fields", async function () {
     const tool = createQueryLibraryTool({
       resolveLibraryID: () => 1,
-      searchLibraryItems: async () =>
+      searchAllLibraryItems: async () =>
         [
           {
             itemId: 99,
+            itemType: "journalArticle",
             title: "Example Paper",
             firstCreator: "Alice Example",
             year: "2021",
+            attachments: [{ contextItemId: 501, title: "PDF" }],
+            tags: ["review"],
+            collectionIds: [11],
           },
         ] as any,
       getPaperTargetsByItemIds: () => [
@@ -200,11 +204,12 @@ describe("primitive agent tools", function () {
           title: "Paper Seven",
           firstCreator: "Dana Example",
           year: "2020",
-          attachments: [{ contextItemId: 701, title: "Main PDF" }],
+          attachments: [{ contextItemId: 701, title: "Main PDF", contentType: "application/pdf" }],
           tags: ["alpha"],
           collectionIds: [12],
         },
       ],
+      getItem: () => fakeItem,
       resolveMetadataItem: () => fakeItem,
       getEditableArticleMetadata: () => makeMetadataSnapshot(7, "Paper Seven"),
       getPaperNotes: () => [
@@ -221,6 +226,9 @@ describe("primitive agent tools", function () {
           type: "highlight",
           text: "Key line",
         },
+      ],
+      getAllChildAttachmentInfos: async () => [
+        { contextItemId: 701, title: "Main PDF", contentType: "application/pdf" },
       ],
       getCollectionSummary: () => ({
         collectionId: 12,
@@ -242,7 +250,7 @@ describe("primitive agent tools", function () {
     assert.equal(entry.title, "Paper Seven");
     assert.lengthOf(entry.notes, 1);
     assert.lengthOf(entry.annotations, 1);
-    assert.deepEqual(entry.attachments, [{ contextItemId: 701, title: "Main PDF" }]);
+    assert.deepEqual(entry.attachments, [{ contextItemId: 701, title: "Main PDF", contentType: "application/pdf" }]);
     assert.deepEqual(entry.collections, [
       { collectionId: 12, name: "Reading", libraryID: 1, path: "Reading" },
     ]);
@@ -703,6 +711,85 @@ describe("primitive agent tools", function () {
       noteId: 55,
       html: "<p>Original body</p>",
     });
+  });
+
+  it("edit_current_note normalizes HTML note content before review and save", async function () {
+    const tool = createEditCurrentNoteTool({
+      getActiveNoteSnapshot: () => ({
+        noteId: 55,
+        title: "",
+        html: "<div><p></p></div>",
+        text: "",
+        libraryID: 1,
+        noteKind: "standalone",
+      }),
+      replaceCurrentNote: async ({
+        content,
+      }: {
+        content: string;
+      }) => {
+        assert.equal(content, "Approved *note*");
+        return {
+          noteId: 55,
+          title: "",
+          previousHtml: "<div><p></p></div>",
+          previousText: "",
+          nextText: content,
+        };
+      },
+      restoreNoteHtml: async () => {},
+    } as never);
+    const noteRequest = {
+      ...baseContext.request,
+      activeNoteContext: {
+        noteId: 55,
+        title: "",
+        noteKind: "standalone" as const,
+        noteText: "",
+      },
+    };
+
+    const validated = tool.validate({
+      content: "<h1>Summary</h1><p><strong>Key point</strong></p>",
+    });
+    assert.isTrue(validated.ok);
+    if (!validated.ok) return;
+    assert.equal(validated.value.content, "# Summary\n\n**Key point**");
+
+    const pending = tool.createPendingAction?.(validated.value, {
+      ...baseContext,
+      request: noteRequest,
+    });
+    assert.exists(pending);
+    assert.include(pending?.description || "", '"Untitled note"');
+    const titleField = pending?.fields[0] as Extract<
+      NonNullable<typeof pending>["fields"][number],
+      { type: "text" }
+    >;
+    assert.equal(titleField.value, "Untitled note");
+    const textareaField = pending?.fields[2] as Extract<
+      NonNullable<typeof pending>["fields"][number],
+      { type: "textarea" }
+    >;
+    assert.equal(textareaField.value, "# Summary\n\n**Key point**");
+
+    const confirmed = tool.applyConfirmation?.(
+      validated.value,
+      { content: "<p>Approved <em>note</em></p>" },
+      {
+        ...baseContext,
+        request: noteRequest,
+      },
+    );
+    assert.isTrue(confirmed?.ok);
+    if (!confirmed?.ok) return;
+    assert.equal(confirmed.value.content, "Approved *note*");
+
+    const result = await tool.execute(confirmed.value, {
+      ...baseContext,
+      request: noteRequest,
+    });
+    assert.equal((result as { noteText: string }).noteText, "Approved *note*");
   });
 
   it("includes the active note content in agent prompts", async function () {

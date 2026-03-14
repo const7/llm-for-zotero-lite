@@ -57,8 +57,6 @@ type RenderAgentTraceParams = {
   onTraceMissing?: () => void;
 };
 
-type AgentRunEventPayload = AgentRunEventRecord["payload"];
-
 function normalizeSelectedTexts(
   selectedTexts: unknown,
   legacySelectedText?: unknown,
@@ -1832,46 +1830,18 @@ function summarizeAgentTraceToolResult(
   };
 }
 
-function getNextMeaningfulPayload(
-  events: AgentRunEventRecord[],
-  fromIndex: number,
-): AgentRunEventPayload | null {
-  for (let index = fromIndex; index < events.length; index += 1) {
-    const payload = events[index]?.payload;
-    if (!payload || payload.type === "status") continue;
-    return payload;
-  }
-  return null;
+function isGenericAgentStatusText(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return (
+    normalized === "running agent" ||
+    /^continuing agent \(\d+\/\d+\)$/.test(normalized)
+  );
 }
 
 function buildInitialAgentMessage(requestChips: AgentTraceChip[]): string {
   return requestChips.length
-    ? "I've got your question and the attached context. I'm checking that first so I can ground the answer properly."
-    : "I've got your question. I'm checking the current context first.";
-}
-
-function buildToolFollowUpMessage(
-  _toolName: string,
-  nextPayload: AgentRunEventPayload | null,
-): string | null {
-  if (!nextPayload) return null;
-  if (nextPayload.type === "tool_call") {
-    return `I'm ready for the next step, so I'm using ${toolLabelFromName(
-      nextPayload.name,
-    )} next.`;
-  }
-  if (nextPayload.type === "confirmation_required") {
-    return nextPayload.action.mode === "review"
-      ? "I have the result ready. Review it below and choose the next step when you're ready."
-      : "I'm ready for the next action. Review it below and approve if you want me to continue.";
-  }
-  if (nextPayload.type === "message_delta") {
-    return "I have enough grounded information now, so I'm drafting the answer next.";
-  }
-  if (nextPayload.type === "final") {
-    return "I have what I need now, so I can answer directly.";
-  }
-  return null;
+    ? "Checking the request against the attached context."
+    : "Checking the current request and Zotero context.";
 }
 
 function compactAgentTraceEvents(
@@ -1923,8 +1893,8 @@ export function buildAgentTraceDisplayItems(
   const requestChips = buildAgentTraceRequestChips(userMessage);
   const requestSummary = buildAgentTraceRequestSummary(userMessage);
   const pendingActions = new Map<string, AgentPendingAction>();
-  let announcedReadyToAnswer = false;
   let announcedWriting = false;
+  let lastMeaningfulStatus: string | null = null;
 
   items.push({
     type: "message",
@@ -1937,18 +1907,35 @@ export function buildAgentTraceDisplayItems(
       kind: "plan",
       icon: "↳",
       text: requestChips.length
-        ? "Received your question and the attached context"
-        : "Received your question",
+        ? "Request and attached context received"
+        : "Request received",
     },
     chips: requestChips,
   });
 
   for (let index = 0; index < compactedEvents.length; index += 1) {
     const entry = compactedEvents[index];
-    const nextPayload = getNextMeaningfulPayload(compactedEvents, index + 1);
     switch (entry.payload.type) {
-      case "status":
+      case "status": {
+        const statusText = readAgentTraceText(entry.payload.text);
+        if (
+          !statusText ||
+          isGenericAgentStatusText(statusText) ||
+          statusText === lastMeaningfulStatus
+        ) {
+          break;
+        }
+        lastMeaningfulStatus = statusText;
+        items.push({
+          type: "action",
+          row: {
+            kind: "plan",
+            icon: "…",
+            text: statusText,
+          },
+        });
         break;
+      }
       case "tool_call":
         items.push({
           type: "action",
@@ -2004,30 +1991,11 @@ export function buildAgentTraceDisplayItems(
               // card generation errors must not crash the trace
             }
           }
-          const followUp = buildToolFollowUpMessage(
-            entry.payload.name,
-            nextPayload,
-          );
-          if (followUp) {
-            items.push({
-              type: "message",
-              tone: row.kind === "skip" ? "warning" : "neutral",
-              text: followUp,
-            });
-          }
         }
         break;
       }
       case "confirmation_required":
         pendingActions.set(entry.payload.requestId, entry.payload.action);
-        items.push({
-          type: "message",
-          tone: entry.payload.action.mode === "review" ? "neutral" : "warning",
-          text:
-            entry.payload.action.mode === "review"
-              ? "I have the result ready. Review it below and choose what happens next."
-              : "I'm ready for the next action, but I need your approval before I continue.",
-        });
         items.push({
           type: "action",
           row: summarizeAgentTraceConfirmationRequest(entry.payload.action, requestSummary),
@@ -2051,28 +2019,9 @@ export function buildAgentTraceDisplayItems(
             requestSummary,
           ),
         });
-        if (action.mode !== "review" || entry.payload.approved) {
-          items.push({
-            type: "message",
-            tone: entry.payload.approved ? "neutral" : "warning",
-            text: entry.payload.approved
-              ? action.mode === "review"
-                ? "Thanks - I'm carrying out that reviewed action now."
-                : "Thanks - I'm continuing with that action now."
-              : "No problem - I stopped there.",
-          });
-        }
         break;
       }
       case "message_delta":
-        if (!announcedReadyToAnswer) {
-          announcedReadyToAnswer = true;
-          items.push({
-            type: "message",
-            tone: "neutral",
-            text: "I have enough grounded information now, so I'm turning it into a direct answer.",
-          });
-        }
         if (!announcedWriting) {
           announcedWriting = true;
           items.push({
@@ -2080,7 +2029,7 @@ export function buildAgentTraceDisplayItems(
             row: {
               kind: "plan",
               icon: "✎",
-              text: "Drafting the answer",
+              text: "Drafting answer",
             },
           });
         }

@@ -569,6 +569,7 @@ export async function retryAgentTurn(
   // Clear the previous agent run so the trace and text reset immediately.
   assistantMessage.text = "";
   assistantMessage.agentRunId = undefined;
+  assistantMessage.runMode = "agent";
   assistantMessage.streaming = true;
   assistantMessage.reasoningSummary = undefined;
   assistantMessage.reasoningDetails = undefined;

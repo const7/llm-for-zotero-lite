@@ -50,14 +50,14 @@ export class LibraryReadService {
     return uniqueNumbers(itemIds);
   }
 
-  readItems(params: {
+  async readItems(params: {
     request: AgentRuntimeRequest;
     itemIds?: number[];
     paperContexts?: PaperContextRef[];
     sections: ReadLibrarySection[];
     maxNotes?: number;
     maxAnnotations?: number;
-  }): Record<string, ReadLibraryResultEntry> {
+  }): Promise<Record<string, ReadLibraryResultEntry>> {
     const itemIds = this.resolveItemIds(params);
     const targetMap = new Map(
       this.zoteroGateway
@@ -111,9 +111,9 @@ export class LibraryReadService {
               maxAnnotations: params.maxAnnotations,
             })
           : undefined,
-        // For attachments, show all child attachment types (not just PDFs)
+        // For attachments, show all child attachment types (not just PDFs) with indexing state
         attachments: sectionSet.has("attachments")
-          ? this.zoteroGateway.getAllChildAttachmentInfos(itemId)
+          ? await this.zoteroGateway.getAllChildAttachmentInfos(itemId)
           : undefined,
         collections: sectionSet.has("collections")
           ? collectionIds

@@ -59,8 +59,78 @@ export function stripNoteHtml(html: string): string {
   return text.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-export function renderRawNoteHtml(contentText: string): string {
+function decodeNoteHtmlEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function isLikelyHtmlNoteContent(text: string): boolean {
+  if (!text || !/[<>]/.test(text)) return false;
+  return /<\/?(?:p|div|span|strong|b|em|i|u|a|ul|ol|li|blockquote|h[1-6]|br|hr|code|pre)\b/i.test(
+    text,
+  );
+}
+
+export function normalizeNoteSourceText(contentText: string): string {
   const raw = sanitizeText(contentText || "").trim();
+  if (!raw) return "";
+  if (!isLikelyHtmlNoteContent(raw)) return raw;
+
+  let normalized = raw.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, "");
+
+  normalized = normalized.replace(
+    /<a\b[^>]*href\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi,
+    (_match, _quote, href, text) => {
+      const label = stripNoteHtml(text).trim();
+      const decodedHref = decodeNoteHtmlEntities(`${href || ""}`).trim();
+      if (!label) return decodedHref;
+      return decodedHref ? `[${label}](${decodedHref})` : label;
+    },
+  );
+  normalized = normalized.replace(
+    /<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi,
+    (_match, _tag, text) => `**${stripNoteHtml(text).trim()}**`,
+  );
+  normalized = normalized.replace(
+    /<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi,
+    (_match, _tag, text) => `*${stripNoteHtml(text).trim()}*`,
+  );
+  normalized = normalized.replace(
+    /<code[^>]*>([\s\S]*?)<\/code>/gi,
+    (_match, text) => `\`${stripNoteHtml(text).trim()}\``,
+  );
+  normalized = normalized.replace(
+    /<pre[^>]*>([\s\S]*?)<\/pre>/gi,
+    (_match, text) => `\n\n\`\`\`\n${decodeNoteHtmlEntities(stripNoteHtml(text))}\n\`\`\`\n\n`,
+  );
+  normalized = normalized.replace(/<hr\s*\/?>/gi, "\n\n---\n\n");
+  normalized = normalized.replace(/<br\s*\/?>/gi, "\n");
+  normalized = normalized.replace(
+    /<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi,
+    (_match, level, text) =>
+      `\n\n${"#".repeat(Number(level) || 1)} ${stripNoteHtml(text).trim()}\n\n`,
+  );
+  normalized = normalized.replace(/<li[^>]*>/gi, "\n- ");
+  normalized = normalized.replace(/<\/li>/gi, "");
+  normalized = normalized.replace(/<blockquote[^>]*>/gi, "\n\n> ");
+  normalized = normalized.replace(/<\/blockquote>/gi, "\n\n");
+  normalized = normalized.replace(/<[^>]+>/g, "");
+  normalized = decodeNoteHtmlEntities(normalized)
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return normalized || stripNoteHtml(raw);
+}
+
+export function renderRawNoteHtml(contentText: string): string {
+  const raw = normalizeNoteSourceText(contentText);
   if (!raw) return "<p></p>";
   try {
     return renderMarkdownForNote(raw);

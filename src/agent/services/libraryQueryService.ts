@@ -1,4 +1,5 @@
 import type {
+  AgentLibraryFilters,
   CollectionBrowseNode,
   CollectionSummary,
   DuplicateGroup,
@@ -9,7 +10,7 @@ import type {
   ZoteroGateway,
 } from "./zoteroGateway";
 
-export type QueryLibraryEntity = "items" | "collections" | "notes";
+export type QueryLibraryEntity = "items" | "collections" | "notes" | "tags" | "libraries";
 export type QueryLibraryMode = "search" | "list" | "related" | "duplicates";
 export type QueryLibraryInclude =
   | "metadata"
@@ -26,6 +27,7 @@ export type QueryLibraryFilters = {
   yearFrom?: number;
   yearTo?: number;
   itemType?: string;
+  tag?: string;
 };
 
 export type QueryLibraryItemResult = LibraryItemTarget & {
@@ -226,60 +228,57 @@ export class LibraryQueryService {
     warnings: string[];
   }> {
     const filters = params.filters || {};
-    let itemsResult:
-      | Awaited<ReturnType<ZoteroGateway["listLibraryItemTargets"]>>
-      | Awaited<ReturnType<ZoteroGateway["listCollectionItemTargets"]>>
-      | Awaited<ReturnType<ZoteroGateway["listUnfiledItemTargets"]>>
-      | Awaited<ReturnType<ZoteroGateway["listUntaggedItemTargets"]>>;
-    if (filters.collectionId) {
-      itemsResult = await this.zoteroGateway.listCollectionItemTargets({
-        libraryID: params.libraryID,
-        collectionId: filters.collectionId,
-        limit: params.limit,
-        itemType: filters.itemType,
-      });
-    } else if (filters.unfiled) {
-      itemsResult = await this.zoteroGateway.listUnfiledItemTargets({
+
+    // untagged has no Zotero.Search equivalent — keep in-memory path via old gateway method
+    if (filters.untagged) {
+      const itemsResult = await this.zoteroGateway.listUntaggedItemTargets({
         libraryID: params.libraryID,
         limit: params.limit,
         itemType: filters.itemType,
       });
-    } else if (filters.untagged) {
-      itemsResult = await this.zoteroGateway.listUntaggedItemTargets({
-        libraryID: params.libraryID,
-        limit: params.limit,
-        itemType: filters.itemType,
-      });
-    } else {
-      itemsResult = await this.zoteroGateway.listLibraryItemTargets({
-        libraryID: params.libraryID,
-        limit: params.limit,
-        itemType: filters.itemType,
-      });
+      let items = itemsResult.items;
+      if (filters.author) {
+        const q = filters.author.toLowerCase();
+        items = items.filter((p) => p.firstCreator?.toLowerCase().includes(q));
+      }
+      if (filters.yearFrom != null || filters.yearTo != null) {
+        items = items.filter((p) => {
+          const y = parseInt(p.year || "", 10);
+          if (isNaN(y)) return false;
+          if (filters.yearFrom != null && y < filters.yearFrom) return false;
+          if (filters.yearTo != null && y > filters.yearTo) return false;
+          return true;
+        });
+      }
+      const enriched = items.map((item) => enrichItemTarget(item, this.zoteroGateway, params.include));
+      return { results: enriched, totalCount: items.length, warnings: [] };
     }
-    let items = itemsResult.items;
-    if (filters.author) {
-      const authorLower = filters.author.toLowerCase();
-      items = items.filter((p) => p.firstCreator?.toLowerCase().includes(authorLower));
-    }
-    if (filters.yearFrom != null || filters.yearTo != null) {
-      items = items.filter((p) => {
-        const y = parseInt(p.year || "", 10);
-        if (isNaN(y)) return false;
-        if (filters.yearFrom != null && y < filters.yearFrom) return false;
-        if (filters.yearTo != null && y > filters.yearTo) return false;
-        return true;
-      });
-    }
-    const enriched = items.map((item) =>
+
+    // All other filters pushed into Zotero.Search
+    const agentFilters: AgentLibraryFilters = {
+      collectionId: filters.collectionId,
+      unfiled: filters.unfiled,
+      itemType: filters.itemType,
+      author: filters.author,
+      yearFrom: filters.yearFrom,
+      yearTo: filters.yearTo,
+      tag: filters.tag,
+    };
+    const result = await this.zoteroGateway.listItemsByFilters({
+      libraryID: params.libraryID,
+      filters: agentFilters,
+      limit: params.limit,
+    });
+    const enriched = result.items.map((item) =>
       enrichItemTarget(item, this.zoteroGateway, params.include),
     );
-    return { results: enriched, totalCount: items.length, warnings: [] };
+    return { results: enriched, totalCount: result.totalCount, warnings: [] };
   }
 
   async searchItems(params: {
     libraryID: number;
     text: string;
+    filters?: QueryLibraryFilters;
     limit?: number;
     include?: QueryLibraryInclude[];
     excludeContextItemId?: number | null;
@@ -288,10 +287,25 @@ export class LibraryQueryService {
     results: QueryLibraryItemResult[];
     warnings: string[];
   }> {
-    // Default to broadened search (all item types)
+    const filters = params.filters || {};
+    const agentFilters: AgentLibraryFilters | undefined =
+      filters.collectionId || filters.unfiled || filters.itemType ||
+      filters.author || filters.yearFrom != null || filters.yearTo != null ||
+      filters.tag
+        ? {
+            collectionId: filters.collectionId,
+            unfiled: filters.unfiled,
+            itemType: filters.itemType,
+            author: filters.author,
+            yearFrom: filters.yearFrom,
+            yearTo: filters.yearTo,
+            tag: filters.tag,
+          }
+        : undefined;
     const results = await this.zoteroGateway.searchAllLibraryItems({
       libraryID: params.libraryID,
       query: params.text,
+      filters: agentFilters,
       limit: params.limit,
     });
     const enriched = results.map((item) =>
@@ -417,6 +431,15 @@ export class LibraryQueryService {
       })),
       warnings: [],
     };
+  }
+
+  async queryTags(params: {
+    libraryID: number;
+    query?: string;
+    limit?: number;
+  }): Promise<{ results: { name: string; type: number }[]; warnings: string[] }> {
+    const results = await this.zoteroGateway.listLibraryTags(params);
+    return { results, warnings: [] };
   }
 
   async browseCollectionTree(params: {
