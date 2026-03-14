@@ -1,5 +1,6 @@
 import type { PaperContextRef } from "../../../shared/types";
-import type { AgentToolDefinition } from "../../types";
+import { normalizeNoteSourceText } from "../../../modules/contextPanel/notes";
+import type { AgentPendingField, AgentToolDefinition } from "../../types";
 import {
   LibraryMutationService,
   type ApplyTagsOperation,
@@ -311,8 +312,8 @@ function normalizeSaveNoteOperation(
   fallbackId: string,
 ): SaveNoteOperation | null {
   const content =
-    typeof value.content === "string" && value.content.trim()
-      ? value.content.trim()
+    typeof value.content === "string"
+      ? normalizeNoteSourceText(value.content)
       : "";
   if (!content) return null;
   return {
@@ -400,6 +401,41 @@ function normalizeOperations(value: unknown): LibraryMutationOperation[] | null 
 
 function getMoveAssignmentFieldId(operation: MoveToCollectionOperation): string {
   return `moveAssignments:${operation.id || "move_to_collection"}`;
+}
+
+function getSaveNoteContentFieldId(operation: SaveNoteOperation): string {
+  return `saveNoteContent:${operation.id || "save_note"}`;
+}
+
+function buildSaveNoteReviewFields(
+  operations: LibraryMutationOperation[],
+): AgentPendingField[] {
+  const saveNoteOperations = operations.filter(
+    (operation): operation is SaveNoteOperation => operation.type === "save_note",
+  );
+  if (!saveNoteOperations.length) return [];
+  return saveNoteOperations.flatMap((operation, index) => {
+    const suffix =
+      saveNoteOperations.length > 1 ? ` ${index + 1}` : "";
+    return [
+      {
+        type: "diff_preview" as const,
+        id: `saveNoteDiff:${operation.id || "save_note"}`,
+        label: `Note changes${suffix}`,
+        before: "",
+        after: operation.content,
+        sourceFieldId: getSaveNoteContentFieldId(operation),
+        contextLines: 2,
+        emptyMessage: "No note content yet.",
+      },
+      {
+        type: "textarea" as const,
+        id: getSaveNoteContentFieldId(operation),
+        label: `Final note content${suffix}`,
+        value: operation.content,
+      },
+    ];
+  });
 }
 
 function normalizeCollectionKey(value: string | undefined): string {
@@ -785,19 +821,27 @@ export function createMutateLibraryTool(
           ): field is NonNullable<ReturnType<typeof buildMoveAssignmentField>> =>
             Boolean(field),
         );
+      const saveNoteReviewFields = buildSaveNoteReviewFields(input.operations);
+      const hasMoveAssignments = moveAssignmentFields.length > 0;
+      const hasNoteDrafts = saveNoteReviewFields.length > 0;
       return {
         toolName: "mutate_library",
         title: `Review ${input.operations.length} library change${
           input.operations.length === 1 ? "" : "s"
         }`,
         description:
-          moveAssignmentFields.length > 0
-            ? "Choose destination folders below, uncheck any operation to skip it, or edit the JSON below before approval."
-            : "Uncheck any operation to skip it, or edit the JSON below before approval.",
+          hasMoveAssignments && hasNoteDrafts
+            ? "Review the note drafts below, choose destination folders, uncheck any operation to skip it, or edit the JSON below before approval."
+            : hasMoveAssignments
+              ? "Choose destination folders below, uncheck any operation to skip it, or edit the JSON below before approval."
+              : hasNoteDrafts
+                ? "Review the note drafts below, uncheck any operation to skip it, or edit the JSON below before approval."
+                : "Uncheck any operation to skip it, or edit the JSON below before approval.",
         confirmLabel: "Apply changes",
         cancelLabel: "Cancel",
         fields: [
           ...moveAssignmentFields,
+          ...saveNoteReviewFields,
           {
             type: "checklist",
             id: "selectedOperations",
@@ -827,6 +871,13 @@ export function createMutateLibraryTool(
       if (!validateObject<Record<string, unknown>>(resolutionData)) {
         return fail("confirmation data is required");
       }
+      const originalSaveNoteContentById = new Map(
+        _input.operations
+          .filter(
+            (operation): operation is SaveNoteOperation => operation.type === "save_note",
+          )
+          .map((operation) => [operation.id || "save_note", operation.content]),
+      );
       let operations = normalizeOperations(
         typeof resolutionData.operationsJson === "string"
           ? (() => {
@@ -852,6 +903,22 @@ export function createMutateLibraryTool(
       }
       operations = operations
         .map((operation) => {
+          if (operation.type === "save_note") {
+            const fieldId = getSaveNoteContentFieldId(operation);
+            const editedContent =
+              typeof resolutionData[fieldId] === "string"
+                ? normalizeNoteSourceText(resolutionData[fieldId] as string)
+                : "";
+            const originalContent =
+              originalSaveNoteContentById.get(operation.id || "save_note") || "";
+            if (editedContent && editedContent !== originalContent) {
+              return {
+                ...operation,
+                content: editedContent,
+              };
+            }
+            return operation;
+          }
           if (operation.type !== "move_to_collection") {
             return operation;
           }

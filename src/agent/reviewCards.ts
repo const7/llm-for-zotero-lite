@@ -3,10 +3,12 @@ import type {
   AgentModelMessage,
   AgentInheritedApproval,
   AgentPendingAction,
+  AgentPendingField,
   AgentToolContext,
   AgentToolReviewResolution,
   AgentToolResult,
 } from "./types";
+import { normalizeNoteSourceText } from "../modules/contextPanel/notes";
 
 type SearchLiteratureOnlineMode =
   | "recommendations"
@@ -194,6 +196,30 @@ function buildMetadataNoteTemplate(
   ].join("\n");
 }
 
+function buildNoteDraftReviewFields(noteContent: string): AgentPendingField[] {
+  return [
+    {
+      type: "diff_preview",
+      id: "noteDiff",
+      label: "Note changes",
+      before: "",
+      after: noteContent,
+      sourceFieldId: "noteContent",
+      contextLines: 2,
+      emptyMessage: "No note content yet.",
+      visibleForActionIds: ["save_note"],
+    },
+    {
+      type: "textarea",
+      id: "noteContent",
+      label: "Final note content",
+      value: noteContent,
+      visibleForActionIds: ["save_note"],
+      requiredForActionIds: ["save_note"],
+    },
+  ];
+}
+
 function prepareSearchReview(
   result: AgentToolResult,
 ): SearchReviewPrepared | null {
@@ -364,14 +390,7 @@ export function createSearchLiteratureReviewAction(
           label: "Metadata results",
           rows: prepared.rows,
         },
-        {
-          type: "textarea",
-          id: "noteContent",
-          label: "Note content",
-          value: noteContent,
-          visibleForActionIds: ["save_note"],
-          requiredForActionIds: ["save_note"],
-        },
+        ...buildNoteDraftReviewFields(noteContent),
       ],
     };
   }
@@ -410,14 +429,7 @@ export function createSearchLiteratureReviewAction(
         ],
         visibleForActionIds: ["import", "save_note"],
       },
-      {
-        type: "textarea",
-        id: "noteContent",
-        label: "Note content",
-        value: noteContent,
-        visibleForActionIds: ["save_note"],
-        requiredForActionIds: ["save_note"],
-      },
+      ...buildNoteDraftReviewFields(noteContent),
       {
         type: "text",
         id: "nextQuery",
@@ -474,8 +486,9 @@ export function resolveSearchLiteratureReview(
 
   if (prepared.kind === "metadata") {
     if (actionId === "save_note") {
-      const noteContent =
-        readString(data.noteContent) || buildMetadataNoteTemplate(context, prepared.rows);
+      const noteContent = normalizeNoteSourceText(
+        readString(data.noteContent) || buildMetadataNoteTemplate(context, prepared.rows),
+      );
       return {
         kind: "invoke_tool",
         call: {
@@ -548,8 +561,9 @@ export function resolveSearchLiteratureReview(
   }
 
   if (actionId === "save_note") {
-    const noteContent =
-      readString(data.noteContent) || buildPaperNoteTemplate(context, prepared);
+    const noteContent = normalizeNoteSourceText(
+      readString(data.noteContent) || buildPaperNoteTemplate(context, prepared),
+    );
     return {
       kind: "invoke_tool",
       call: {

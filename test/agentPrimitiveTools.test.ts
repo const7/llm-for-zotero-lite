@@ -363,6 +363,98 @@ describe("primitive agent tools", function () {
     assert.deepEqual(appliedCalls, ["apply_tags", "remove_tags_undo"]);
   });
 
+  it("mutate_library shows editable diff previews for save_note operations", async function () {
+    let savedNoteContent = "";
+    const tool = createMutateLibraryTool({
+      resolveMetadataItem: () => null,
+      getEditableArticleMetadata: () => null,
+      getCollectionSummary: () => null,
+      createCollection: async () => {
+        throw new Error("not used");
+      },
+      deleteCollection: async () => undefined,
+      saveAnswerToNote: async ({ content }: { content: string }) => {
+        savedNoteContent = content;
+        return "created" as const;
+      },
+      importPapersByIdentifiers: async () => ({ succeeded: 0, failed: 0 }),
+      addItemsToCollections: async () => ({
+        selectedCount: 0,
+        movedCount: 0,
+        skippedCount: 0,
+        collections: [],
+        items: [],
+      }),
+      removeItemFromCollection: async () => undefined,
+      addItemsToCollection: async () => ({
+        selectedCount: 0,
+        movedCount: 0,
+        skippedCount: 0,
+        collection: { collectionId: 1, name: "X", libraryID: 1 },
+        items: [],
+      }),
+      updateArticleMetadata: async () => ({
+        status: "updated" as const,
+        itemId: 1,
+        title: "X",
+        changedFields: ["title"],
+      }),
+      getItem: () => null,
+      applyTagAssignments: async () => ({
+        selectedCount: 0,
+        updatedCount: 0,
+        skippedCount: 0,
+        items: [],
+      }),
+      removeTagsFromItem: async () => undefined,
+      applyTagsToItems: async () => ({
+        selectedCount: 0,
+        updatedCount: 0,
+        skippedCount: 0,
+        items: [],
+      }),
+    } as never);
+
+    const validated = tool.validate({
+      operations: [{ type: "save_note", content: "## Draft note", target: "item" }],
+    });
+    assert.isTrue(validated.ok);
+    if (!validated.ok) return;
+
+    const pending = await tool.createPendingAction?.(validated.value, baseContext);
+    assert.exists(pending);
+    assert.deepEqual(pending?.fields.map((field) => field.id), [
+      "saveNoteDiff:op-1",
+      "saveNoteContent:op-1",
+      "selectedOperations",
+      "operationsJson",
+    ]);
+    const diffField = pending?.fields[0] as Extract<
+      NonNullable<typeof pending>["fields"][number],
+      { type: "diff_preview" }
+    >;
+    assert.equal(diffField.after, "## Draft note");
+    assert.equal(diffField.sourceFieldId, "saveNoteContent:op-1");
+
+    const confirmed = tool.applyConfirmation?.(
+      validated.value,
+      {
+        selectedOperations: [{ id: "op-1", checked: true }],
+        operationsJson: JSON.stringify(validated.value.operations, null, 2),
+        "saveNoteContent:op-1": "## Edited note",
+      },
+      baseContext,
+    );
+    assert.isTrue(confirmed?.ok);
+    if (!confirmed?.ok) return;
+    assert.equal(confirmed.value.operations[0]?.type, "save_note");
+    assert.equal((confirmed.value.operations[0] as { content?: string }).content, "## Edited note");
+
+    const result = await tool.execute(confirmed.value, baseContext);
+    assert.equal((result as { appliedCount: number }).appliedCount, 1);
+    assert.equal(savedNoteContent, "## Edited note");
+  });
+
   it("mutate_library can collect destination folders for unresolved move operations", async function () {
     const moveCalls: Array<{ itemId: number; targetCollectionId: number }> = [];
     const tool = createMutateLibraryTool({
