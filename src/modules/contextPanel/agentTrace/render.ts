@@ -17,6 +17,7 @@ import {
   normalizeSelectedTextSources,
 } from "../normalizers";
 import { agentReasoningExpandedCache } from "../agentState";
+import { buildTextDiffPreview } from "./diffPreview";
 
 type AgentTraceSummaryKind = "plan" | "tool" | "ok" | "skip" | "done";
 
@@ -175,6 +176,91 @@ function renderReviewTableField(
   }
 
   return list;
+}
+
+function renderDiffPreviewField(
+  doc: Document,
+  field: Extract<AgentPendingField, { type: "diff_preview" }>,
+): {
+  element: HTMLDivElement;
+  update: (nextAfter: string) => void;
+} {
+  const wrap = doc.createElement("div");
+  wrap.className = "llm-agent-hitl-diff";
+
+  const body = doc.createElement("div");
+  body.className = "llm-agent-hitl-diff-body";
+  wrap.appendChild(body);
+
+  const update = (nextAfter: string) => {
+    body.replaceChildren();
+    const lines = buildTextDiffPreview(field.before || "", nextAfter, {
+      contextLines: field.contextLines,
+    });
+    if (!lines.length) {
+      const empty = doc.createElement("div");
+      empty.className = "llm-agent-hitl-diff-empty";
+      empty.textContent = field.emptyMessage || "No changes.";
+      body.appendChild(empty);
+      return;
+    }
+
+    for (const line of lines) {
+      if (line.kind === "gap") {
+        const gap = doc.createElement("div");
+        gap.className = "llm-agent-hitl-diff-gap";
+        gap.textContent = `... ${line.omittedCount} unchanged line${
+          line.omittedCount === 1 ? "" : "s"
+        } ...`;
+        body.appendChild(gap);
+        continue;
+      }
+
+      const row = doc.createElement("div");
+      row.className = `llm-agent-hitl-diff-line llm-agent-hitl-diff-line-${line.kind}`;
+
+      const gutter = doc.createElement("div");
+      gutter.className = "llm-agent-hitl-diff-gutter";
+
+      const oldLineNumber = doc.createElement("span");
+      oldLineNumber.className = "llm-agent-hitl-diff-line-number";
+      oldLineNumber.textContent =
+        typeof line.oldLineNumber === "number" ? String(line.oldLineNumber) : "";
+
+      const newLineNumber = doc.createElement("span");
+      newLineNumber.className = "llm-agent-hitl-diff-line-number";
+      newLineNumber.textContent =
+        typeof line.newLineNumber === "number" ? String(line.newLineNumber) : "";
+
+      const marker = doc.createElement("span");
+      marker.className = "llm-agent-hitl-diff-marker";
+      marker.textContent =
+        line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " ";
+
+      gutter.append(oldLineNumber, newLineNumber, marker);
+
+      const content = doc.createElement("pre");
+      content.className = "llm-agent-hitl-diff-content";
+      for (const segment of line.segments) {
+        const segmentEl = doc.createElement("span");
+        segmentEl.className =
+          segment.kind === "context"
+            ? "llm-agent-hitl-diff-segment"
+            : `llm-agent-hitl-diff-segment llm-agent-hitl-diff-segment-${segment.kind}`;
+        segmentEl.textContent = segment.text;
+        content.appendChild(segmentEl);
+      }
+      if (!content.textContent) {
+        content.textContent = " ";
+      }
+
+      row.append(gutter, content);
+      body.appendChild(row);
+    }
+  };
+
+  update(field.after || "");
+  return { element: wrap, update };
 }
 
 function renderImageGalleryField(
@@ -1057,6 +1143,17 @@ export function renderPendingActionCard(
   const normalizedActions = normalizePendingActions(pending.action);
   const buttonLayout = getPendingActionButtonLayout(pending.action);
   let activeActionId = normalizedActions.defaultActionId;
+  const liveFieldBindings = new Map<
+    string,
+    {
+      getValue: () => string;
+      bindChange: (callback: () => void) => void;
+    }
+  >();
+  const diffPreviewBindings: Array<{
+    field: Extract<AgentPendingField, { type: "diff_preview" }>;
+    update: (nextAfter: string) => void;
+  }> = [];
   const fieldAccessors: Array<{
     field: AgentPendingField;
     container: HTMLElement;
@@ -1104,6 +1201,12 @@ export function renderPendingActionCard(
           textarea.addEventListener("input", callback);
         },
       });
+      liveFieldBindings.set(field.id, {
+        getValue: () => textarea.value,
+        bindChange: (callback) => {
+          textarea.addEventListener("input", callback);
+        },
+      });
       card.appendChild(fieldContainer);
       continue;
     }
@@ -1130,6 +1233,12 @@ export function renderPendingActionCard(
         },
         isValid: () => input.value.trim().length > 0,
         bindValidity: (callback) => {
+          input.addEventListener("input", callback);
+        },
+      });
+      liveFieldBindings.set(field.id, {
+        getValue: () => input.value,
+        bindChange: (callback) => {
           input.addEventListener("input", callback);
         },
       });
@@ -1166,6 +1275,12 @@ export function renderPendingActionCard(
           select.addEventListener("change", callback);
         },
       });
+      liveFieldBindings.set(field.id, {
+        getValue: () => select.value,
+        bindChange: (callback) => {
+          select.addEventListener("change", callback);
+        },
+      });
       card.appendChild(fieldContainer);
       continue;
     }
@@ -1178,6 +1293,31 @@ export function renderPendingActionCard(
         fieldContainer.appendChild(label);
       }
       fieldContainer.appendChild(renderReviewTableField(doc, field));
+      fieldAccessors.push({
+        field,
+        container: fieldContainer,
+        id: field.id,
+        getValue: () => null,
+        setDisabled: () => undefined,
+        isValid: () => true,
+      });
+      card.appendChild(fieldContainer);
+      continue;
+    }
+
+    if (field.type === "diff_preview") {
+      if (field.label) {
+        const label = doc.createElement("label");
+        label.className = "llm-agent-hitl-label";
+        label.textContent = field.label;
+        fieldContainer.appendChild(label);
+      }
+      const rendered = renderDiffPreviewField(doc, field);
+      fieldContainer.appendChild(rendered.element);
+      diffPreviewBindings.push({
+        field,
+        update: rendered.update,
+      });
       fieldAccessors.push({
         field,
         container: fieldContainer,
@@ -1272,6 +1412,20 @@ export function renderPendingActionCard(
       });
       card.appendChild(fieldContainer);
     }
+  }
+
+  for (const binding of diffPreviewBindings) {
+    const source = binding.field.sourceFieldId
+      ? liveFieldBindings.get(binding.field.sourceFieldId)
+      : null;
+    if (!source) {
+      continue;
+    }
+    const refresh = () => {
+      binding.update(source.getValue());
+    };
+    refresh();
+    source.bindChange(refresh);
   }
 
   const buttons: HTMLButtonElement[] = [];

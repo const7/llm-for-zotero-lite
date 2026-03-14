@@ -673,14 +673,16 @@ describe("primitive agent tools", function () {
     assert.exists(pending);
     assert.deepEqual(
       pending?.fields.map((field) => field.type),
-      ["text", "review_table", "textarea"],
+      ["diff_preview", "textarea"],
     );
-    const reviewField = pending?.fields[1] as Extract<
+    assert.equal(pending?.mode, "review");
+    const reviewField = pending?.fields[0] as Extract<
       NonNullable<typeof pending>["fields"][number],
-      { type: "review_table" }
+      { type: "diff_preview" }
     >;
-    assert.equal(reviewField.rows[0]?.before, "Original body");
-    assert.equal(reviewField.rows[0]?.after, "Rewritten body");
+    assert.equal(reviewField.before, "Original body");
+    assert.equal(reviewField.after, "Rewritten body");
+    assert.equal(reviewField.sourceFieldId, "content");
 
     const confirmed = tool.applyConfirmation?.(
       validated.value,
@@ -762,12 +764,14 @@ describe("primitive agent tools", function () {
     });
     assert.exists(pending);
     assert.include(pending?.description || "", '"Untitled note"');
-    const titleField = pending?.fields[0] as Extract<
+    const diffField = pending?.fields[0] as Extract<
       NonNullable<typeof pending>["fields"][number],
-      { type: "text" }
+      { type: "diff_preview" }
     >;
-    assert.equal(titleField.value, "Untitled note");
-    const textareaField = pending?.fields[2] as Extract<
+    assert.equal(diffField.before, "");
+    assert.equal(diffField.after, "# Summary\n\n**Key point**");
+    assert.equal(diffField.emptyMessage, "No note changes yet.");
+    const textareaField = pending?.fields[1] as Extract<
       NonNullable<typeof pending>["fields"][number],
       { type: "textarea" }
     >;

@@ -2361,6 +2361,128 @@ label.llm-search-results-item:hover {
   color: var(--fill-primary);
 }
 
+.llm-agent-hitl-diff {
+  border: 1px solid var(--stroke-secondary);
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--fill-quaternary) 86%, black 14%);
+}
+
+.llm-agent-hitl-diff-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.llm-agent-hitl-diff-line {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: stretch;
+  min-width: 0;
+  border-top: 1px solid color-mix(in srgb, var(--stroke-secondary) 70%, transparent);
+}
+
+.llm-agent-hitl-diff-line:first-child {
+  border-top: 0;
+}
+
+.llm-agent-hitl-diff-line-context {
+  background: color-mix(in srgb, var(--fill-quaternary) 92%, transparent);
+}
+
+.llm-agent-hitl-diff-line-add {
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.llm-agent-hitl-diff-line-remove {
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.llm-agent-hitl-diff-gutter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 16px;
+  gap: 6px;
+  align-items: center;
+  padding: 7px 8px 7px 10px;
+  border-right: 1px solid color-mix(in srgb, var(--stroke-secondary) 70%, transparent);
+  color: var(--fill-tertiary);
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  font-size: var(--llm-fs-9);
+  line-height: 1.45;
+}
+
+.llm-agent-hitl-diff-line-number {
+  text-align: right;
+}
+
+.llm-agent-hitl-diff-marker {
+  text-align: center;
+  font-weight: 700;
+}
+
+.llm-agent-hitl-diff-line-add .llm-agent-hitl-diff-marker,
+.llm-agent-hitl-diff-line-add .llm-agent-hitl-diff-segment-add {
+  color: #7ce4a1;
+}
+
+.llm-agent-hitl-diff-line-remove .llm-agent-hitl-diff-marker,
+.llm-agent-hitl-diff-line-remove .llm-agent-hitl-diff-segment-remove {
+  color: #ff9f9f;
+}
+
+.llm-agent-hitl-diff-content {
+  margin: 0;
+  padding: 7px 12px;
+  min-width: 0;
+  min-height: 1.45em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  font-size: var(--llm-fs-10);
+  line-height: 1.45;
+  color: var(--fill-primary);
+}
+
+.llm-agent-hitl-diff-segment-add {
+  background: rgba(34, 197, 94, 0.18);
+  border-radius: 4px;
+}
+
+.llm-agent-hitl-diff-segment-remove {
+  background: rgba(239, 68, 68, 0.18);
+  border-radius: 4px;
+}
+
+.llm-agent-hitl-diff-gap,
+.llm-agent-hitl-diff-empty {
+  padding: 9px 12px;
+  font-size: var(--llm-fs-10);
+  color: var(--fill-tertiary);
+  background: color-mix(in srgb, var(--fill-quaternary) 94%, transparent);
+}
+
+.llm-agent-hitl-diff-gap {
+  text-align: center;
+  border-top: 1px solid color-mix(in srgb, var(--stroke-secondary) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--stroke-secondary) 70%, transparent);
+}
+
 .llm-agent-hitl-checklist {
   display: flex;
   flex-direction: column;

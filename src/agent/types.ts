@@ -79,6 +79,15 @@ export type AgentPendingField =
       }>;
     })
   | (AgentPendingFieldBase & {
+      type: "diff_preview";
+      label?: string;
+      before?: string;
+      after?: string;
+      sourceFieldId?: string;
+      contextLines?: number;
+      emptyMessage?: string;
+    })
+  | (AgentPendingFieldBase & {
       type: "image_gallery";
       label?: string;
       items: Array<{

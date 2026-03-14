@@ -82,30 +82,21 @@ export function createEditCurrentNoteTool(
       input.content = normalizedContent;
       return {
         toolName: "edit_current_note",
+        mode: "review",
         title: `Review note update`,
-        description: `Review the current note content and edit the final replacement text for "${input.noteTitle}" before applying it.`,
+        description: `Review the proposed note changes for "${input.noteTitle}" and edit the final note text before applying it.`,
         confirmLabel: "Apply edit",
         cancelLabel: "Cancel",
         fields: [
           {
-            type: "text",
-            id: "noteTitle",
-            label: "Current note",
-            value: input.noteTitle,
-          },
-          {
-            type: "review_table",
-            id: "noteReview",
-            label: "Proposed note update",
-            rows: [
-              {
-                key: "content",
-                label: "Note content",
-                before: snapshot.text,
-                after: normalizedContent,
-                multiline: true,
-              },
-            ],
+            type: "diff_preview",
+            id: "noteDiff",
+            label: "Note changes",
+            before: snapshot.text,
+            after: normalizedContent,
+            sourceFieldId: "content",
+            contextLines: 2,
+            emptyMessage: "No note changes yet.",
           },
           {
             type: "textarea",
