@@ -38,4 +38,21 @@ describe("textUtils selected text prompt composition", function () {
     assert.include(prompt, "Selected text from the PDF reader:");
     assert.notInclude(prompt, "[paper=");
   });
+
+  it("uses note-edit wording for active note editing focus", function () {
+    const prompt = buildQuestionWithSelectedTextContexts(
+      ["Revise this paragraph."],
+      ["note-edit"],
+      "Make it clearer.",
+    );
+    assert.include(
+      prompt,
+      "Selected text from the current Zotero note editor (editing focus):",
+    );
+    assert.include(
+      prompt,
+      "The user selected this snippet inside the active note and wants help editing it in place.",
+    );
+    assert.include(prompt, "User question:\nMake it clearer.");
+  });
 });

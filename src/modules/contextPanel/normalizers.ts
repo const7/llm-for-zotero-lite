@@ -15,7 +15,9 @@ export function normalizePositiveInt(value: unknown): number | null {
 }
 
 export function normalizeSelectedTextSource(value: unknown): SelectedTextSource {
-  return value === "model" ? "model" : "pdf";
+  if (value === "model") return "model";
+  if (value === "note-edit") return "note-edit";
+  return "pdf";
 }
 
 export function normalizeSelectedTextSources(

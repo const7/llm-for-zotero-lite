@@ -53,6 +53,7 @@ import {
   getItemSelectionCacheKeys,
   appendSelectedTextContextForItem,
   applySelectedTextPreview,
+  syncSelectedTextContextForSource,
 } from "./contextResolution";
 import { ensurePDFTextCached, ensureNoteTextCached } from "./pdfContext";
 import { resolveCurrentSelectionPageLocationFromReader } from "./livePdfSelectionLocator";
@@ -62,6 +63,7 @@ import {
 } from "./readerSelection";
 import { resolveReaderPopupPaperContext } from "./readerPopup";
 import { resolveInitialPanelItemState } from "./portalScope";
+import { getEditableSelectionFromDocument } from "./noteSelection";
 
 // =============================================================================
 // Public API
@@ -670,6 +672,198 @@ export function registerReaderSelectionTracking() {
     config.addonID,
   );
   readerAPI.__llmSelectionTrackingRegistered = true;
+}
+
+type MainWindowWithNoteEditingTracker = _ZoteroTypes.MainWindow & {
+  __llmNoteEditingSelectionTracking?: {
+    intervalId: number;
+    refresh: () => void;
+    lastNoteId: number;
+    lastSelectionText: string;
+  };
+};
+
+function collectAccessibleDocuments(
+  rootDoc: Document,
+  docs: Document[] = [],
+  seen: Set<Document> = new Set<Document>(),
+  depth = 0,
+): Document[] {
+  if (!rootDoc || seen.has(rootDoc) || depth > 3) {
+    return docs;
+  }
+  seen.add(rootDoc);
+  docs.push(rootDoc);
+  const frames = Array.from(rootDoc.querySelectorAll("iframe"));
+  for (const frame of frames) {
+    try {
+      const frameDoc = (frame as HTMLIFrameElement).contentDocument;
+      if (frameDoc) {
+        collectAccessibleDocuments(frameDoc, docs, seen, depth + 1);
+      }
+    } catch (_err) {
+      void _err;
+    }
+  }
+  return docs;
+}
+
+function getActiveNoteItemFromWindow(
+  win: _ZoteroTypes.MainWindow,
+): Zotero.Item | null {
+  try {
+    const tabs = (win as unknown as { Zotero?: { Tabs?: any } }).Zotero?.Tabs;
+    const selectedId =
+      tabs?.selectedID === undefined || tabs?.selectedID === null
+        ? ""
+        : `${tabs.selectedID}`;
+    const activeTab = Array.isArray(tabs?._tabs)
+      ? tabs._tabs.find((tab: Record<string, unknown>) => `${tab?.id || ""}` === selectedId)
+      : null;
+    const data = (activeTab?.data || {}) as Record<string, unknown>;
+    const candidateIds = [
+      data.itemID,
+      data.itemId,
+      data.id,
+      data.noteID,
+      data.noteId,
+    ];
+    for (const candidateId of candidateIds) {
+      const parsed = Number(candidateId);
+      if (!Number.isFinite(parsed) || parsed <= 0) continue;
+      const item = Zotero.Items.get(Math.floor(parsed)) || null;
+      if ((item as any)?.isNote?.()) {
+        return item;
+      }
+    }
+  } catch (_err) {
+    void _err;
+  }
+
+  try {
+    const pane = (win as unknown as {
+      ZoteroPane?: { getSelectedItems?: () => Zotero.Item[] };
+    }).ZoteroPane;
+    const selectedItems = pane?.getSelectedItems?.() || [];
+    const noteItem = selectedItems.find((item: Zotero.Item) =>
+      (item as any)?.isNote?.(),
+    );
+    return noteItem || null;
+  } catch (_err) {
+    void _err;
+  }
+
+  return null;
+}
+
+function refreshPanelsForConversationKey(conversationKey: number): void {
+  for (const [activeBody, syncPanelState] of activeContextPanelStateSync) {
+    if (!(activeBody as Element).isConnected) {
+      activeContextPanels.delete(activeBody);
+      activeContextPanelStateSync.delete(activeBody);
+      continue;
+    }
+    const activeRoot = activeBody.querySelector(
+      "#llm-main",
+    ) as HTMLDivElement | null;
+    const activeConversationKey = activeRoot
+      ? Number(activeRoot.dataset.itemId || 0)
+      : 0;
+    if (
+      Number.isFinite(activeConversationKey) &&
+      activeConversationKey === conversationKey
+    ) {
+      syncPanelState();
+    }
+  }
+}
+
+function refreshTrackedNoteEditingSelection(
+  win: MainWindowWithNoteEditingTracker,
+): void {
+  const tracker = win.__llmNoteEditingSelectionTracking;
+  if (!tracker) return;
+  const noteItem = getActiveNoteItemFromWindow(win);
+  const nextNoteId =
+    noteItem && Number.isFinite(noteItem.id) && noteItem.id > 0
+      ? Math.floor(noteItem.id)
+      : 0;
+  const nextSelectionText = noteItem
+    ? collectAccessibleDocuments(win.document).reduce((found, doc) => {
+        return found || getEditableSelectionFromDocument(doc);
+      }, "")
+    : "";
+
+  if (
+    tracker.lastNoteId === nextNoteId &&
+    tracker.lastSelectionText === nextSelectionText
+  ) {
+    return;
+  }
+
+  if (
+    tracker.lastNoteId > 0 &&
+    (tracker.lastNoteId !== nextNoteId || !nextSelectionText)
+  ) {
+    if (
+      syncSelectedTextContextForSource(
+        tracker.lastNoteId,
+        "",
+        "note-edit",
+      )
+    ) {
+      refreshPanelsForConversationKey(tracker.lastNoteId);
+    }
+  }
+
+  if (nextNoteId > 0 && nextSelectionText) {
+    if (
+      syncSelectedTextContextForSource(
+        nextNoteId,
+        nextSelectionText,
+        "note-edit",
+      )
+    ) {
+      refreshPanelsForConversationKey(nextNoteId);
+    }
+  }
+
+  tracker.lastNoteId = nextNoteId;
+  tracker.lastSelectionText = nextSelectionText;
+}
+
+export function registerNoteEditingSelectionTracking(
+  win: _ZoteroTypes.MainWindow,
+) {
+  const trackedWindow = win as MainWindowWithNoteEditingTracker;
+  if (trackedWindow.__llmNoteEditingSelectionTracking) return;
+  const refresh = () => {
+    refreshTrackedNoteEditingSelection(trackedWindow);
+  };
+  const intervalId = win.setInterval(refresh, 250);
+  trackedWindow.__llmNoteEditingSelectionTracking = {
+    intervalId,
+    refresh,
+    lastNoteId: 0,
+    lastSelectionText: "",
+  };
+  win.document.addEventListener("selectionchange", refresh, true);
+  win.document.addEventListener("mouseup", refresh, true);
+  win.document.addEventListener("keyup", refresh, true);
+  win.addEventListener(
+    "unload",
+    () => {
+      const tracker = trackedWindow.__llmNoteEditingSelectionTracking;
+      if (!tracker) return;
+      win.clearInterval(tracker.intervalId);
+      win.document.removeEventListener("selectionchange", tracker.refresh, true);
+      win.document.removeEventListener("mouseup", tracker.refresh, true);
+      win.document.removeEventListener("keyup", tracker.refresh, true);
+      delete trackedWindow.__llmNoteEditingSelectionTracking;
+    },
+    { once: true },
+  );
+  refresh();
 }
 
 export function clearConversation(itemId: number) {

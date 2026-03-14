@@ -9432,6 +9432,18 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       ) {
         return;
       }
+      if (selectedContexts[index]?.source === "note-edit") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (status) {
+          setStatus(
+            status,
+            "Editing focus syncs to the live note selection",
+            "ready",
+          );
+        }
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       const nextPinned = togglePinnedSelectedText(

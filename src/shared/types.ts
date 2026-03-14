@@ -3,7 +3,7 @@
  * This file has zero imports — all types are pure data shapes.
  */
 
-export type SelectedTextSource = "pdf" | "model";
+export type SelectedTextSource = "pdf" | "model" | "note-edit";
 
 export type ChatAttachmentCategory =
   | "image"

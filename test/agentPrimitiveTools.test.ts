@@ -895,6 +895,8 @@ describe("primitive agent tools", function () {
         mode: "agent",
         userText: "Revise the note",
         activeItemId: 55,
+        selectedTexts: ["This sentence needs work."],
+        selectedTextSources: ["note-edit"],
         activeNoteContext: {
           noteId: 55,
           title: "Draft Note",
@@ -912,5 +914,10 @@ describe("primitive agent tools", function () {
     assert.include(userText, "Active note parent item ID: 9");
     assert.include(userText, "Current note content for this turn");
     assert.include(userText, "Current note body");
+    assert.include(
+      userText,
+      "Selected text 1 [source=active note editing focus]:",
+    );
+    assert.include(userText, "This sentence needs work.");
   });
 });

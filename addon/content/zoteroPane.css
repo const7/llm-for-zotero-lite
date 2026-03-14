@@ -3683,6 +3683,20 @@ label.llm-search-results-item:hover {
   content: "🧠";
 }
 
+.llm-image-preview-meta.llm-selected-context-meta.llm-selected-context-source-note-edit::before {
+  content: "✍🏻";
+}
+
+.llm-image-preview-meta.llm-selected-context-meta.llm-selected-context-source-note-edit {
+  white-space: nowrap;
+}
+
+.llm-selected-context.llm-selected-context-source-note-edit .llm-selected-context-header {
+  border: 1px solid color-mix(in srgb, var(--color-accent) 38%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
 .llm-image-preview-meta.llm-selected-context-meta.llm-selected-context-meta-corrupted::after {
   content: " ⚠";
   color: #fbbf24;

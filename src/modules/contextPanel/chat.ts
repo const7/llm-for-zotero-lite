@@ -2326,6 +2326,7 @@ export type BuildAgentRuntimeRequestParams = {
   item: Zotero.Item;
   userText: string;
   selectedTexts: string[];
+  selectedTextSources?: SelectedTextSource[];
   paperContexts: PaperContextRef[];
   fullTextPaperContexts: PaperContextRef[];
   attachments: ChatAttachment[] | undefined;
@@ -2359,6 +2360,7 @@ function buildAgentRuntimeRequest(
     userText: params.userText,
     activeItemId: params.item.id,
     selectedTexts: params.selectedTexts,
+    selectedTextSources: params.selectedTextSources,
     selectedPaperContexts: params.paperContexts,
     fullTextPaperContexts: params.fullTextPaperContexts,
     attachments: params.attachments,

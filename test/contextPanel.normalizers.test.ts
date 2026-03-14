@@ -24,11 +24,12 @@ describe("contextPanel normalizers", function () {
   it("normalizeSelectedTextSource(s) should normalize unknown entries to pdf", function () {
     assert.equal(normalizeSelectedTextSource("model"), "model");
     assert.equal(normalizeSelectedTextSource("pdf"), "pdf");
+    assert.equal(normalizeSelectedTextSource("note-edit"), "note-edit");
     assert.equal(normalizeSelectedTextSource("other"), "pdf");
 
     assert.deepEqual(
-      normalizeSelectedTextSources(["model", "x", "pdf"], 3),
-      ["model", "pdf", "pdf"],
+      normalizeSelectedTextSources(["model", "note-edit", "x", "pdf"], 4),
+      ["model", "note-edit", "pdf", "pdf"],
     );
     assert.deepEqual(normalizeSelectedTextSources(undefined, 2), [
       "pdf",

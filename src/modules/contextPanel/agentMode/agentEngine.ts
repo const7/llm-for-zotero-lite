@@ -65,6 +65,7 @@ type BuildAgentRuntimeRequestParamsShape = {
   item: Zotero.Item;
   userText: string;
   selectedTexts: string[];
+  selectedTextSources?: SelectedTextSource[];
   paperContexts: PaperContextRef[];
   fullTextPaperContexts: PaperContextRef[];
   attachments: ChatAttachment[] | undefined;
@@ -250,6 +251,10 @@ export async function sendAgentTurn(
     advanced,
   });
   const selectedTextsForMessage = deps.normalizeSelectedTexts(selectedTexts);
+  const selectedTextSourcesForMessage = deps.normalizeSelectedTextSources(
+    selectedTextSources,
+    selectedTextsForMessage.length,
+  );
   const normalizedPaperContexts = deps.normalizePaperContexts(paperContexts);
   const normalizedFullTextPaperContexts =
     deps.normalizePaperContexts(fullTextPaperContexts);
@@ -266,6 +271,7 @@ export async function sendAgentTurn(
     item,
     userText: question,
     selectedTexts: selectedTextsForMessage,
+    selectedTextSources: selectedTextSourcesForMessage,
     paperContexts: paperContextsForMessage,
     fullTextPaperContexts: fullTextPaperContextsForMessage,
     attachments,
@@ -313,10 +319,6 @@ export async function sendAgentTurn(
 
   const historyForRun = deps.chatHistory.get(conversationKey) || [];
   const shownQuestion = displayQuestion || question;
-  const selectedTextSourcesForMessage = deps.normalizeSelectedTextSources(
-    selectedTextSources,
-    selectedTextsForMessage.length,
-  );
   const selectedTextPaperContextsForMessage =
     deps.normalizeSelectedTextPaperContextsByIndex(
       selectedTextPaperContexts,
@@ -609,6 +611,10 @@ export async function retryAgentTurn(
     : retryPair.userMessage.selectedText
       ? [retryPair.userMessage.selectedText]
       : [];
+  const selectedTextSourcesRaw = deps.normalizeSelectedTextSources(
+    retryPair.userMessage.selectedTextSources,
+    selectedTextsRaw.length,
+  );
 
   const historyForLLM = deps.buildLLMHistoryMessages(
     history.slice(0, retryPair.userIndex),
@@ -619,6 +625,7 @@ export async function retryAgentTurn(
     item,
     userText: question,
     selectedTexts: selectedTextsRaw,
+    selectedTextSources: selectedTextSourcesRaw,
     paperContexts,
     fullTextPaperContexts,
     attachments: retryPair.userMessage.attachments?.filter(

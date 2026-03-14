@@ -6,6 +6,7 @@ import type {
   ActiveNoteContext,
   ChatAttachment,
   PaperContextRef,
+  SelectedTextSource,
 } from "../shared/types";
 import type { ReasoningConfig as LLMReasoningConfig } from "../utils/llmClient";
 
@@ -15,6 +16,7 @@ export type AgentRequest = {
   userText: string;
   activeItemId?: number;
   selectedTexts?: string[];
+  selectedTextSources?: SelectedTextSource[];
   selectedPaperContexts?: PaperContextRef[];
   fullTextPaperContexts?: PaperContextRef[];
   pinnedPaperContexts?: PaperContextRef[];

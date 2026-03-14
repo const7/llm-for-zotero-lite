@@ -582,6 +582,76 @@ export function setSelectedTextContextEntries(
   selectedTextCache.set(itemId, normalized);
 }
 
+function areSelectedTextContextsEquivalent(
+  left: SelectedTextContext,
+  right: SelectedTextContext,
+): boolean {
+  const leftPaperKey = left.paperContext
+    ? `${left.paperContext.itemId}:${left.paperContext.contextItemId}`
+    : "";
+  const rightPaperKey = right.paperContext
+    ? `${right.paperContext.itemId}:${right.paperContext.contextItemId}`
+    : "";
+  return (
+    left.text === right.text &&
+    left.source === right.source &&
+    leftPaperKey === rightPaperKey &&
+    (left.contextItemId || 0) === (right.contextItemId || 0) &&
+    (left.pageIndex ?? -1) === (right.pageIndex ?? -1) &&
+    (left.pageLabel || "") === (right.pageLabel || "")
+  );
+}
+
+export function syncSelectedTextContextForSource(
+  itemId: number,
+  text: string,
+  source: SelectedTextSource,
+  options?: {
+    paperContext?: PaperContextRef | null;
+    location?: SelectedTextPageLocation | null;
+  },
+): boolean {
+  const normalizedSource = normalizeSelectedTextSource(source);
+  const existingContexts = getSelectedTextContextEntries(itemId);
+  const retainedContexts = existingContexts.filter(
+    (entry) => entry.source !== normalizedSource,
+  );
+  const normalizedText = normalizeSelectedText(text || "");
+  if (!normalizedText) {
+    if (retainedContexts.length === existingContexts.length) {
+      return false;
+    }
+    setSelectedTextContextEntries(itemId, retainedContexts);
+    selectedTextPreviewExpandedCache.delete(itemId);
+    return true;
+  }
+
+  const nextContext = buildSelectedTextContext(
+    normalizedText,
+    normalizedSource,
+    options?.paperContext,
+    options?.location,
+  );
+  const existingContext = existingContexts.find(
+    (entry) => entry.source === normalizedSource,
+  );
+  if (
+    existingContext &&
+    retainedContexts.length === existingContexts.length - 1 &&
+    areSelectedTextContextsEquivalent(existingContext, nextContext)
+  ) {
+    return false;
+  }
+
+  const nextContexts =
+    normalizedSource === "note-edit"
+      ? [nextContext, ...retainedContexts]
+      : [...retainedContexts, nextContext];
+  setSelectedTextContextEntries(itemId, nextContexts);
+  selectedTextPreviewExpandedCache.delete(itemId);
+  return true;
+}
+
 export function appendSelectedTextContextForItem(
   itemId: number,
   text: string,
@@ -821,6 +891,9 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
     );
     const contextLabel =
       (() => {
+        if (selectedSource === "note-edit") {
+          return "Editing";
+        }
         const pageLabel = formatSelectedTextContextPageLabel(selectedContext);
         if (selectedSource === "pdf" && pageLabel) {
           if (isGlobalConversation) {
@@ -854,6 +927,10 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
       "llm-selected-context-source-model",
       selectedSource === "model",
     );
+    previewBox.classList.toggle(
+      "llm-selected-context-source-note-edit",
+      selectedSource === "note-edit",
+    );
     previewBox.classList.toggle("llm-selected-context-pinned", pinned);
     previewBox.dataset.pinned = pinned ? "true" : "false";
     previewBox.dataset.contextPinKey =
@@ -876,6 +953,10 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
       "llm-selected-context-source-model",
       selectedSource === "model",
     );
+    previewMeta.classList.toggle(
+      "llm-selected-context-source-note-edit",
+      selectedSource === "note-edit",
+    );
     previewMeta.textContent = contextLabel;
     const isCorrupted = isLikelyCorruptedSelectedText(selectedText);
     previewMeta.classList.toggle(
@@ -889,6 +970,10 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
       (selectedContext.pageIndex as number) >= 0;
     previewMeta.title = isJumpablePdfContext
       ? `Jump to ${pageLabel || "page"}`
+      : selectedSource === "note-edit"
+        ? isExpanded
+          ? "Collapse editing focus"
+          : "Expand editing focus"
       : isExpanded
         ? "Collapse text context"
         : "Expand text context";
@@ -906,15 +991,17 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
         ? `${Math.floor(selectedContext.contextItemId as number)}`
         : "";
 
-    const previewClear = ownerDoc.createElement("button");
-    previewClear.type = "button";
-    previewClear.className = "llm-remove-img-btn llm-selected-context-clear";
-    previewClear.dataset.contextIndex = `${index}`;
-    previewClear.textContent = "×";
-    previewClear.title = "Clear selected context";
-    previewClear.setAttribute("aria-label", "Clear selected context");
-
-    previewHeader.append(previewMeta, previewClear);
+    previewHeader.appendChild(previewMeta);
+    if (selectedSource !== "note-edit") {
+      const previewClear = ownerDoc.createElement("button");
+      previewClear.type = "button";
+      previewClear.className = "llm-remove-img-btn llm-selected-context-clear";
+      previewClear.dataset.contextIndex = `${index}`;
+      previewClear.textContent = "×";
+      previewClear.title = "Clear selected context";
+      previewClear.setAttribute("aria-label", "Clear selected context");
+      previewHeader.appendChild(previewClear);
+    }
 
     const previewExpanded = ownerDoc.createElement("div");
     previewExpanded.className =

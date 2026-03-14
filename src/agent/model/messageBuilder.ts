@@ -94,7 +94,16 @@ function buildUserMessage(request: AgentRuntimeRequest): AgentModelMessage {
   }
   if (Array.isArray(request.selectedTexts) && request.selectedTexts.length) {
     const selectedTextBlock = request.selectedTexts
-      .map((entry, index) => `Selected text ${index + 1}:\n"""\n${entry}\n"""`)
+      .map((entry, index) => {
+        const source = request.selectedTextSources?.[index];
+        const sourceLabel =
+          source === "model"
+            ? "model response"
+            : source === "note-edit"
+              ? "active note editing focus"
+              : "PDF reader";
+        return `Selected text ${index + 1} [source=${sourceLabel}]:\n"""\n${entry}\n"""`;
+      })
       .join("\n\n");
     contextLines.push(selectedTextBlock);
   }

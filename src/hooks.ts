@@ -4,6 +4,7 @@ import { PREFERENCES_PANE_ID } from "./modules/contextPanel/constants";
 import {
   registerReaderContextPanel,
   registerLLMStyles,
+  registerNoteEditingSelectionTracking,
   registerReaderSelectionTracking,
 } from "./modules/contextPanel";
 import { invalidatePaperSearchCache } from "./modules/contextPanel/paperSearch";
@@ -81,6 +82,7 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
   registerLLMStyles(win);
   registerReaderContextPanel();
   registerReaderSelectionTracking();
+  registerNoteEditingSelectionTracking(win);
 }
 
 function registerPrefsPane() {

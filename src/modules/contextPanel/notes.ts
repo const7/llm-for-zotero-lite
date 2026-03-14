@@ -279,6 +279,9 @@ function formatSelectedTextLabel(
   total: number,
 ): string {
   const icon = getSelectedTextSourceIcon(source);
+  if (source === "note-edit") {
+    return total === 1 ? `${icon} Editing focus` : `${icon} Editing focus (${index + 1})`;
+  }
   if (total === 1) return `${icon} Selected text`;
   return `${icon} Selected text (${index + 1})`;
 }
