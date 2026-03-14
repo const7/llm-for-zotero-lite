@@ -43,8 +43,11 @@ export type PaperContextRef = {
 
 /** A Zotero note (item note or standalone) selected as a reference context. */
 export type NoteContextRef = {
-  noteItemId: number;
+  libraryID: number;
+  noteItemKey: string;
+  noteItemId?: number;
   parentItemId?: number;
+  parentItemKey?: string;
   noteKind: "item" | "standalone";
   title: string;
 };

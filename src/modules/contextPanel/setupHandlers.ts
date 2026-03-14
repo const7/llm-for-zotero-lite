@@ -7116,8 +7116,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       undefined,
       undefined,
       {
+        libraryID: snapshot.libraryID,
+        noteItemKey: snapshot.noteItemKey || "",
         noteItemId: snapshot.noteId,
         parentItemId: snapshot.parentItemId,
+        parentItemKey: snapshot.parentItemKey,
         noteKind: snapshot.noteKind,
         title: snapshot.title || `Note ${snapshot.noteId}`,
       },
@@ -9630,7 +9633,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         e.preventDefault();
         e.stopPropagation();
         if (status) {
-          setStatus(status, "Note context is always pinned in note mode", "ready");
+          setStatus(
+            status,
+            "Live note preview is pinned while editing",
+            "ready",
+          );
         }
         return;
       }

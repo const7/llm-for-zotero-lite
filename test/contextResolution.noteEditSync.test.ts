@@ -63,6 +63,7 @@ describe("contextResolution note-edit sync", function () {
   it("refreshes note-backed text contexts from the current note snapshot", function () {
     const noteItem = {
       id: 501,
+      key: "ABCD1234",
       libraryID: 1,
       isNote: () => true,
       getNote: () => "<p>Updated note body</p>",
@@ -72,6 +73,8 @@ describe("contextResolution note-edit sync", function () {
       ...(originalZotero || {}),
       Items: {
         get: (id: number) => (id === 501 ? noteItem : null),
+        getByLibraryAndKey: (libraryID: number, key: string) =>
+          libraryID === 1 && key === "ABCD1234" ? noteItem : null,
       },
     };
 
@@ -80,7 +83,8 @@ describe("contextResolution note-edit sync", function () {
         text: "Stale note body",
         source: "note",
         noteContext: {
-          noteItemId: 501,
+          libraryID: 1,
+          noteItemKey: "ABCD1234",
           noteKind: "standalone",
           title: "Old title",
         },
@@ -93,8 +97,11 @@ describe("contextResolution note-edit sync", function () {
         text: "Updated note body",
         source: "note",
         noteContext: {
+          libraryID: 1,
+          noteItemKey: "ABCD1234",
           noteItemId: 501,
           parentItemId: undefined,
+          parentItemKey: undefined,
           noteKind: "standalone",
           title: "Context note",
         },

@@ -5,6 +5,7 @@ import {
   setStatus,
 } from "./textUtils";
 import {
+  buildNoteContextIdentityKey,
   normalizeNoteContextRef,
   normalizePaperContextRefs,
   normalizePositiveInt,
@@ -50,7 +51,7 @@ type SelectedTextPageLocation = {
 };
 
 type NoteChipSnapshot = {
-  noteId: number;
+  noteId?: number;
   title: string;
   text: string;
 };
@@ -535,6 +536,32 @@ export function setSelectedTextContexts(itemId: number, texts: string[]): void {
   setSelectedTextContextEntries(itemId, normalized);
 }
 
+function resolveNoteItemFromContext(
+  noteContext?: NoteContextRef | null,
+): Zotero.Item | null {
+  if (!noteContext) return null;
+  const noteItemId = normalizePositiveInt(noteContext.noteItemId);
+  if (noteItemId) {
+    const noteItem = Zotero.Items.get(noteItemId) || null;
+    if (noteItem) return noteItem;
+  }
+  const libraryID = normalizePositiveInt(noteContext.libraryID);
+  const noteItemKey =
+    typeof noteContext.noteItemKey === "string" && noteContext.noteItemKey.trim()
+      ? noteContext.noteItemKey.trim().toUpperCase()
+      : "";
+  const getByLibraryAndKey = (Zotero.Items as unknown as {
+    getByLibraryAndKey?: (
+      libraryID: number,
+      key: string,
+    ) => Zotero.Item | null | undefined;
+  }).getByLibraryAndKey;
+  if (libraryID && noteItemKey && typeof getByLibraryAndKey === "function") {
+    return getByLibraryAndKey(libraryID, noteItemKey) || null;
+  }
+  return null;
+}
+
 function syncNoteBackedSelectedTextContexts(
   contexts: SelectedTextContext[],
 ): {
@@ -543,25 +570,30 @@ function syncNoteBackedSelectedTextContexts(
 } {
   let changed = false;
   const nextContexts = contexts.map((entry) => {
-    if (entry.source !== "note" || !entry.noteContext?.noteItemId) {
+    if (entry.source !== "note" || !entry.noteContext) {
       return entry;
     }
-    const noteItem =
-      Zotero.Items.get(Math.floor(entry.noteContext.noteItemId)) || null;
+    const noteItem = resolveNoteItemFromContext(entry.noteContext);
     const snapshot = readNoteSnapshot(noteItem);
     if (!snapshot?.text) {
       return entry;
     }
     const nextNoteContext: NoteContextRef = {
+      libraryID: snapshot.libraryID,
+      noteItemKey: snapshot.noteItemKey || entry.noteContext.noteItemKey,
       noteItemId: snapshot.noteId,
       parentItemId: snapshot.parentItemId,
+      parentItemKey: snapshot.parentItemKey || entry.noteContext.parentItemKey,
       noteKind: snapshot.noteKind,
       title: snapshot.title || entry.noteContext.title || `Note ${snapshot.noteId}`,
     };
     if (
       entry.text === snapshot.text &&
+      buildNoteContextIdentityKey(entry.noteContext) ===
+        buildNoteContextIdentityKey(nextNoteContext) &&
       entry.noteContext.noteItemId === nextNoteContext.noteItemId &&
       entry.noteContext.parentItemId === nextNoteContext.parentItemId &&
+      entry.noteContext.parentItemKey === nextNoteContext.parentItemKey &&
       entry.noteContext.noteKind === nextNoteContext.noteKind &&
       entry.noteContext.title === nextNoteContext.title
     ) {
@@ -670,7 +702,8 @@ function areSelectedTextContextsEquivalent(
     left.text === right.text &&
     left.source === right.source &&
     leftPaperKey === rightPaperKey &&
-    (left.noteContext?.noteItemId || 0) === (right.noteContext?.noteItemId || 0) &&
+    buildNoteContextIdentityKey(left.noteContext) ===
+      buildNoteContextIdentityKey(right.noteContext) &&
     (left.contextItemId || 0) === (right.contextItemId || 0) &&
     (left.pageIndex ?? -1) === (right.pageIndex ?? -1) &&
     (left.pageLabel || "") === (right.pageLabel || "")
@@ -745,9 +778,7 @@ export function appendSelectedTextContextForItem(
     const paperKey = entry.paperContext
       ? `${entry.paperContext.itemId}:${entry.paperContext.contextItemId}`
       : "-";
-    const noteKey = entry.noteContext
-      ? `${entry.noteContext.noteItemId}:${entry.noteContext.noteKind}`
-      : "-";
+    const noteKey = buildNoteContextIdentityKey(entry.noteContext) || "-";
     const contextItemId = Number.isFinite(entry.contextItemId)
       ? Math.floor(entry.contextItemId as number)
       : 0;
@@ -869,19 +900,35 @@ export function addSelectedTextContext(
 }
 
 function resolveNoteChipSnapshot(
-  noteId: number,
+  note: number | NoteContextRef,
   fallback?: {
     title?: string;
     text?: string;
   },
 ): NoteChipSnapshot | null {
-  if (!Number.isFinite(noteId) || noteId <= 0) return null;
-  const normalizedNoteId = Math.floor(noteId);
-  const noteItem = Zotero.Items.get(normalizedNoteId) || null;
+  const normalizedNoteId =
+    typeof note === "number" && Number.isFinite(note) && note > 0
+      ? Math.floor(note)
+      : typeof note === "object"
+        ? normalizePositiveInt(note.noteItemId) || undefined
+        : undefined;
+  const noteItem =
+    typeof note === "object"
+      ? resolveNoteItemFromContext(note)
+      : normalizedNoteId
+        ? Zotero.Items.get(normalizedNoteId) || null
+        : null;
   const snapshot = readNoteSnapshot(noteItem);
+  const fallbackTitle =
+    fallback?.title ||
+    (typeof note === "object" ? note.title : "") ||
+    (normalizedNoteId ? `Note ${normalizedNoteId}` : "Note");
+  if (!snapshot && !normalizedNoteId && !fallback?.text && !fallbackTitle) {
+    return null;
+  }
   return {
     noteId: snapshot?.noteId || normalizedNoteId,
-    title: snapshot?.title || fallback?.title || `Note ${normalizedNoteId}`,
+    title: snapshot?.title || fallbackTitle,
     text: snapshot?.text || fallback?.text || "",
   };
 }
@@ -891,6 +938,9 @@ export function createNoteContextChip(
   snapshot: NoteChipSnapshot,
   options: CreateNoteChipOptions,
 ): HTMLDivElement {
+  const noteLabelText = snapshot.noteId
+    ? `Note ${snapshot.noteId}`
+    : snapshot.title || "Note";
   const noteChip = ownerDoc.createElement("div");
   noteChip.className = "llm-selected-context llm-note-context-chip";
   if (options.pinned) {
@@ -898,7 +948,7 @@ export function createNoteContextChip(
   }
   noteChip.dataset.noteChip = "true";
   noteChip.dataset.noteChipKind = options.noteChipKind;
-  noteChip.dataset.noteId = `${snapshot.noteId}`;
+  noteChip.dataset.noteId = snapshot.noteId ? `${snapshot.noteId}` : "";
   noteChip.dataset.contextOwnerId = `${options.ownerId}`;
   noteChip.dataset.pinned = options.pinned ? "true" : "false";
   noteChip.classList.toggle("expanded", options.expanded);
@@ -911,7 +961,7 @@ export function createNoteContextChip(
   noteMeta.type = "button";
   noteMeta.className =
     "llm-image-preview-meta llm-selected-context-meta llm-note-context-meta";
-  noteMeta.setAttribute("aria-label", `Note context: Note ${snapshot.noteId}`);
+  noteMeta.setAttribute("aria-label", `Note context: ${noteLabelText}`);
   noteMeta.setAttribute("aria-expanded", options.expanded ? "true" : "false");
   if (options.removableIndex !== undefined) {
     noteMeta.dataset.contextIndex = `${options.removableIndex}`;
@@ -922,7 +972,7 @@ export function createNoteContextChip(
   noteIcon.textContent = "📝";
   const noteLabel = ownerDoc.createElement("span");
   noteLabel.className = "llm-note-context-label";
-  noteLabel.textContent = `Note ${snapshot.noteId}`;
+  noteLabel.textContent = noteLabelText;
   noteMeta.append(noteIcon, noteLabel);
   noteHeader.appendChild(noteMeta);
 
@@ -932,8 +982,8 @@ export function createNoteContextChip(
     noteClear.className = "llm-remove-img-btn llm-selected-context-clear";
     noteClear.dataset.contextIndex = `${options.removableIndex}`;
     noteClear.textContent = "×";
-    noteClear.title = `Clear Note ${snapshot.noteId}`;
-    noteClear.setAttribute("aria-label", `Clear Note ${snapshot.noteId}`);
+    noteClear.title = `Clear ${noteLabelText}`;
+    noteClear.setAttribute("aria-label", `Clear ${noteLabelText}`);
     noteHeader.appendChild(noteClear);
   }
 
@@ -955,18 +1005,23 @@ export function refreshNoteChipPreview(noteChip: Element): void {
   const noteId = Number((noteChip as HTMLDivElement).dataset.noteId || 0);
   const snapshot = resolveNoteChipSnapshot(noteId);
   if (!snapshot) return;
-  (noteChip as HTMLDivElement).dataset.noteId = `${snapshot.noteId}`;
+  (noteChip as HTMLDivElement).dataset.noteId = snapshot.noteId
+    ? `${snapshot.noteId}`
+    : "";
   const noteMeta = noteChip.querySelector(
     ".llm-note-context-meta",
   ) as HTMLButtonElement | null;
   if (noteMeta) {
     noteMeta.removeAttribute("title");
-    noteMeta.setAttribute("aria-label", `Note context: Note ${snapshot.noteId}`);
+    const noteLabelText = snapshot.noteId
+      ? `Note ${snapshot.noteId}`
+      : snapshot.title || "Note";
+    noteMeta.setAttribute("aria-label", `Note context: ${noteLabelText}`);
     const noteLabel = noteMeta.querySelector(
       ".llm-note-context-label",
     ) as HTMLSpanElement | null;
     if (noteLabel) {
-      noteLabel.textContent = `Note ${snapshot.noteId}`;
+      noteLabel.textContent = noteLabelText;
     }
   }
   const bodyEl = noteChip.querySelector(
@@ -988,8 +1043,11 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
 
   const selectedContexts = getSelectedTextContextEntries(itemId);
   const panelRoot = body.querySelector("#llm-main") as HTMLDivElement | null;
+  // Show the active-note chip whenever the panel is in note-editing mode,
+  // regardless of whether the user has selected any text in the editor.
+  const showActiveNoteChip = Boolean(panelRoot?.dataset.noteId);
   const activeNoteChipData = (() => {
-    if (!panelRoot) return null;
+    if (!panelRoot || !showActiveNoteChip) return null;
     const noteId = Number(panelRoot.dataset.noteId || 0);
     const snapshot = resolveNoteChipSnapshot(noteId, {
       title: panelRoot.dataset.noteTitle || "",
@@ -1005,6 +1063,9 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
       text: snapshot.text,
     };
   })();
+  if (!showActiveNoteChip) {
+    selectedNotePreviewExpandedCache.delete(itemId);
+  }
   prunePinnedSelectedTextKeys(pinnedSelectedTextKeys, itemId, selectedContexts);
   if (!selectedContexts.length && !activeNoteChipData) {
     previewList.style.display = "none";
@@ -1049,14 +1110,11 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
       itemId,
       selectedContext,
     );
-    if (selectedSource === "note" && selectedContext.noteContext?.noteItemId) {
-      const noteSnapshot = resolveNoteChipSnapshot(
-        selectedContext.noteContext.noteItemId,
-        {
-          title: selectedContext.noteContext.title,
-          text: selectedContext.text,
-        },
-      );
+    if (selectedSource === "note" && selectedContext.noteContext) {
+      const noteSnapshot = resolveNoteChipSnapshot(selectedContext.noteContext, {
+        title: selectedContext.noteContext.title,
+        text: selectedContext.text,
+      });
       if (noteSnapshot) {
         previewList.appendChild(
           createNoteContextChip(ownerDoc, noteSnapshot, {

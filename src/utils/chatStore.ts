@@ -1,4 +1,5 @@
 import type {
+  NoteContextRef,
   SelectedTextSource,
   PaperContextRef,
   GlobalConversationSummary,
@@ -9,6 +10,7 @@ import {
   PAPER_CONVERSATION_KEY_BASE,
 } from "../modules/contextPanel/constants";
 import {
+  normalizeSelectedTextNoteContexts,
   normalizeSelectedTextPaperContexts,
   normalizeSelectedTextSource,
   normalizePaperContextRefs,
@@ -24,6 +26,7 @@ export type StoredChatMessage = {
   selectedTexts?: string[];
   selectedTextSources?: SelectedTextSource[];
   selectedTextPaperContexts?: (PaperContextRef | undefined)[];
+  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
   paperContexts?: PaperContextRef[];
   fullTextPaperContexts?: PaperContextRef[];
   screenshotImages?: string[];
@@ -166,6 +169,7 @@ export async function initChatStore(): Promise<void> {
         selected_texts_json TEXT,
         selected_text_sources_json TEXT,
         selected_text_paper_contexts_json TEXT,
+        selected_text_note_contexts_json TEXT,
         paper_contexts_json TEXT,
         full_text_paper_contexts_json TEXT,
         screenshot_images TEXT,
@@ -262,6 +266,17 @@ export async function initChatStore(): Promise<void> {
       await Zotero.DB.queryAsync(
         `ALTER TABLE ${CHAT_MESSAGES_TABLE}
          ADD COLUMN selected_text_paper_contexts_json TEXT`,
+      );
+    }
+    const hasSelectedTextNoteContextsJsonColumn = Boolean(
+      columns?.some(
+        (column) => column?.name === "selected_text_note_contexts_json",
+      ),
+    );
+    if (!hasSelectedTextNoteContextsJsonColumn) {
+      await Zotero.DB.queryAsync(
+        `ALTER TABLE ${CHAT_MESSAGES_TABLE}
+         ADD COLUMN selected_text_note_contexts_json TEXT`,
       );
     }
     const hasPaperContextsJsonColumn = Boolean(
@@ -375,6 +390,7 @@ export async function loadConversation(
             selected_texts_json AS selectedTextsJson,
             selected_text_sources_json AS selectedTextSourcesJson,
             selected_text_paper_contexts_json AS selectedTextPaperContextsJson,
+            selected_text_note_contexts_json AS selectedTextNoteContextsJson,
             paper_contexts_json AS paperContextsJson,
             full_text_paper_contexts_json AS fullTextPaperContextsJson,
             screenshot_images AS screenshotImages,
@@ -400,6 +416,7 @@ export async function loadConversation(
         selectedTextsJson?: unknown;
         selectedTextSourcesJson?: unknown;
         selectedTextPaperContextsJson?: unknown;
+        selectedTextNoteContextsJson?: unknown;
         paperContextsJson?: unknown;
         fullTextPaperContextsJson?: unknown;
         screenshotImages?: unknown;
@@ -479,6 +496,24 @@ export async function loadConversation(
         }
       } catch (_err) {
         selectedTextPaperContexts = undefined;
+      }
+    }
+    let selectedTextNoteContexts: (NoteContextRef | undefined)[] | undefined;
+    if (
+      typeof row.selectedTextNoteContextsJson === "string" &&
+      row.selectedTextNoteContextsJson
+    ) {
+      try {
+        const parsed = JSON.parse(row.selectedTextNoteContextsJson) as unknown;
+        const normalized = normalizeSelectedTextNoteContexts(
+          parsed,
+          normalizedTexts.length,
+        );
+        if (normalized.some((entry) => Boolean(entry))) {
+          selectedTextNoteContexts = normalized;
+        }
+      } catch (_err) {
+        selectedTextNoteContexts = undefined;
       }
     }
     let paperContexts: PaperContextRef[] | undefined;
@@ -628,6 +663,7 @@ export async function loadConversation(
         );
       })(),
       selectedTextPaperContexts,
+      selectedTextNoteContexts,
       paperContexts,
       fullTextPaperContexts,
       screenshotImages,
@@ -676,6 +712,10 @@ export async function appendMessage(
     message.selectedTextPaperContexts,
     selectedTexts.length,
   );
+  const selectedTextNoteContexts = normalizeSelectedTextNoteContexts(
+    message.selectedTextNoteContexts,
+    selectedTexts.length,
+  );
   const paperContexts = normalizePaperContextRefs(message.paperContexts);
   const fullTextPaperContexts = normalizePaperContextRefs(
     message.fullTextPaperContexts,
@@ -703,8 +743,8 @@ export async function appendMessage(
     : [];
   await Zotero.DB.queryAsync(
     `INSERT INTO ${CHAT_MESSAGES_TABLE}
-      (conversation_key, role, text, timestamp, run_mode, agent_run_id, selected_text, selected_texts_json, selected_text_sources_json, selected_text_paper_contexts_json, paper_contexts_json, full_text_paper_contexts_json, screenshot_images, attachments_json, model_name, model_entry_id, model_provider_label, reasoning_summary, reasoning_details)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (conversation_key, role, text, timestamp, run_mode, agent_run_id, selected_text, selected_texts_json, selected_text_sources_json, selected_text_paper_contexts_json, selected_text_note_contexts_json, paper_contexts_json, full_text_paper_contexts_json, screenshot_images, attachments_json, model_name, model_entry_id, model_provider_label, reasoning_summary, reasoning_details)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       normalizedKey,
       message.role,
@@ -717,6 +757,9 @@ export async function appendMessage(
       selectedTextSources.length ? JSON.stringify(selectedTextSources) : null,
       selectedTextPaperContexts.some((entry) => Boolean(entry))
         ? JSON.stringify(selectedTextPaperContexts)
+        : null,
+      selectedTextNoteContexts.some((entry) => Boolean(entry))
+        ? JSON.stringify(selectedTextNoteContexts)
         : null,
       paperContexts.length ? JSON.stringify(paperContexts) : null,
       fullTextPaperContexts.length
@@ -745,6 +788,7 @@ export async function updateLatestUserMessage(
     | "selectedTexts"
     | "selectedTextSources"
     | "selectedTextPaperContexts"
+    | "selectedTextNoteContexts"
     | "paperContexts"
     | "fullTextPaperContexts"
     | "screenshotImages"
@@ -768,6 +812,10 @@ export async function updateLatestUserMessage(
   );
   const selectedTextPaperContexts = normalizeSelectedTextPaperContexts(
     message.selectedTextPaperContexts,
+    selectedTexts.length,
+  );
+  const selectedTextNoteContexts = normalizeSelectedTextNoteContexts(
+    message.selectedTextNoteContexts,
     selectedTexts.length,
   );
   const paperContexts = normalizePaperContextRefs(message.paperContexts);
@@ -806,6 +854,7 @@ export async function updateLatestUserMessage(
          selected_texts_json = ?,
          selected_text_sources_json = ?,
          selected_text_paper_contexts_json = ?,
+         selected_text_note_contexts_json = ?,
          paper_contexts_json = ?,
          full_text_paper_contexts_json = ?,
          screenshot_images = ?,
@@ -827,6 +876,9 @@ export async function updateLatestUserMessage(
       selectedTextSources.length ? JSON.stringify(selectedTextSources) : null,
       selectedTextPaperContexts.some((entry) => Boolean(entry))
         ? JSON.stringify(selectedTextPaperContexts)
+        : null,
+      selectedTextNoteContexts.some((entry) => Boolean(entry))
+        ? JSON.stringify(selectedTextNoteContexts)
         : null,
       paperContexts.length ? JSON.stringify(paperContexts) : null,
       fullTextPaperContexts.length
