@@ -55,6 +55,23 @@ function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function buildPinnedNoteKey(
+  noteContext: SelectedTextContext["noteContext"],
+): string {
+  if (!noteContext) return "-";
+  const libraryID = Number.isFinite(noteContext.libraryID)
+    ? Math.max(0, Math.floor(noteContext.libraryID))
+    : 0;
+  const noteItemKey = normalizeText(noteContext.noteItemKey).toUpperCase();
+  if (libraryID && noteItemKey) {
+    return `${libraryID}:${noteItemKey}`;
+  }
+  const noteItemId = Number.isFinite(noteContext.noteItemId)
+    ? Math.max(0, Math.floor(noteContext.noteItemId as number))
+    : 0;
+  return noteItemId ? `legacy:${noteItemId}:${noteContext.noteKind}` : "-";
+}
+
 export function buildPinnedSelectedTextKey(
   context: SelectedTextContext,
 ): string {
@@ -64,9 +81,7 @@ export function buildPinnedSelectedTextKey(
   const paperKey = paperContext
     ? `${Math.floor(paperContext.itemId)}:${Math.floor(paperContext.contextItemId)}`
     : "-";
-  const noteKey = context.noteContext
-    ? `${Math.floor(context.noteContext.noteItemId)}:${context.noteContext.noteKind}`
-    : "-";
+  const noteKey = buildPinnedNoteKey(context.noteContext);
   const contextItemId = Number.isFinite(context.contextItemId)
     ? Math.max(0, Math.floor(context.contextItemId!))
     : 0;

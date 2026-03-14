@@ -11,6 +11,56 @@ function normalizeText(value: unknown, sanitize?: TextSanitizer): string {
   return (sanitize ? sanitize(raw) : raw).trim();
 }
 
+function normalizeLibraryItemKey(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toUpperCase();
+  return normalized || undefined;
+}
+
+function resolveNoteItem(
+  noteItemId?: number | null,
+  libraryID?: number | null,
+  noteItemKey?: string | null,
+): Zotero.Item | null {
+  const items = (globalThis as { Zotero?: { Items?: Record<string, unknown> } })
+    .Zotero?.Items as
+    | {
+        get?: (id: number) => Zotero.Item | null | undefined;
+        getByLibraryAndKey?: (
+          libraryID: number,
+          key: string,
+        ) => Zotero.Item | null | undefined;
+      }
+    | undefined;
+  if (noteItemId && typeof items?.get === "function") {
+    const fromId = items.get(noteItemId) || null;
+    if (fromId) return fromId;
+  }
+  if (
+    libraryID &&
+    noteItemKey &&
+    typeof items?.getByLibraryAndKey === "function"
+  ) {
+    return items.getByLibraryAndKey(libraryID, noteItemKey) || null;
+  }
+  return null;
+}
+
+export function buildNoteContextIdentityKey(
+  noteContext: Partial<NoteContextRef> | null | undefined,
+): string {
+  const libraryID = normalizePositiveInt(noteContext?.libraryID);
+  const noteItemKey = normalizeLibraryItemKey(noteContext?.noteItemKey);
+  if (libraryID && noteItemKey) {
+    return `${libraryID}:${noteItemKey}`;
+  }
+  const noteItemId = normalizePositiveInt(noteContext?.noteItemId);
+  if (!noteItemId) return "";
+  const noteKind =
+    noteContext?.noteKind === "standalone" ? "standalone" : "item";
+  return `legacy:${noteItemId}:${noteKind}`;
+}
+
 export function normalizePositiveInt(value: unknown): number | null {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return null;
@@ -46,18 +96,57 @@ export function normalizeNoteContextRef(
 ): NoteContextRef | undefined {
   if (!value || typeof value !== "object") return undefined;
   const typed = value as Record<string, unknown>;
-  const noteItemId = normalizePositiveInt(typed.noteItemId);
-  if (!noteItemId) return undefined;
+  const noteItemId = normalizePositiveInt(typed.noteItemId) || undefined;
+  let libraryID = normalizePositiveInt(typed.libraryID) || undefined;
+  let noteItemKey = normalizeLibraryItemKey(typed.noteItemKey);
   const sanitize = options?.sanitizeText;
   const title = normalizeText(typed.title, sanitize);
+  let resolvedTitle = title;
+  let parentItemId = normalizePositiveInt(typed.parentItemId) || undefined;
+  let parentItemKey = normalizeLibraryItemKey(typed.parentItemKey);
+  const resolvedNoteItem = resolveNoteItem(noteItemId, libraryID, noteItemKey);
+  if (!libraryID) {
+    libraryID =
+      normalizePositiveInt((resolvedNoteItem as any)?.libraryID) || undefined;
+  }
+  if (!noteItemKey) {
+    noteItemKey = normalizeLibraryItemKey((resolvedNoteItem as any)?.key);
+  }
+  if (!parentItemId) {
+    parentItemId =
+      normalizePositiveInt((resolvedNoteItem as any)?.parentID) || undefined;
+  }
+  if (!parentItemKey && parentItemId) {
+    const parentItem =
+      (globalThis as {
+        Zotero?: { Items?: { get?: (id: number) => Zotero.Item | null | undefined } };
+      }).Zotero?.Items?.get?.(parentItemId) || null;
+    parentItemKey = normalizeLibraryItemKey((parentItem as any)?.key);
+  }
+  if (!resolvedTitle) {
+    resolvedTitle =
+      normalizeText((resolvedNoteItem as any)?.getDisplayTitle?.(), sanitize) ||
+      normalizeText((resolvedNoteItem as any)?.getField?.("title"), sanitize);
+  }
+  if (!libraryID || !noteItemKey) return undefined;
   const noteKind =
-    typed.noteKind === "standalone" ? "standalone" : "item";
-  const parentItemId = normalizePositiveInt(typed.parentItemId) || undefined;
+    typed.noteKind === "standalone"
+      ? "standalone"
+      : typed.noteKind === "item"
+        ? "item"
+        : parentItemId || parentItemKey
+          ? "item"
+          : "standalone";
   return {
+    libraryID,
+    noteItemKey,
     noteItemId,
     parentItemId,
+    parentItemKey,
     noteKind,
-    title: title || `Note ${noteItemId}`,
+    title:
+      resolvedTitle ||
+      (noteItemId ? `Note ${noteItemId}` : `Note ${noteItemKey}`),
   };
 }
 

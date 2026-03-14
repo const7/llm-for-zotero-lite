@@ -1,8 +1,10 @@
 import { assert } from "chai";
 import {
+  normalizeNoteContextRef,
   normalizeAttachmentContentHash,
   normalizePaperContextRefs,
   normalizePositiveInt,
+  normalizeSelectedTextNoteContexts,
   normalizeSelectedTextPaperContexts,
   normalizeSelectedTextSource,
   normalizeSelectedTextSources,
@@ -119,6 +121,69 @@ describe("contextPanel normalizers", function () {
       citationKey: undefined,
       firstCreator: undefined,
       year: "2020-11-12",
+    });
+    assert.isUndefined(rows[3]);
+  });
+
+  it("normalizeNoteContextRef should preserve stable library identity", function () {
+    const row = normalizeNoteContextRef({
+      libraryID: 3,
+      noteItemKey: " abcd1234 ",
+      noteItemId: 88,
+      parentItemKey: " efgh5678 ",
+      noteKind: "item",
+      title: " Geometry notes ",
+    });
+
+    assert.deepEqual(row, {
+      libraryID: 3,
+      noteItemKey: "ABCD1234",
+      noteItemId: 88,
+      parentItemId: undefined,
+      parentItemKey: "EFGH5678",
+      noteKind: "item",
+      title: "Geometry notes",
+    });
+  });
+
+  it("normalizeSelectedTextNoteContexts should preserve index alignment", function () {
+    const rows = normalizeSelectedTextNoteContexts(
+      [
+        {
+          libraryID: 1,
+          noteItemKey: "AAAA1111",
+          noteKind: "standalone",
+          title: "Note A",
+        },
+        { noteItemId: "bad" },
+        {
+          libraryID: 2,
+          noteItemKey: "BBBB2222",
+          noteKind: "item",
+          title: "Note B",
+        },
+      ],
+      4,
+    );
+    assert.lengthOf(rows, 4);
+    assert.deepEqual(rows[0], {
+      libraryID: 1,
+      noteItemKey: "AAAA1111",
+      noteItemId: undefined,
+      parentItemId: undefined,
+      parentItemKey: undefined,
+      noteKind: "standalone",
+      title: "Note A",
+    });
+    assert.isUndefined(rows[1]);
+    assert.deepEqual(rows[2], {
+      libraryID: 2,
+      noteItemKey: "BBBB2222",
+      noteItemId: undefined,
+      parentItemId: undefined,
+      parentItemKey: undefined,
+      noteKind: "item",
+      title: "Note B",
     });
     assert.isUndefined(rows[3]);
   });

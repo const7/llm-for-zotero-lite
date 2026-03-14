@@ -328,6 +328,13 @@ function resolveAutoLoadedPaperContextForItem(
 function buildActiveNoteContextBlock(
   item: Zotero.Item | null | undefined,
 ): string {
+  // Inject whenever a note session is active — regardless of whether the user
+  // has selected any text in the editor. The note-edit selection entries are
+  // still shown as individual "Editing" snippets; this block always provides
+  // the full note content as base context.
+  if (!resolveActiveNoteSession(item)) {
+    return "";
+  }
   const snapshot = readNoteSnapshot(item);
   if (!snapshot || !snapshot.text.trim()) {
     return snapshot
@@ -1199,6 +1206,7 @@ async function buildContextPlanForRequest(params: {
   item: Zotero.Item;
   question: string;
   images?: string[];
+  selectedTextSources?: SelectedTextSource[];
   paperContexts: PaperContextRef[];
   fullTextPaperContexts: PaperContextRef[];
   recentPaperContexts: PaperContextRef[];
@@ -1262,7 +1270,9 @@ async function buildContextPlanForRequest(params: {
     contextBudgetTokens: plan.contextBudget.contextBudgetTokens,
     usedContextTokens: plan.usedContextTokens,
   });
-  const noteContext = buildActiveNoteContextBlock(params.item).trim();
+  const noteContext = buildActiveNoteContextBlock(
+    params.item,
+  ).trim();
   const planContext = sanitizeText(plan.contextText || "").trim();
   const combinedContext = [noteContext, planContext].filter(Boolean).join("\n\n");
   return {
@@ -1976,6 +1986,7 @@ export async function retryLatestAssistantResponse(
       item,
       question,
       images: screenshotImages,
+      selectedTextSources: retryPair.userMessage.selectedTextSources,
       paperContexts,
       fullTextPaperContexts,
       recentPaperContexts,
@@ -2739,6 +2750,7 @@ export async function sendQuestion(
       item,
       question,
       images,
+      selectedTextSources: selectedTextSourcesForMessage,
       paperContexts: paperContextsForMessage,
       fullTextPaperContexts: fullTextPaperContextsForMessage,
       recentPaperContexts,
