@@ -1,4 +1,8 @@
-import type { PaperContextRef, SelectedTextSource } from "./types";
+import type {
+  NoteContextRef,
+  PaperContextRef,
+  SelectedTextSource,
+} from "./types";
 
 type TextSanitizer = (value: string) => string;
 
@@ -16,6 +20,7 @@ export function normalizePositiveInt(value: unknown): number | null {
 
 export function normalizeSelectedTextSource(value: unknown): SelectedTextSource {
   if (value === "model") return "model";
+  if (value === "note") return "note";
   if (value === "note-edit") return "note-edit";
   return "pdf";
 }
@@ -29,6 +34,45 @@ export function normalizeSelectedTextSources(
   const out: SelectedTextSource[] = [];
   for (let index = 0; index < count; index++) {
     out.push(normalizeSelectedTextSource(raw[index]));
+  }
+  return out;
+}
+
+export function normalizeNoteContextRef(
+  value: unknown,
+  options?: {
+    sanitizeText?: TextSanitizer;
+  },
+): NoteContextRef | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const typed = value as Record<string, unknown>;
+  const noteItemId = normalizePositiveInt(typed.noteItemId);
+  if (!noteItemId) return undefined;
+  const sanitize = options?.sanitizeText;
+  const title = normalizeText(typed.title, sanitize);
+  const noteKind =
+    typed.noteKind === "standalone" ? "standalone" : "item";
+  const parentItemId = normalizePositiveInt(typed.parentItemId) || undefined;
+  return {
+    noteItemId,
+    parentItemId,
+    noteKind,
+    title: title || `Note ${noteItemId}`,
+  };
+}
+
+export function normalizeSelectedTextNoteContexts(
+  value: unknown,
+  count: number,
+  options?: {
+    sanitizeText?: TextSanitizer;
+  },
+): (NoteContextRef | undefined)[] {
+  if (count <= 0) return [];
+  const raw = Array.isArray(value) ? value : [];
+  const out: (NoteContextRef | undefined)[] = [];
+  for (let index = 0; index < count; index++) {
+    out.push(normalizeNoteContextRef(raw[index], options));
   }
   return out;
 }

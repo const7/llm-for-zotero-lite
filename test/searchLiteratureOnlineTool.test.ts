@@ -82,6 +82,65 @@ describe("search_literature_online tool", function () {
     assert.lengthOf((result as { results: unknown[] }).results, 2);
   });
 
+  it("resolves metadata lookups from the current Zotero item when only item context is provided", async function () {
+    (globalThis as typeof globalThis & { fetch?: typeof fetch }).fetch = (async (
+      url: string | URL | Request,
+    ) => {
+      const href = String(url);
+      if (href.includes("api.crossref.org/works/10.1000%2Fexample")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            message: {
+              DOI: "10.1000/example",
+              title: ["Example Title"],
+              author: [{ given: "Alice", family: "Example" }],
+              "container-title": ["Journal"],
+              URL: "https://doi.org/10.1000/example",
+            },
+          }),
+        } as Response;
+      }
+      if (href.includes("api.semanticscholar.org/graph/v1/paper/DOI:10.1000%2Fexample")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            title: "Example Title",
+            authors: [{ name: "Alice Example" }],
+            year: 2024,
+            abstract: "Abstract",
+            venue: "Journal",
+            citationCount: 12,
+            externalIds: { DOI: "10.1000/example" },
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    }) as typeof fetch;
+
+    const item = { id: 7 } as any;
+    const tool = createSearchLiteratureOnlineTool({
+      resolveMetadataItem: () => item,
+      getEditableArticleMetadata: () =>
+        ({
+          title: "Existing Title",
+          fields: { DOI: "10.1000/example" },
+        }) as any,
+    } as never);
+    const validated = tool.validate({
+      mode: "metadata",
+      itemId: 7,
+    });
+    assert.isTrue(validated.ok);
+    if (!validated.ok) return;
+
+    const result = await tool.execute(validated.value, baseContext);
+    assert.equal((result as { mode: string }).mode, "metadata");
+    assert.lengthOf((result as { results: unknown[] }).results, 2);
+  });
+
   it("supports live search mode through the unified online tool", async function () {
     (globalThis as typeof globalThis & { fetch?: typeof fetch }).fetch = (async (
       url: string | URL | Request,

@@ -47,9 +47,9 @@ describe("reviewCards note drafts", function () {
     assert.exists(action);
     assert.deepEqual(
       action?.fields.map((field) => field.type),
-      ["review_table", "diff_preview", "textarea"],
+      ["review_table", "select", "diff_preview", "textarea"],
     );
-    const diffField = action?.fields[1] as Extract<
+    const diffField = action?.fields[2] as Extract<
       NonNullable<typeof action>["fields"][number],
       { type: "diff_preview" }
     >;
@@ -130,5 +130,67 @@ describe("reviewCards note drafts", function () {
     ).operations;
     assert.equal(operations?.[0]?.type, "save_note");
     assert.equal(operations?.[0]?.content, "# Summary\n\n**Key point**");
+  });
+
+  it("builds a metadata update mutation directly from the selected metadata source", function () {
+    const result: AgentToolResult = {
+      callId: "call-1",
+      name: "search_literature_online",
+      ok: true,
+      content: {
+        mode: "metadata",
+        results: [
+          {
+            source: "Crossref",
+            title: "Wrong Paper",
+            authors: ["Other Author"],
+            year: 2024,
+            doi: "10.1000/wrong",
+          },
+          {
+            source: "Semantic Scholar",
+            title: "Climer metadata",
+            authors: ["Alice Example", "Bob Example"],
+            year: 2025,
+            doi: "10.1000/example",
+            abstract: "Useful abstract",
+            venue: "Journal of Tests",
+            url: "https://doi.org/10.1000/example",
+          },
+        ],
+      },
+    };
+
+    const next = resolveSearchLiteratureReview(
+      { itemId: 55, doi: "10.1000/example" },
+      result,
+      {
+        approved: true,
+        actionId: "review_changes",
+        data: {
+          selectedMetadataResult: "metadata-2",
+        },
+      },
+      baseContext,
+    );
+
+    assert.equal(next.kind, "invoke_tool");
+    if (next.kind !== "invoke_tool") return;
+    assert.equal(next.call.name, "mutate_library");
+    const operations = (
+      next.call.arguments as {
+        operations?: Array<{
+          type?: string;
+          itemId?: number;
+          metadata?: Record<string, unknown>;
+        }>;
+      }
+    ).operations;
+    assert.equal(operations?.[0]?.type, "update_metadata");
+    assert.equal(operations?.[0]?.itemId, 55);
+    assert.equal(operations?.[0]?.metadata?.title, "Climer metadata");
+    assert.equal(operations?.[0]?.metadata?.DOI, "10.1000/example");
+    assert.equal(operations?.[0]?.metadata?.publicationTitle, "Journal of Tests");
+    assert.equal(operations?.[0]?.metadata?.abstractNote, "Useful abstract");
   });
 });

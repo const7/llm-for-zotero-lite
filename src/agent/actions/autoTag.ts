@@ -124,10 +124,15 @@ export const autoTagAction: AgentAction<AutoTagInput, AutoTagOutput> = {
     );
 
     const mutateContent = mutateResult.content as Record<string, unknown>;
+    const mutateResults = Array.isArray(mutateContent.results) ? mutateContent.results : [];
     const taggedCount = mutateResult.ok
-      ? (typeof mutateContent.tagged === "number"
-          ? mutateContent.tagged
-          : itemIds.length)
+      ? mutateResults.reduce((total, entry) => {
+          if (!entry || typeof entry !== "object") return total;
+          const result = (entry as { result?: unknown }).result;
+          if (!result || typeof result !== "object") return total;
+          const updated = Number((result as { updatedCount?: unknown }).updatedCount || 0);
+          return total + (Number.isFinite(updated) ? updated : 0);
+        }, 0)
       : 0;
 
     ctx.onProgress({

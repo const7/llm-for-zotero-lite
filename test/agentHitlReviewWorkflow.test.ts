@@ -193,7 +193,7 @@ function createStubMutateTool(
 }
 
 describe("AgentRuntime HITL review workflow", function () {
-  it("lets approved metadata reviews continue into the next model step", async function () {
+  it("routes approved metadata reviews directly into a metadata update review", async function () {
     const restoreDb = installMockDb();
     try {
       const registry = new AgentToolRegistry();
@@ -220,6 +220,20 @@ describe("AgentRuntime HITL review workflow", function () {
           ],
         })),
       );
+      registry.register(
+        createStubMutateTool(async (input) => {
+          const operations = Array.isArray(input.operations)
+            ? (input.operations as Array<Record<string, unknown>>)
+            : [];
+          assert.lengthOf(operations, 1);
+          assert.equal(operations[0].type, "update_metadata");
+          assert.equal((operations[0].metadata as Record<string, unknown>)?.DOI, "10.1000/a");
+          return {
+            appliedCount: 1,
+            results: [{ itemId: 1 }],
+          };
+        }),
+      );
       const adapter = new StepAdapter([
         {
           kind: "tool_calls",
@@ -242,33 +256,6 @@ describe("AgentRuntime HITL review workflow", function () {
             ],
           },
         },
-        (params) => {
-          const toolMessages = params.messages.filter(
-            (message) => message.role === "tool",
-          );
-          assert.lengthOf(toolMessages, 1);
-          const reviewed = JSON.parse(
-            String((toolMessages[0] as { content: string }).content),
-          ) as { results: Array<{ title: string }> };
-          assert.lengthOf(reviewed.results, 2);
-          assert.equal(reviewed.results[0].title, "Paper A");
-          assert.isTrue(
-            params.messages.some(
-              (message) =>
-                message.role === "user" &&
-                typeof message.content === "string" &&
-                message.content.includes("reviewed the external metadata results"),
-            ),
-          );
-          return {
-            kind: "final",
-            text: "Used reviewed metadata.",
-            assistantMessage: {
-              role: "assistant",
-              content: "Used reviewed metadata.",
-            },
-          };
-        },
       ]);
       const runtime = new AgentRuntime({
         registry,
@@ -277,7 +264,11 @@ describe("AgentRuntime HITL review workflow", function () {
 
       const events: AgentEvent[] = [];
       const outcome = await runtime.runTurn({
-        request: makeRequest(),
+        request: makeRequest({
+          selectedPaperContexts: [
+            { itemId: 1, contextItemId: 101, title: "Paper A" },
+          ],
+        }),
         onEvent: async (event) => {
           events.push(event);
           if (
@@ -287,11 +278,20 @@ describe("AgentRuntime HITL review workflow", function () {
             assert.equal(event.action.mode, "review");
             assert.deepEqual(
               event.action.actions?.map((action) => action.id),
-              ["continue", "save_note", "cancel"],
+              ["review_changes", "save_note", "cancel"],
             );
             runtime.resolveConfirmation(event.requestId, {
               approved: true,
-              actionId: "continue",
+              actionId: "review_changes",
+              data: { selectedMetadataResult: "metadata-1" },
+            });
+          }
+          if (
+            event.type === "confirmation_required" &&
+            event.action.toolName === "mutate_library"
+          ) {
+            runtime.resolveConfirmation(event.requestId, {
+              approved: true,
             });
           }
         },
@@ -299,8 +299,8 @@ describe("AgentRuntime HITL review workflow", function () {
 
       assert.equal(outcome.kind, "completed");
       if (outcome.kind !== "completed") return;
-      assert.equal(outcome.text, "Used reviewed metadata.");
-      assert.equal(adapter.stepIndex, 2);
+      assert.equal(outcome.text, "Applied the selected metadata to the paper.");
+      assert.equal(adapter.stepIndex, 1);
       const resultIndex = events.findIndex(
         (event) =>
           event.type === "tool_result" &&
@@ -311,8 +311,14 @@ describe("AgentRuntime HITL review workflow", function () {
           event.type === "confirmation_required" &&
           event.action.toolName === "search_literature_online",
       );
+      const mutateIndex = events.findIndex(
+        (event) =>
+          event.type === "confirmation_required" &&
+          event.action.toolName === "mutate_library",
+      );
       assert.isAtLeast(resultIndex, 0);
       assert.isAbove(reviewIndex, resultIndex);
+      assert.isAbove(mutateIndex, reviewIndex);
     } finally {
       restoreDb();
     }

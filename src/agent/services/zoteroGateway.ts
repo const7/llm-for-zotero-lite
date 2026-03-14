@@ -2262,14 +2262,22 @@ export class ZoteroGateway {
   async importPapersByIdentifiers(
     identifiers: string[],
     libraryID?: number,
-  ): Promise<{ succeeded: number; failed: number }> {
+    targetCollectionId?: number,
+  ): Promise<{ succeeded: number; failed: number; itemIds?: number[] }> {
     let succeeded = 0;
     let failed = 0;
+    const itemIds: number[] = [];
     const targetLibraryID =
       libraryID ??
       (Zotero as unknown as { Libraries?: { userLibraryID?: number } })
         .Libraries?.userLibraryID ??
       1;
+    const targetCollection = targetCollectionId
+      ? this.getCollection(targetCollectionId)
+      : null;
+    if (targetCollectionId && !targetCollection) {
+      throw new Error("Target collection not found");
+    }
 
     for (const rawId of identifiers) {
       try {
@@ -2300,7 +2308,30 @@ export class ZoteroGateway {
         translate.setTranslator(translators);
         const items = await translate.translate({ libraryID: targetLibraryID });
         if (items && items.length > 0) {
-          succeeded += items.length;
+          const importedRegularItemIds = items
+            .map((item) =>
+              item && typeof item === "object"
+                ? Number((item as { id?: unknown }).id)
+                : NaN,
+            )
+            .filter((itemId) => Number.isFinite(itemId) && itemId > 0)
+            .map((itemId) => Math.floor(itemId))
+            .filter((itemId) => {
+              const importedItem = this.getItem(itemId);
+              return Boolean(importedItem?.isRegularItem?.());
+            });
+          if (targetCollection) {
+            for (const itemId of importedRegularItemIds) {
+              const importedItem = this.getItem(itemId);
+              if (!importedItem || importedItem.inCollection?.(targetCollection.id)) {
+                continue;
+              }
+              importedItem.addToCollection(targetCollection.id);
+              await importedItem.saveTx();
+            }
+          }
+          itemIds.push(...importedRegularItemIds);
+          succeeded += importedRegularItemIds.length || items.length;
         } else {
           failed++;
         }
@@ -2309,6 +2340,6 @@ export class ZoteroGateway {
       }
     }
 
-    return { succeeded, failed };
+    return { succeeded, failed, itemIds };
   }
 }

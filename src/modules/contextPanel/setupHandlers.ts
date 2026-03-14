@@ -37,6 +37,7 @@ import {
   selectedImagePreviewActiveIndexCache,
   selectedFilePreviewExpandedCache,
   selectedPaperContextCache,
+  selectedOtherRefContextCache,
   paperContextModeOverrides,
   selectedPaperPreviewExpandedCache,
   pinnedSelectedTextKeys,
@@ -128,6 +129,7 @@ import {
   getActiveReaderSelectionText,
   getActiveContextAttachmentFromTabs,
   addSelectedTextContext,
+  appendSelectedTextContextForItem,
   applySelectedTextPreview,
   formatSelectedTextContextPageLabel,
   getSelectedTextContextEntries,
@@ -135,6 +137,7 @@ import {
   getSelectedTextExpandedIndex,
   includeSelectedTextFromReader,
   isNoteContextExpanded,
+  refreshNoteChipPreview,
   refreshActiveNoteChipPreview,
   resolveContextSourceItem,
   setNoteContextExpanded,
@@ -158,6 +161,7 @@ import {
   createNoteFromChatHistory,
   createStandaloneNoteFromChatHistory,
   buildChatHistoryNotePayload,
+  readNoteSnapshot,
 } from "./notes";
 import {
   persistAttachmentBlob,
@@ -201,17 +205,19 @@ import type {
   ReasoningOption,
   AdvancedModelParams,
   PaperContextRef,
+  OtherContextRef,
   PaperContextSendMode,
   SelectedTextContext,
 } from "./types";
 import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/llmClient";
 import type { ReasoningConfig as LLMReasoningConfig } from "../../utils/llmClient";
 import {
-  browsePaperCollectionCandidates,
+  browseAllItemCandidates,
+  searchAllItemCandidates,
+  ZOTERO_NOTE_CONTENT_TYPE,
   normalizePaperSearchText,
   parsePaperSearchSlashToken,
   parseAtSearchToken,
-  searchPaperCandidates,
   type PaperBrowseCollectionCandidate,
   type PaperSearchAttachmentCandidate,
   type PaperSearchGroupCandidate,
@@ -1531,6 +1537,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     selectedPaperPreviewExpandedCache.delete(itemId);
     clearPaperModeOverrides(itemId);
   };
+  const clearAllRefContextState = (itemId: number) => {
+    clearSelectedPaperState(itemId);
+    selectedOtherRefContextCache.delete(itemId);
+  };
 
   const clearSelectedTextState = (itemId: number) => {
     setSelectedTextContexts(itemId, []);
@@ -1614,6 +1624,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     } else {
       selectedPaperContextCache.delete(itemId);
     }
+    // Retain other ref contexts across sends (they persist like paper contexts).
     const autoLoadedPaperContext =
       item && item.id === itemId ? resolveAutoLoadedPaperContext() : null;
     const overrides = paperContextModeOverrides.get(itemId);
@@ -1653,7 +1664,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   const clearTransientComposeStateForItem = (itemId: number) => {
     clearDraftInputState(itemId);
     clearSelectedImageState(itemId);
-    clearSelectedPaperState(itemId);
+    clearAllRefContextState(itemId);
     clearSelectedFileState(itemId);
     clearSelectedTextState(itemId);
   };
@@ -2111,6 +2122,53 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     list.appendChild(chip);
   };
 
+  const appendOtherRefChip = (
+    ownerDoc: Document,
+    list: HTMLDivElement,
+    ref: OtherContextRef,
+    removableIndex: number,
+  ) => {
+    const chip = createElement(
+      ownerDoc,
+      "div",
+      `llm-selected-context llm-other-ref-chip llm-other-ref-chip-${ref.refKind}`,
+    );
+    chip.dataset.otherRefItemId = `${ref.contextItemId}`;
+    chip.dataset.otherRefIndex = `${removableIndex}`;
+    chip.classList.add("collapsed");
+
+    const icon = ref.refKind === "figure" ? "🖼" : "📎";
+    const chipHeader = createElement(
+      ownerDoc,
+      "div",
+      "llm-image-preview-header llm-selected-context-header llm-other-ref-chip-header",
+    );
+    const chipLabel = createElement(
+      ownerDoc,
+      "span",
+      "llm-other-ref-chip-label",
+      {
+        textContent: `${icon} ${ref.title}`,
+        title: `${ref.refKind === "figure" ? "Figure" : "File"}: ${ref.title}`,
+      },
+    );
+    const removeBtn = createElement(
+      ownerDoc,
+      "button",
+      "llm-remove-img-btn llm-other-ref-clear",
+      {
+        type: "button",
+        textContent: "×",
+        title: `Remove ${ref.title}`,
+      },
+    ) as HTMLButtonElement;
+    removeBtn.dataset.otherRefIndex = `${removableIndex}`;
+    removeBtn.setAttribute("aria-label", `Remove ${ref.title}`);
+    chipHeader.append(chipLabel, removeBtn);
+    chip.appendChild(chipHeader);
+    list.appendChild(chip);
+  };
+
   const updatePaperPreview = () => {
     if (!item || !paperPreview || !paperPreviewList) return;
     closePaperChipMenu();
@@ -2118,8 +2176,13 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     const selectedPapers = normalizePaperContextEntries(
       selectedPaperContextCache.get(itemId) || [],
     );
+    const selectedOtherRefs = selectedOtherRefContextCache.get(itemId) || [];
     const autoLoadedPaperContext = resolveAutoLoadedPaperContext();
-    if (!selectedPapers.length && !autoLoadedPaperContext) {
+    const hasAnyContext =
+      selectedPapers.length > 0 ||
+      selectedOtherRefs.length > 0 ||
+      !!autoLoadedPaperContext;
+    if (!hasAnyContext) {
       paperPreview.style.display = "none";
       paperPreviewList.innerHTML = "";
       clearSelectedPaperState(itemId);
@@ -2152,8 +2215,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         fullText:
           isPaperContextFullTextMode(
             resolvePaperContextNextSendMode(itemId, paperContext),
-          ),
+        ),
       });
+    });
+    selectedOtherRefs.forEach((ref, index) => {
+      appendOtherRefChip(ownerDoc, paperPreviewList, ref, index);
     });
   };
 
@@ -2237,11 +2303,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         e.stopPropagation();
         if (!item) return;
         const currentFiles = selectedFileAttachmentCache.get(item.id) || [];
-        const removedEntry = currentFiles[index];
-        const nextFiles = currentFiles.filter((_entry, i) => i !== index);
-        if (removedEntry) {
-          removePinnedFile(pinnedFileKeys, item.id, removedEntry);
-        }
+        const removedEntry = attachment;
+        const nextFiles = currentFiles.filter((f) => f.id !== removedEntry.id);
+        removePinnedFile(pinnedFileKeys, item.id, removedEntry);
         if (nextFiles.length) {
           selectedFileAttachmentCache.set(item.id, nextFiles);
         } else {
@@ -2605,6 +2669,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       : undefined,
     selectedTextPaperContexts: Array.isArray(message.selectedTextPaperContexts)
       ? [...message.selectedTextPaperContexts]
+      : undefined,
+    selectedTextNoteContexts: Array.isArray(message.selectedTextNoteContexts)
+      ? [...message.selectedTextNoteContexts]
       : undefined,
     screenshotImages: Array.isArray(message.screenshotImages)
       ? [...message.screenshotImages]
@@ -6543,7 +6610,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
 
   /**
    * Shows an inline launch form for actions that require user-provided fields
-   * (currently only `literature_review` which requires `topic`).
+   * when their required inputs cannot be derived from the current context.
    * Returns a promise that resolves with the filled input, or null if cancelled.
    */
   const showActionLaunchForm = (
@@ -6735,6 +6802,44 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     ].filter(Boolean);
     return parts.join(" · ");
   }
+  function resolvePickerItemKind(
+    contentType?: string,
+  ): "pdf" | "note" | "figure" | "other" {
+    if (!contentType) return "other";
+    if (contentType === "application/pdf") return "pdf";
+    if (contentType === ZOTERO_NOTE_CONTENT_TYPE) return "note";
+    if (contentType.startsWith("image/")) return "figure";
+    return "other";
+  }
+  function resolvePickerKindIcon(kind: "pdf" | "note" | "figure" | "other"): string {
+    if (kind === "pdf") return "📚";
+    if (kind === "note") return "📝";
+    if (kind === "figure") return "🖼";
+    return "📎";
+  }
+  function resolvePickerKindLabel(kind: "pdf" | "note" | "figure" | "other"): string {
+    if (kind === "pdf") return "PDF";
+    if (kind === "note") return "Note";
+    if (kind === "figure") return "Figure";
+    return "File";
+  }
+  function resolveGroupIcon(group: PaperSearchGroupCandidate): string {
+    if (group.itemKind === "standalone-note") return "📝";
+    const hasPdf = group.attachments.some(
+      (a) => resolvePickerItemKind(a.contentType) === "pdf",
+    );
+    if (hasPdf) return "📚";
+    const hasFigure = group.attachments.some(
+      (a) => resolvePickerItemKind(a.contentType) === "figure",
+    );
+    if (hasFigure) return "🖼";
+    const hasNote = group.attachments.some(
+      (a) => resolvePickerItemKind(a.contentType) === "note",
+    );
+    if (hasNote) return "📝";
+    if (group.attachments.length > 0) return "📎";
+    return "📄";
+  }
   const getPaperPickerAttachmentDisplayTitle = (
     group: PaperSearchGroupCandidate,
     attachment: PaperSearchAttachmentCandidate,
@@ -6742,7 +6847,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   ): string => {
     const normalizedTitle = sanitizeText(attachment.title || "").trim();
     if (normalizedTitle) return normalizedTitle;
-    return group.attachments.length > 1 ? `PDF ${attachmentIndex + 1}` : "PDF";
+    const kind = resolvePickerItemKind(attachment.contentType);
+    return group.attachments.length > 1
+      ? `${resolvePickerKindLabel(kind)} ${attachmentIndex + 1}`
+      : resolvePickerKindLabel(kind);
   };
   const getPaperPickerGroupByItemId = (
     itemId: number,
@@ -6992,6 +7100,49 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     }
     return true;
   };
+  const upsertNoteTextContext = (contextItemId: number): boolean => {
+    const textContextKey = getTextContextConversationKey();
+    if (!item || !textContextKey) return false;
+    const noteItem = Zotero.Items.get(contextItemId) || null;
+    const snapshot = readNoteSnapshot(noteItem);
+    if (!snapshot?.text) {
+      if (status) setStatus(status, "Selected note is empty", "warning");
+      return false;
+    }
+    const appended = appendSelectedTextContextForItem(
+      textContextKey,
+      snapshot.text,
+      "note",
+      undefined,
+      undefined,
+      {
+        noteItemId: snapshot.noteId,
+        parentItemId: snapshot.parentItemId,
+        noteKind: snapshot.noteKind,
+        title: snapshot.title || `Note ${snapshot.noteId}`,
+      },
+    );
+    if (!appended) {
+      if (status) setStatus(status, "Note already selected", "warning");
+      return false;
+    }
+    updateSelectedTextPreviewPreservingScroll();
+    if (status) setStatus(status, "Note context added as text.", "ready");
+    return true;
+  };
+  const upsertOtherRefContext = (ref: OtherContextRef): boolean => {
+    if (!item) return false;
+    const existing = selectedOtherRefContextCache.get(item.id) || [];
+    const duplicate = existing.some((e) => e.contextItemId === ref.contextItemId);
+    if (duplicate) {
+      if (status) setStatus(status, "File already selected", "warning");
+      return false;
+    }
+    selectedOtherRefContextCache.set(item.id, [...existing, ref]);
+    updatePaperPreviewPreservingScroll();
+    if (status) setStatus(status, `${ref.refKind === "figure" ? "Figure" : "File"} context added.`, "ready");
+    return true;
+  };
   const consumeActiveAtToken = (): boolean => {
     const token = getActiveAtToken();
     if (!token) return false;
@@ -7026,20 +7177,37 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     const selectedAttachment = selectedGroup.attachments[attachmentIndex];
     if (!selectedAttachment) return false;
     consumeActiveSlashToken();
-    ztoolkit.log("LLM: Paper picker selection", {
+    const contentType = selectedAttachment.contentType;
+    const kind = resolvePickerItemKind(contentType);
+    ztoolkit.log("LLM: Picker selection", {
       selectionKind,
+      kind,
       itemId: selectedGroup.itemId,
       contextItemId: selectedAttachment.contextItemId,
     });
-    upsertPaperContext({
-      itemId: selectedGroup.itemId,
-      contextItemId: selectedAttachment.contextItemId,
-      title: selectedGroup.title,
-      attachmentTitle: selectedAttachment.title,
-      citationKey: selectedGroup.citationKey,
-      firstCreator: selectedGroup.firstCreator,
-      year: selectedGroup.year,
-    });
+    if (kind === "pdf") {
+      upsertPaperContext({
+        itemId: selectedGroup.itemId,
+        contextItemId: selectedAttachment.contextItemId,
+        title: selectedGroup.title,
+        attachmentTitle: selectedAttachment.title,
+        citationKey: selectedGroup.citationKey,
+        firstCreator: selectedGroup.firstCreator,
+        year: selectedGroup.year,
+      });
+    } else if (kind === "note") {
+      upsertNoteTextContext(selectedAttachment.contextItemId);
+    } else {
+      upsertOtherRefContext({
+        contextItemId: selectedAttachment.contextItemId,
+        parentItemId: selectedGroup.itemId !== selectedAttachment.contextItemId
+          ? selectedGroup.itemId
+          : undefined,
+        title: selectedAttachment.title || selectedGroup.title,
+        contentType: contentType || "application/octet-stream",
+        refKind: kind === "figure" ? "figure" : "other",
+      });
+    }
     closePaperPicker();
     inputBox.focus({ preventScroll: true });
     return true;
@@ -7183,8 +7351,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     if (!paperPickerRows.length) {
       const emptyMessage =
         paperPickerMode === "browse"
-          ? "No references available."
-          : "No papers matched.";
+          ? "No items available."
+          : "No items matched.";
       paperPickerMode = "empty";
       paperPickerEmptyMessage = emptyMessage;
       renderPaperPicker();
@@ -7265,6 +7433,12 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           "div",
           "llm-paper-picker-group-title-line",
         );
+        const itemIcon = createElement(
+          ownerDoc,
+          "span",
+          "llm-paper-picker-item-icon",
+          { textContent: resolveGroupIcon(group) },
+        );
         const title = createElement(
           ownerDoc,
           "span",
@@ -7274,25 +7448,17 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
             title: group.title,
           },
         );
-        titleLine.appendChild(title);
+        titleLine.append(itemIcon, title);
         if (isMultiAttachment) {
           const attachmentCount = createElement(
             ownerDoc,
             "span",
             "llm-paper-picker-badge",
             {
-              textContent: `${group.attachments.length} PDFs`,
+              textContent: `${group.attachments.length} files`,
             },
           );
-          const chevron = createElement(
-            ownerDoc,
-            "span",
-            "llm-paper-picker-group-chevron",
-            {
-              textContent: expanded ? "▾" : "▸",
-            },
-          );
-          titleLine.append(attachmentCount, chevron);
+          titleLine.appendChild(attachmentCount);
         }
         rowMain.appendChild(titleLine);
         const metaText = buildPaperMetaText(group);
@@ -7318,6 +7484,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           attachment,
           row.attachmentIndex,
         );
+        const attachmentKind = resolvePickerItemKind(attachment.contentType);
         const indent = createElement(
           ownerDoc,
           "span",
@@ -7327,6 +7494,17 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           ownerDoc,
           "div",
           "llm-paper-picker-attachment-main",
+        );
+        const attachmentText = createElement(
+          ownerDoc,
+          "div",
+          "llm-paper-picker-attachment-text",
+        );
+        const kindIcon = createElement(
+          ownerDoc,
+          "span",
+          "llm-paper-picker-item-icon",
+          { textContent: resolvePickerKindIcon(attachmentKind) },
         );
         const title = createElement(
           ownerDoc,
@@ -7338,9 +7516,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           },
         );
         const meta = createElement(ownerDoc, "span", "llm-paper-picker-meta", {
-          textContent: "PDF attachment",
+          textContent: `${resolvePickerKindLabel(attachmentKind)} attachment`,
         });
-        attachmentMain.append(title, meta);
+        attachmentText.append(title, meta);
+        attachmentMain.append(kindIcon, attachmentText);
         option.append(indent, attachmentMain);
       }
 
@@ -7421,13 +7600,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         return;
       }
       const normalizedQuery = normalizePaperSearchText(activeSlashToken.query);
-      const contextSource = resolveContextSourceItem(item);
-      const excludeContextItemId = contextSource.contextItem?.id ?? null;
       if (!normalizedQuery) {
-        const collections = await browsePaperCollectionCandidates(
-          libraryID,
-          excludeContextItemId,
-        );
+        const collections = await browseAllItemCandidates(libraryID);
         if (requestId !== paperPickerRequestSeq) return;
         if (!getActiveSlashToken()) {
           closePaperPicker();
@@ -7438,10 +7612,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         renderPaperPicker();
         return;
       }
-      const results = await searchPaperCandidates(
+      const results = await searchAllItemCandidates(
         libraryID,
         activeSlashToken.query,
-        excludeContextItemId,
         20,
       );
       if (requestId !== paperPickerRequestSeq) return;
@@ -7659,6 +7832,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       const selectedTextPaperContexts = selectedContexts.map(
         (entry) => entry.paperContext,
       );
+      const selectedTextNoteContexts = selectedContexts.map(
+        (entry) => entry.noteContext,
+      );
       const selectedPaperContexts = normalizePaperContextEntries(
         selectedPaperContextCache.get(currentItem.id) || [],
       );
@@ -7702,6 +7878,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           selectedTexts,
           selectedTextSources,
           selectedTextPaperContexts,
+          selectedTextNoteContexts,
           images,
           selectedPaperContexts,
           fullTextPaperContexts,
@@ -8967,6 +9144,30 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       if (!item) return;
       const target = e.target as Element | null;
       if (!target) return;
+
+      // Other/figure ref chip removal
+      const otherClearBtn = target.closest(
+        ".llm-other-ref-clear",
+      ) as HTMLButtonElement | null;
+      if (otherClearBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const index = Number.parseInt(otherClearBtn.dataset.otherRefIndex || "", 10);
+        const others = selectedOtherRefContextCache.get(item.id) || [];
+        if (Number.isFinite(index) && index >= 0 && index < others.length) {
+          const next = others.filter((_, i) => i !== index);
+          if (next.length) {
+            selectedOtherRefContextCache.set(item.id, next);
+          } else {
+            selectedOtherRefContextCache.delete(item.id);
+          }
+          updatePaperPreviewPreservingScroll();
+          if (status) setStatus(status, `File context removed (${next.length})`, "ready");
+        }
+        return;
+      }
+
+      // Paper chip removal
       const clearBtn = target.closest(
         ".llm-paper-context-clear",
       ) as HTMLButtonElement | null;
@@ -9256,26 +9457,44 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   if (selectedContextList) {
     selectedContextList.addEventListener("mouseover", (e: Event) => {
       const target = e.target as Element | null;
-      if (!target?.closest("[data-note-chip='true']")) {
+      const noteChip = target?.closest("[data-note-chip='true']") as
+        | HTMLDivElement
+        | null;
+      if (!noteChip) {
         return;
       }
-      refreshActiveNoteChipPreview(body);
+      if (noteChip.dataset.noteChipKind === "active") {
+        refreshActiveNoteChipPreview(body);
+      } else {
+        refreshNoteChipPreview(noteChip);
+      }
     });
     selectedContextList.addEventListener("focusin", (e: Event) => {
       const target = e.target as Element | null;
-      if (!target?.closest("[data-note-chip='true']")) {
+      const noteChip = target?.closest("[data-note-chip='true']") as
+        | HTMLDivElement
+        | null;
+      if (!noteChip) {
         return;
       }
-      refreshActiveNoteChipPreview(body);
+      if (noteChip.dataset.noteChipKind === "active") {
+        refreshActiveNoteChipPreview(body);
+      } else {
+        refreshNoteChipPreview(noteChip);
+      }
     });
     selectedContextList.addEventListener("click", (e: Event) => {
       if (!item) return;
       const target = e.target as Element | null;
       if (!target) return;
+      const noteChip = target.closest("[data-note-chip='true']") as
+        | HTMLDivElement
+        | null;
+      const noteChipKind = noteChip?.dataset.noteChipKind || "";
       const noteMetaBtn = target.closest(
         ".llm-note-context-meta",
       ) as HTMLButtonElement | null;
-      if (noteMetaBtn) {
+      if (noteMetaBtn && noteChipKind === "active") {
         e.preventDefault();
         e.stopPropagation();
         const textContextKey = getTextContextConversationKey();
@@ -9295,7 +9514,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         updateSelectedTextPreviewPreservingScroll();
         return;
       }
-      if (target.closest("[data-note-chip='true']")) {
+      if (noteChip && noteChipKind === "active") {
         return;
       }
 
@@ -9404,7 +9623,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       if (!item) return;
       const target = e.target as Element | null;
       if (!target) return;
-      if (target.closest("[data-note-chip='true']")) {
+      const noteChip = target.closest("[data-note-chip='true']") as
+        | HTMLDivElement
+        | null;
+      if (noteChip?.dataset.noteChipKind === "active") {
         e.preventDefault();
         e.stopPropagation();
         if (status) {

@@ -55,4 +55,15 @@ describe("textUtils selected text prompt composition", function () {
     );
     assert.include(prompt, "User question:\nMake it clearer.");
   });
+
+  it("uses note wording for selected Zotero note context", function () {
+    const prompt = buildQuestionWithSelectedTextContexts(
+      ["Draft note content."],
+      ["note"],
+      "Use this for context.",
+    );
+    assert.include(prompt, "Selected text from a Zotero note:");
+    assert.notInclude(prompt, "editing focus");
+    assert.include(prompt, "User question:\nUse this for context.");
+  });
 });

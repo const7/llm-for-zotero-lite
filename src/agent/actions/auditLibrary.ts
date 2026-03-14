@@ -1,5 +1,9 @@
 import type { AgentAction, ActionExecutionContext, ActionResult } from "./types";
 import { callTool } from "./executor";
+import {
+  getMetadataField,
+  getMetadataTitle,
+} from "./metadataSnapshot";
 
 type AuditScope = "all" | "collection";
 
@@ -90,18 +94,14 @@ export const auditLibraryAction: AgentAction<AuditLibraryInput, AuditLibraryOutp
       const itemId = typeof record.itemId === "number" ? record.itemId : null;
       if (!itemId) continue;
 
-      const title =
-        (record.metadata && typeof record.metadata === "object"
-          ? (record.metadata as Record<string, unknown>).title
-          : null) ||
-        record.title ||
-        `Item ${itemId}`;
-
-      const meta = record.metadata as Record<string, unknown> | null | undefined;
+      const meta = record.metadata;
+      const title = getMetadataTitle(meta) || record.title || `Item ${itemId}`;
       const missingFields: string[] = [];
 
-      if (!meta?.abstractNote) missingFields.push("abstract");
-      if (!meta?.DOI && !meta?.url) missingFields.push("DOI/URL");
+      if (!getMetadataField(meta, "abstractNote")) missingFields.push("abstract");
+      if (!getMetadataField(meta, "DOI") && !getMetadataField(meta, "url")) {
+        missingFields.push("DOI/URL");
+      }
 
       const tags = Array.isArray(record.tags) ? record.tags : [];
       if (tags.length === 0) missingFields.push("tags");

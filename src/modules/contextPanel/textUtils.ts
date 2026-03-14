@@ -17,8 +17,22 @@ export const DEFAULT_FILE_ANALYSIS_PROMPT = "Please analyze attached files.";
 
 export function getSelectedTextSourceIcon(source: SelectedTextSource): string {
   if (source === "model") return "🧠";
+  if (source === "note") return "📝";
   if (source === "note-edit") return "✍🏻";
   return "📋";
+}
+
+function buildQuestionWithSelectedNoteText(
+  selectedText: string,
+  userPrompt: string,
+): string {
+  const normalizedPrompt = userPrompt.trim() || DEFAULT_SELECTED_TEXT_PROMPT;
+  return [
+    "Selected text from a Zotero note:",
+    `"""\n${selectedText}\n"""`,
+    "",
+    `User question:\n${normalizedPrompt}`,
+  ].join("\n");
 }
 
 function buildQuestionWithNoteEditingText(
@@ -186,11 +200,19 @@ export function buildQuestionWithSelectedTextContexts(
       normalizedPrompt,
     );
   }
+  if (normalizedTexts.length === 1 && normalizedSources[0] === "note") {
+    return buildQuestionWithSelectedNoteText(
+      normalizedTexts[0],
+      normalizedPrompt,
+    );
+  }
   const contextBlocks = normalizedTexts.map((text, index) => {
     const source = normalizedSources[index];
     const sourceLabel =
       source === "model"
         ? "model_response 🧠"
+        : source === "note"
+          ? "zotero_note 📝"
         : source === "note-edit"
           ? "note_editor ✍🏻"
           : "pdf_reader 📋";

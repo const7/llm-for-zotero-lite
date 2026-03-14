@@ -281,6 +281,16 @@ describe("primitive agent tools", function () {
       removeTagsFromItem: async () => {
         appliedCalls.push("remove_tags_undo");
       },
+      getPaperTargetsByItemIds: (itemIds: number[]) =>
+        itemIds.map((itemId) => ({
+          itemId,
+          title: `Paper ${itemId}`,
+          firstCreator: "Alice Example",
+          year: "2024",
+          attachments: [],
+          tags: [],
+          collectionIds: [],
+        })),
       getCollectionSummary: () => null,
       createCollection: async () => {
         appliedCalls.push("create_collection");
@@ -338,8 +348,8 @@ describe("primitive agent tools", function () {
     const pending = await tool.createPendingAction?.(validated.value, baseContext);
     assert.exists(pending);
     assert.deepEqual(pending?.fields.map((field) => field.id), [
+      "tagAssignments:op-1",
       "selectedOperations",
-      "operationsJson",
     ]);
 
     const confirmed = tool.applyConfirmation?.(
@@ -427,7 +437,6 @@ describe("primitive agent tools", function () {
       "saveNoteDiff:op-1",
       "saveNoteContent:op-1",
       "selectedOperations",
-      "operationsJson",
     ]);
     const diffField = pending?.fields[0] as Extract<
       NonNullable<typeof pending>["fields"][number],
@@ -618,6 +627,130 @@ describe("primitive agent tools", function () {
     ]);
   });
 
+  it("mutate_library builds tag assignment review fields and filters empty tag rows", async function () {
+    const tagCalls: Array<{ itemId: number; tags: string[] }> = [];
+    const tool = createMutateLibraryTool({
+      resolveLibraryID: () => 1,
+      listCollectionSummaries: () => [],
+      getCollectionSummary: () => null,
+      getPaperTargetsByItemIds: (itemIds: number[]) =>
+        itemIds.map((itemId) => ({
+          itemId,
+          title: `Paper ${itemId}`,
+          firstCreator: "Alice Example",
+          year: "2024",
+          attachments: [],
+          tags: [],
+          collectionIds: [],
+        })),
+      addItemsToCollections: async () => ({
+        selectedCount: 0,
+        movedCount: 0,
+        skippedCount: 0,
+        collections: [],
+        items: [],
+      }),
+      removeItemFromCollection: async () => undefined,
+      resolveMetadataItem: () => null,
+      getEditableArticleMetadata: () => null,
+      createCollection: async () => {
+        throw new Error("not used");
+      },
+      deleteCollection: async () => undefined,
+      saveAnswerToNote: async () => "created" as const,
+      importPapersByIdentifiers: async () => ({ succeeded: 0, failed: 0 }),
+      addItemsToCollection: async () => ({
+        selectedCount: 0,
+        movedCount: 0,
+        skippedCount: 0,
+        collection: { collectionId: 0, name: "", libraryID: 1 },
+        items: [],
+      }),
+      updateArticleMetadata: async () => ({
+        status: "updated" as const,
+        itemId: 1,
+        title: "X",
+        changedFields: ["title"],
+      }),
+      getItem: () => null,
+      applyTagAssignments: async ({ assignments }: { assignments: Array<{ itemId: number; tags: string[] }> }) => {
+        tagCalls.push(...assignments);
+        return {
+          selectedCount: assignments.length,
+          updatedCount: assignments.length,
+          skippedCount: 0,
+          items: assignments.map((assignment) => ({
+            itemId: assignment.itemId,
+            title: `Paper ${assignment.itemId}`,
+            status: "updated" as const,
+            addedTags: assignment.tags,
+            skippedTags: [],
+          })),
+        };
+      },
+      removeTagsFromItem: async () => undefined,
+      applyTagsToItems: async () => ({
+        selectedCount: 0,
+        updatedCount: 0,
+        skippedCount: 0,
+        items: [],
+      }),
+    } as never);
+
+    const validated = tool.validate({
+      operations: [
+        {
+          type: "apply_tags",
+          assignments: [
+            { itemId: 41, tags: [] },
+            { itemId: 42, tags: [] },
+          ],
+        },
+      ],
+    });
+    assert.isTrue(validated.ok);
+    if (!validated.ok) return;
+
+    const pending = await tool.createPendingAction?.(validated.value, baseContext);
+    assert.exists(pending);
+    const tagField = pending?.fields.find(
+      (field) => field.id === "tagAssignments:op-1",
+    ) as Extract<(typeof pending)["fields"][number], { type: "tag_assignment_table" }> | undefined;
+    assert.exists(tagField);
+    assert.equal(tagField?.type, "tag_assignment_table");
+    assert.deepEqual(
+      tagField?.rows.map((row) => row.id),
+      ["41", "42"],
+    );
+
+    const confirmed = tool.applyConfirmation?.(
+      validated.value,
+      {
+        selectedOperations: [{ id: "op-1", checked: true }],
+        operationsJson: JSON.stringify(validated.value.operations, null, 2),
+        "tagAssignments:op-1": [
+          { id: "41", value: ["representation", "memory"] },
+          { id: "42", value: [] },
+        ],
+      },
+      baseContext,
+    );
+    assert.isTrue(confirmed?.ok);
+    if (!confirmed?.ok) return;
+    assert.lengthOf(confirmed.value.operations, 1);
+    const tagOperation = confirmed.value.operations[0];
+    assert.equal(tagOperation.type, "apply_tags");
+    assert.deepEqual((tagOperation as any).assignments, [
+      { itemId: 41, tags: ["representation", "memory"] },
+    ]);
+
+    const result = await tool.execute(confirmed.value, baseContext);
+    assert.equal((result as { appliedCount: number }).appliedCount, 1);
+    assert.deepEqual(tagCalls, [
+      { itemId: 41, tags: ["representation", "memory"] },
+    ]);
+  });
+
   it("mutate_library accepts singular move operation payloads from the model", function () {
     const tool = createMutateLibraryTool({
       getCollectionSummary: () => null,
@@ -650,6 +783,76 @@ describe("primitive agent tools", function () {
     assert.equal(
       (validatedFromTopLevel.value.operations[0] as any).targetCollectionId,
       12,
+    );
+  });
+
+  it("mutate_library accepts import targets for import_identifiers operations", function () {
+    const tool = createMutateLibraryTool({
+      getCollectionSummary: () => null,
+    } as never);
+
+    const validated = tool.validate({
+      operation: {
+        type: "import_identifiers",
+        identifiers: ["10.1000/a"],
+        collectionId: 17,
+      },
+    });
+    assert.isTrue(validated.ok);
+    if (!validated.ok) return;
+    assert.equal(
+      (validated.value.operations[0] as any).targetCollectionId,
+      17,
+    );
+  });
+
+  it("mutate_library accepts common metadata update payload variants from the model", function () {
+    const tool = createMutateLibraryTool({
+      getCollectionSummary: () => null,
+    } as never);
+
+    const validatedFromPatch = tool.validate({
+      operation: {
+        type: "update_metadata",
+        itemId: 51,
+        patch: {
+          title: "Patched Title",
+        },
+      },
+    });
+    assert.isTrue(validatedFromPatch.ok);
+    if (!validatedFromPatch.ok) return;
+    assert.equal(
+      (validatedFromPatch.value.operations[0] as any).metadata.title,
+      "Patched Title",
+    );
+
+    const validatedFromTopLevel = tool.validate({
+      type: "update_metadata",
+      itemId: 52,
+      title: "Top Level Title",
+    });
+    assert.isTrue(validatedFromTopLevel.ok);
+    if (!validatedFromTopLevel.ok) return;
+    assert.equal(
+      (validatedFromTopLevel.value.operations[0] as any).metadata.title,
+      "Top Level Title",
+    );
+
+    const validatedFromSnapshotShape = tool.validate({
+      type: "update_metadata",
+      itemId: 53,
+      metadata: {
+        fields: {
+          DOI: "10.1000/example",
+        },
+      },
+    });
+    assert.isTrue(validatedFromSnapshotShape.ok);
+    if (!validatedFromSnapshotShape.ok) return;
+    assert.equal(
+      (validatedFromSnapshotShape.value.operations[0] as any).metadata.DOI,
+      "10.1000/example",
     );
   });
 

@@ -1,5 +1,10 @@
 import type { AgentAction, ActionExecutionContext, ActionResult } from "./types";
+import type { EditableArticleMetadataPatch } from "../services/zoteroGateway";
 import { callTool } from "./executor";
+import {
+  getMetadataField,
+  hasMetadataCreators,
+} from "./metadataSnapshot";
 
 type SyncMetadataInput = {
   scope?: "all" | "collection";
@@ -72,20 +77,17 @@ export const syncMetadataAction: AgentAction<SyncMetadataInput, SyncMetadataOutp
     const content = queryResult.content as Record<string, unknown>;
     const allItems = Array.isArray(content.results) ? content.results : [];
 
-    type ItemWithDoi = { itemId: number; doi: string; currentMeta: Record<string, unknown> };
+    type ItemWithDoi = { itemId: number; doi: string; currentMeta: unknown };
     const itemsWithDoi: ItemWithDoi[] = [];
     for (const item of allItems) {
       if (!item || typeof item !== "object") continue;
       const record = item as Record<string, unknown>;
       const itemId = typeof record.itemId === "number" ? record.itemId : null;
       if (!itemId) continue;
-      const meta = record.metadata as Record<string, unknown> | null | undefined;
-      const doi =
-        typeof meta?.DOI === "string" && meta.DOI.trim()
-          ? meta.DOI.trim().replace(/^https?:\/\/doi\.org\//i, "")
-          : null;
+      const meta = record.metadata;
+      const doi = getMetadataField(meta, "DOI")?.replace(/^https?:\/\/doi\.org\//i, "") || null;
       if (doi) {
-        itemsWithDoi.push({ itemId, doi, currentMeta: meta || {} });
+        itemsWithDoi.push({ itemId, doi, currentMeta: meta });
       }
     }
 
@@ -113,8 +115,8 @@ export const syncMetadataAction: AgentAction<SyncMetadataInput, SyncMetadataOutp
     type UpdateCandidate = {
       itemId: number;
       doi: string;
-      patch: Record<string, string>;
-      currentMeta: Record<string, unknown>;
+      patch: EditableArticleMetadataPatch;
+      currentMeta: unknown;
       externalTitle: string;
     };
     const updateCandidates: UpdateCandidate[] = [];
@@ -144,17 +146,36 @@ export const syncMetadataAction: AgentAction<SyncMetadataInput, SyncMetadataOutp
       if (!externalMeta) continue;
 
       // Build patch: only fill in fields that are currently empty in Zotero
-      const patch: Record<string, string> = {};
+      const patch: EditableArticleMetadataPatch = {};
 
-      if (!currentMeta.abstractNote && typeof externalMeta.abstract === "string" && externalMeta.abstract.trim()) {
+      if (
+        !getMetadataField(currentMeta, "abstractNote") &&
+        typeof externalMeta.abstract === "string" &&
+        externalMeta.abstract.trim()
+      ) {
         patch.abstractNote = externalMeta.abstract.trim();
       }
-      if (!currentMeta.date && (externalMeta.year || externalMeta.publicationDate)) {
+      if (!getMetadataField(currentMeta, "date") && (externalMeta.year || externalMeta.publicationDate)) {
         const yearStr = String(externalMeta.year || externalMeta.publicationDate || "").trim();
         if (yearStr) patch.date = yearStr;
       }
-      if (!currentMeta.publicationTitle && typeof externalMeta.venue === "string" && externalMeta.venue.trim()) {
+      if (
+        !getMetadataField(currentMeta, "publicationTitle") &&
+        typeof externalMeta.venue === "string" &&
+        externalMeta.venue.trim()
+      ) {
         patch.publicationTitle = externalMeta.venue.trim();
+      }
+      if (!hasMetadataCreators(currentMeta) && Array.isArray(externalMeta.authors)) {
+        const creators = externalMeta.authors
+          .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+          .map((name) => ({
+            creatorType: "author",
+            name: name.trim(),
+          }));
+        if (creators.length) {
+          patch.creators = creators;
+        }
       }
 
       if (Object.keys(patch).length > 0) {
@@ -198,7 +219,7 @@ export const syncMetadataAction: AgentAction<SyncMetadataInput, SyncMetadataOutp
     const operations = updateCandidates.map(({ itemId, patch }) => ({
       type: "update_metadata",
       itemId,
-      patch,
+      metadata: patch,
     }));
 
     const mutateResult = await callTool(

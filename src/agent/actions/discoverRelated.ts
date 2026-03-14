@@ -1,5 +1,6 @@
 import type { AgentAction, ActionExecutionContext, ActionResult } from "./types";
 import { callTool } from "./executor";
+import { getMetadataField } from "./metadataSnapshot";
 
 type DiscoverRelatedInput = {
   itemId: number;
@@ -73,14 +74,19 @@ export const discoverRelatedAction: AgentAction<DiscoverRelatedInput, DiscoverRe
     );
 
     const readContent = readResult.ok
-      ? (readResult.content as Record<string, Record<string, unknown>>)
+      ? (readResult.content as Record<string, unknown>)
       : {};
-    const seedEntry = readContent[String(input.itemId)] as Record<string, unknown> | undefined;
-    const seedMeta = seedEntry?.metadata as Record<string, unknown> | undefined;
+    const readResults =
+      readContent.results &&
+      typeof readContent.results === "object" &&
+      !Array.isArray(readContent.results)
+        ? (readContent.results as Record<string, Record<string, unknown>>)
+        : {};
+    const seedEntry = readResults[String(input.itemId)] as Record<string, unknown> | undefined;
+    const seedMeta = seedEntry?.metadata;
     const seedTitle =
-      typeof seedMeta?.title === "string" ? seedMeta.title : `Item ${input.itemId}`;
-    const seedDoi =
-      typeof seedMeta?.DOI === "string" && seedMeta.DOI.trim() ? seedMeta.DOI.trim() : undefined;
+      getMetadataField(seedMeta, "title") || `Item ${input.itemId}`;
+    const seedDoi = getMetadataField(seedMeta, "DOI");
 
     ctx.onProgress({
       type: "step_done",
@@ -253,7 +259,17 @@ export const discoverRelatedAction: AgentAction<DiscoverRelatedInput, DiscoverRe
       "Importing selected papers",
     );
 
-    const importedCount = importResult.ok ? identifiers.length : 0;
+    const importContent = importResult.content as Record<string, unknown>;
+    const importResults = Array.isArray(importContent.results) ? importContent.results : [];
+    const importedCount = importResult.ok
+      ? importResults.reduce((total, entry) => {
+          if (!entry || typeof entry !== "object") return total;
+          const result = (entry as { result?: unknown }).result;
+          if (!result || typeof result !== "object") return total;
+          const succeeded = Number((result as { succeeded?: unknown }).succeeded || 0);
+          return total + (Number.isFinite(succeeded) ? succeeded : 0);
+        }, 0)
+      : 0;
 
     ctx.onProgress({
       type: "step_done",

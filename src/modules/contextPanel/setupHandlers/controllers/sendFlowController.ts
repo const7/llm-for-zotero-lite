@@ -4,6 +4,7 @@ import type {
   AdvancedModelParams,
   ChatAttachment,
   ChatRuntimeMode,
+  NoteContextRef,
   PaperContextRef,
   SelectedTextContext,
 } from "../../types";
@@ -97,6 +98,7 @@ type SendFlowControllerDeps = {
     selectedTexts?: string[],
     selectedTextSources?: SelectedTextSource[],
     selectedTextPaperContexts?: (PaperContextRef | undefined)[],
+    selectedTextNoteContexts?: (NoteContextRef | undefined)[],
     screenshotImages?: string[],
     paperContexts?: PaperContextRef[],
     fullTextPaperContexts?: PaperContextRef[],
@@ -123,6 +125,7 @@ type SendFlowControllerDeps = {
     selectedTexts?: string[],
     selectedTextSources?: SelectedTextSource[],
     selectedTextPaperContexts?: (PaperContextRef | undefined)[],
+    selectedTextNoteContexts?: (NoteContextRef | undefined)[],
     paperContexts?: PaperContextRef[],
     fullTextPaperContexts?: PaperContextRef[],
     attachments?: ChatAttachment[],
@@ -163,6 +166,9 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     const selectedTextSources = selectedContexts.map((entry) => entry.source);
     const selectedTextPaperContexts = selectedContexts.map(
       (entry) => entry.paperContext,
+    );
+    const selectedTextNoteContexts = selectedContexts.map(
+      (entry) => entry.noteContext,
     );
     const primarySelectedText = selectedTexts[0] || "";
     const selectedPaperContexts = deps.getSelectedPaperContexts(item.id);
@@ -284,6 +290,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         selectedTexts.length ? selectedTexts : undefined,
         selectedTexts.length ? selectedTextSources : undefined,
         selectedTexts.length ? selectedTextPaperContexts : undefined,
+        selectedTexts.length ? selectedTextNoteContexts : undefined,
         images,
         selectedPaperContexts,
         fullTextPaperContexts,
@@ -361,6 +368,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       selectedTexts.length ? selectedTexts : undefined,
       selectedTexts.length ? selectedTextSources : undefined,
       selectedTexts.length ? selectedTextPaperContexts : undefined,
+      selectedTexts.length ? selectedTextNoteContexts : undefined,
       selectedPaperContexts,
       fullTextPaperContexts,
       selectedFiles.length ? selectedFiles : undefined,

@@ -5,6 +5,7 @@ export type PaperSearchAttachmentCandidate = {
   contextItemId: number;
   title: string;
   score: number;
+  contentType?: string;
 };
 
 export type PaperSearchGroupCandidate = Omit<
@@ -14,6 +15,7 @@ export type PaperSearchGroupCandidate = Omit<
   attachments: PaperSearchAttachmentCandidate[];
   score: number;
   modifiedAt: number;
+  itemKind?: "standalone-note";
 };
 
 export type PaperSearchSlashToken = {
@@ -33,6 +35,7 @@ type IndexedPaperAttachment = {
   contextItemId: number;
   title: string;
   normalizedTitle: string;
+  contentType?: string;
 };
 
 type IndexedPaperCandidate = {
@@ -44,6 +47,7 @@ type IndexedPaperCandidate = {
   attachments: IndexedPaperAttachment[];
   modifiedAt: number;
   collectionIDs: number[];
+  itemKind?: "standalone-note";
   normalized: {
     title: string;
     shortTitle: string;
@@ -187,10 +191,16 @@ function buildIndexedAttachments(
 ): IndexedPaperAttachment[] {
   return attachments.map((attachment, index) => {
     const title = resolveAttachmentTitle(attachment, index, attachments.length);
+    const contentType =
+      normalizeText(
+        (attachment as unknown as { attachmentContentType?: string })
+          .attachmentContentType || "",
+      ) || undefined;
     return {
       contextItemId: attachment.id,
       title,
       normalizedTitle: normalizePaperSearchText(title),
+      contentType,
     };
   });
 }
@@ -850,10 +860,13 @@ export async function searchPaperCandidates(
 type AllItemsLibraryIndex = {
   libraryID: number;
   candidates: IndexedPaperCandidate[];
+  collections: IndexedCollection[];
 };
 
+const ZOTERO_NOTE_CONTENT_TYPE = "application/x-zotero-note";
+
 function buildIndexedItemCandidate(item: Zotero.Item): IndexedPaperCandidate | null {
-  // Standalone notes
+  // Standalone notes — represent as a single synthetic attachment pointing to itself
   if ((item as any).isNote?.() && !item.parentID) {
     const title =
       normalizeText(
@@ -862,7 +875,15 @@ function buildIndexedItemCandidate(item: Zotero.Item): IndexedPaperCandidate | n
     return {
       itemId: item.id,
       title,
-      attachments: [],
+      itemKind: "standalone-note",
+      attachments: [
+        {
+          contextItemId: item.id,
+          title,
+          normalizedTitle: normalizePaperSearchText(title),
+          contentType: ZOTERO_NOTE_CONTENT_TYPE,
+        },
+      ],
       modifiedAt: toModifiedTimestamp(item.dateModified),
       collectionIDs: getCollectionIDs(item),
       normalized: {
@@ -877,13 +898,33 @@ function buildIndexedItemCandidate(item: Zotero.Item): IndexedPaperCandidate | n
     };
   }
   if (!item?.isRegularItem?.()) return null;
-  // All attachments (not just PDF)
+  // All file attachments
   const allAtts: Zotero.Item[] = [];
   for (const attachmentId of item.getAttachments()) {
     const att = Zotero.Items.get(attachmentId);
     if (att && att.isAttachment?.()) allAtts.push(att);
   }
-  const attachments = buildIndexedAttachments(allAtts);
+  // Child notes — represented as attachment-like entries with a special content type
+  const noteAttachments: IndexedPaperAttachment[] = [];
+  const noteIds: number[] = (item as any).getNotes?.() || [];
+  for (const noteId of noteIds) {
+    const noteItem = Zotero.Items.get(noteId as number);
+    if (!noteItem || !(noteItem as any).isNote?.()) continue;
+    const noteTitle =
+      normalizeText(
+        (noteItem as any).getNoteTitle?.() ||
+          noteItem.getDisplayTitle?.() ||
+          "",
+      ) || `Note ${noteItem.id}`;
+    noteAttachments.push({
+      contextItemId: noteItem.id,
+      title: noteTitle,
+      normalizedTitle: normalizePaperSearchText(noteTitle),
+      contentType: ZOTERO_NOTE_CONTENT_TYPE,
+    });
+  }
+
+  const attachments = [...buildIndexedAttachments(allAtts), ...noteAttachments];
 
   const title = getItemFieldText(item, "title") || `Item ${item.id}`;
   const citationKey = getItemFieldText(item, "citationKey") || undefined;
@@ -917,6 +958,7 @@ function buildIndexedItemCandidate(item: Zotero.Item): IndexedPaperCandidate | n
 
 async function buildAllItemsLibraryIndex(libraryID: number): Promise<AllItemsLibraryIndex> {
   let items: Zotero.Item[] = [];
+  let collections: Zotero.Collection[] = [];
   try {
     const allItems: Zotero.Item[] = await Zotero.Items.getAll(libraryID, true, false, false);
     items = allItems.filter((item) => {
@@ -924,16 +966,21 @@ async function buildAllItemsLibraryIndex(libraryID: number): Promise<AllItemsLib
       if (item.isAttachment?.()) return false;
       return item.isRegularItem?.() ?? false;
     });
+    collections = Zotero.Collections.getByLibrary(libraryID, true) || [];
   } catch (err) {
     ztoolkit.log("LLM: Failed to build all-items index", err);
-    return { libraryID, candidates: [] };
+    return { libraryID, candidates: [], collections: [] };
   }
   const candidates: IndexedPaperCandidate[] = [];
   for (const item of items) {
     const candidate = buildIndexedItemCandidate(item);
     if (candidate) candidates.push(candidate);
   }
-  return { libraryID, candidates };
+  return {
+    libraryID,
+    candidates,
+    collections: collections.map((c) => buildIndexedCollection(c)),
+  };
 }
 
 async function getAllItemsLibraryIndex(libraryID: number): Promise<AllItemsLibraryIndex> {
@@ -977,10 +1024,12 @@ function buildVisibleItemCandidate(
     citationKey: candidate.citationKey,
     firstCreator: candidate.firstCreator,
     year: candidate.year,
+    itemKind: candidate.itemKind,
     attachments: candidate.attachments.map((att) => ({
       contextItemId: att.contextItemId,
       title: att.title,
       score: 0,
+      contentType: att.contentType,
     })),
     score: 0,
     modifiedAt: candidate.modifiedAt,
@@ -1040,4 +1089,68 @@ export async function searchAllItemCandidates(
   });
 
   return rankedCandidates.slice(0, normalizedLimit).map((e) => e.candidate);
+}
+
+export { ZOTERO_NOTE_CONTENT_TYPE };
+
+export async function browseAllItemCandidates(
+  libraryID: number,
+): Promise<PaperBrowseCollectionCandidate[]> {
+  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
+  const index = await getAllItemsLibraryIndex(Math.floor(libraryID));
+  const visibleCandidates = new Map<number, PaperSearchGroupCandidate>();
+  for (const candidate of index.candidates) {
+    visibleCandidates.set(candidate.itemId, buildVisibleItemCandidate(candidate));
+  }
+
+  const collectionMap = new Map<number, PaperBrowseCollectionCandidate>();
+  for (const collection of index.collections) {
+    collectionMap.set(collection.collectionId, {
+      collectionId: collection.collectionId,
+      name: collection.name,
+      childCollections: [],
+      papers: [],
+    });
+  }
+
+  for (const collection of index.collections) {
+    const node = collectionMap.get(collection.collectionId);
+    if (!node) continue;
+    for (const childCollectionID of collection.childCollectionIDs) {
+      const child = collectionMap.get(childCollectionID);
+      if (child) node.childCollections.push(child);
+    }
+    for (const childItemID of collection.childItemIDs) {
+      const candidate = visibleCandidates.get(childItemID);
+      if (candidate) node.papers.push(candidate);
+    }
+  }
+
+  const topLevelCollections: PaperBrowseCollectionCandidate[] = [];
+  for (const collection of index.collections) {
+    const node = collectionMap.get(collection.collectionId);
+    if (!node) continue;
+    if (!collection.parentID || !collectionMap.has(collection.parentID)) {
+      topLevelCollections.push(node);
+    }
+  }
+
+  const unfiledItems = index.candidates
+    .filter((candidate) => candidate.collectionIDs.length === 0)
+    .map((candidate) => visibleCandidates.get(candidate.itemId) || null)
+    .filter((c): c is PaperSearchGroupCandidate => Boolean(c))
+    .sort((a, b) =>
+      a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
+    );
+
+  if (unfiledItems.length) {
+    topLevelCollections.push({
+      collectionId: 0,
+      name: resolveLibraryDisplayName(libraryID),
+      childCollections: [],
+      papers: unfiledItems,
+    });
+  }
+
+  return topLevelCollections;
 }

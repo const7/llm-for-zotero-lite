@@ -86,20 +86,54 @@ function normalizeCreator(value: unknown): EditableArticleCreator | null {
   };
 }
 
+function normalizeCreatorsList(raw: unknown): EditableArticleCreator[] | null {
+  if (Array.isArray(raw)) {
+    const list = raw
+      .map((entry) => normalizeCreator(entry))
+      .filter((entry): entry is EditableArticleCreator => Boolean(entry));
+    return list;
+  }
+  // Model may send a comma/semicolon-separated string like "Stefan Leutgeb, Jill K. Leutgeb"
+  if (typeof raw === "string" && raw.trim()) {
+    return raw
+      .split(/;|,(?![^(]*\))/)
+      .map((name) => name.trim())
+      .filter(Boolean)
+      .map((name) => ({ creatorType: "author", name, fieldMode: 1 as const }));
+  }
+  return null;
+}
+
 function normalizeMetadataPatch(value: unknown): EditableArticleMetadataPatch | null {
   if (!validateObject<Record<string, unknown>>(value)) return null;
+  const normalizedValue = validateObject<Record<string, unknown>>(value.fields)
+    ? {
+        ...(value.fields as Record<string, unknown>),
+        ...value,
+      }
+    : value;
   const metadata: EditableArticleMetadataPatch = {};
   for (const fieldName of EDITABLE_ARTICLE_METADATA_FIELDS) {
-    if (!Object.prototype.hasOwnProperty.call(value, fieldName)) continue;
-    const normalized = normalizeStringValue(value[fieldName]);
+    if (!Object.prototype.hasOwnProperty.call(normalizedValue, fieldName)) continue;
+    const normalized = normalizeStringValue(normalizedValue[fieldName]);
     if (normalized === null) return null;
     metadata[fieldName as EditableArticleMetadataField] = normalized;
   }
-  if (Object.prototype.hasOwnProperty.call(value, "creators")) {
-    if (!Array.isArray(value.creators)) return null;
-    metadata.creators = value.creators
-      .map((entry) => normalizeCreator(entry))
-      .filter((entry): entry is EditableArticleCreator => Boolean(entry));
+  // Accept "creators" or "authors" (common model alias). Handle arrays and
+  // comma/semicolon-separated strings. Non-parseable values are silently skipped
+  // so they do not abort the entire patch.
+  const rawCreators =
+    Object.prototype.hasOwnProperty.call(normalizedValue, "creators")
+      ? normalizedValue.creators
+      : Object.prototype.hasOwnProperty.call(normalizedValue, "authors")
+        ? normalizedValue.authors
+        : undefined;
+  if (rawCreators !== undefined) {
+    const creators = normalizeCreatorsList(rawCreators);
+    if (creators !== null) {
+      metadata.creators = creators;
+    }
+    // If unparseable, skip rather than aborting the whole patch
   }
   return Object.keys(metadata).length ? metadata : null;
 }
@@ -117,7 +151,10 @@ function normalizeUpdateMetadataOperation(
   value: Record<string, unknown>,
   fallbackId: string,
 ): UpdateMetadataOperation | null {
-  const metadata = normalizeMetadataPatch(value.metadata);
+  const metadata =
+    normalizeMetadataPatch(value.metadata) ||
+    normalizeMetadataPatch(value.patch) ||
+    normalizeMetadataPatch(value);
   if (!metadata) return null;
   return {
     id: normalizeOperationId(value.id, fallbackId),
@@ -343,6 +380,10 @@ function normalizeImportIdentifiersOperation(
     type: "import_identifiers",
     identifiers,
     libraryID: normalizePositiveInt(value.libraryID),
+    targetCollectionId:
+      normalizePositiveInt(value.targetCollectionId) ||
+      normalizePositiveInt(value.collectionId) ||
+      normalizePositiveInt(value.folderId),
   };
 }
 
@@ -403,6 +444,10 @@ function getMoveAssignmentFieldId(operation: MoveToCollectionOperation): string 
   return `moveAssignments:${operation.id || "move_to_collection"}`;
 }
 
+function getTagAssignmentFieldId(operation: ApplyTagsOperation): string {
+  return `tagAssignments:${operation.id || "apply_tags"}`;
+}
+
 function getSaveNoteContentFieldId(operation: SaveNoteOperation): string {
   return `saveNoteContent:${operation.id || "save_note"}`;
 }
@@ -461,6 +506,24 @@ function getMoveAssignments(
     targetCollectionId: operation.targetCollectionId,
     targetCollectionName: operation.targetCollectionName,
     targetCollectionPath: operation.targetCollectionPath,
+  }));
+}
+
+function getTagAssignments(
+  operation: ApplyTagsOperation,
+): Array<{ itemId: number; tags: string[] }> {
+  if (operation.assignments?.length) {
+    return operation.assignments.map((assignment) => ({
+      itemId: assignment.itemId,
+      tags: Array.isArray(assignment.tags) ? assignment.tags : [],
+    }));
+  }
+  if (!operation.itemIds?.length) {
+    return [];
+  }
+  return operation.itemIds.map((itemId) => ({
+    itemId,
+    tags: operation.tags || [],
   }));
 }
 
@@ -576,6 +639,37 @@ function buildMoveAssignmentField(
   };
 }
 
+function buildTagAssignmentField(
+  operation: ApplyTagsOperation,
+  zoteroGateway: ZoteroGateway,
+) {
+  const assignments = getTagAssignments(operation);
+  if (!assignments.length) {
+    return null;
+  }
+  const targetByItemId = new Map(
+    zoteroGateway
+      .getPaperTargetsByItemIds(assignments.map((assignment) => assignment.itemId))
+      .map((target) => [target.itemId, target] as const),
+  );
+  return {
+    type: "tag_assignment_table" as const,
+    id: getTagAssignmentFieldId(operation),
+    label: "Suggested tags",
+    rows: assignments.map((assignment) => {
+      const target = targetByItemId.get(assignment.itemId);
+      const details = [target?.firstCreator || "", target?.year || ""].filter(Boolean);
+      return {
+        id: `${assignment.itemId}`,
+        label: target?.title || `Item ${assignment.itemId}`,
+        description: details.join(" · ") || undefined,
+        value: assignment.tags,
+        placeholder: "tag-one, tag-two",
+      };
+    }),
+  };
+}
+
 function normalizeMoveAssignmentsFromResolution(
   value: unknown,
 ): Array<{ itemId: number; targetCollectionId: number }> | null {
@@ -606,8 +700,110 @@ function normalizeMoveAssignmentsFromResolution(
     );
 }
 
+function normalizeTagAssignmentsFromResolution(
+  value: unknown,
+): Array<{ itemId: number; tags: string[] }> | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  return value
+    .map((entry) => {
+      if (!validateObject<Record<string, unknown>>(entry)) {
+        return null;
+      }
+      const itemId = normalizePositiveInt(entry.id);
+      const tags = normalizeStringArray(entry.value);
+      if (!itemId || !tags?.length) {
+        return null;
+      }
+      return { itemId, tags };
+    })
+    .filter((entry): entry is { itemId: number; tags: string[] } => Boolean(entry));
+}
+
 function describeCollection(collection: ReturnType<ZoteroGateway["getCollectionSummary"]>) {
   return collection ? collection.path || collection.name : "unknown collection";
+}
+
+// ── Metadata before/after review helpers ────────────────────────────────────
+
+const METADATA_FIELD_DISPLAY_LABELS: Record<string, string> = {
+  title: "Title",
+  shortTitle: "Short title",
+  abstractNote: "Abstract",
+  publicationTitle: "Journal",
+  journalAbbreviation: "Journal abbreviation",
+  proceedingsTitle: "Proceedings title",
+  date: "Date",
+  volume: "Volume",
+  issue: "Issue",
+  pages: "Pages",
+  DOI: "DOI",
+  url: "URL",
+  language: "Language",
+  extra: "Extra",
+  ISSN: "ISSN",
+  ISBN: "ISBN",
+  publisher: "Publisher",
+  place: "Place",
+};
+
+function formatCreatorsDisplay(creators: EditableArticleCreator[]): string {
+  return creators
+    .map((c) => {
+      if (c.name) return c.name;
+      return [c.firstName, c.lastName].filter(Boolean).join(" ");
+    })
+    .filter(Boolean)
+    .join("; ");
+}
+
+function buildUpdateMetadataReviewField(
+  operation: UpdateMetadataOperation,
+  zoteroGateway: ZoteroGateway,
+  context: Parameters<
+    NonNullable<AgentToolDefinition<MutateLibraryInput, unknown>["createPendingAction"]>
+  >[1],
+  itemTitle: string,
+  showTitle: boolean,
+): Extract<AgentPendingField, { type: "review_table" }> | null {
+  const item = zoteroGateway.resolveMetadataItem({
+    itemId: operation.itemId,
+    paperContext: operation.paperContext,
+    request: context.request,
+    item: context.item,
+  });
+  const snapshot = zoteroGateway.getEditableArticleMetadata(item);
+  const rows: Extract<AgentPendingField, { type: "review_table" }>["rows"] = [];
+
+  for (const fieldName of EDITABLE_ARTICLE_METADATA_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(operation.metadata, fieldName)) continue;
+    const newValue = operation.metadata[fieldName] ?? "";
+    const label = METADATA_FIELD_DISPLAY_LABELS[fieldName] || fieldName;
+    const before = snapshot?.fields[fieldName] ?? "";
+    rows.push({
+      key: fieldName,
+      label,
+      before,
+      after: newValue,
+      multiline: fieldName === "abstractNote",
+    });
+  }
+
+  if (operation.metadata.creators !== undefined) {
+    const before = snapshot ? formatCreatorsDisplay(snapshot.creators) : "";
+    const after = formatCreatorsDisplay(operation.metadata.creators);
+    rows.push({ key: "creators", label: "Authors", before, after });
+  }
+
+  if (!rows.length) return null;
+
+  return {
+    type: "review_table",
+    id: `metadataReview:${operation.id}`,
+    label: showTitle ? itemTitle : undefined,
+    rows,
+  };
 }
 
 function summarizeOperation(
@@ -691,13 +887,19 @@ function summarizeOperation(
             ? "Standalone note"
             : "Attach to current or selected item",
       };
-    case "import_identifiers":
+    case "import_identifiers": {
+      const collection = operation.targetCollectionId
+        ? zoteroGateway.getCollectionSummary(operation.targetCollectionId)
+        : null;
       return {
         label: `Import ${operation.identifiers.length} identifier${
           operation.identifiers.length === 1 ? "" : "s"
         }`,
-        description: operation.identifiers.join(", "),
+        description: collection
+          ? `${operation.identifiers.join(", ")} → ${describeCollection(collection)}`
+          : operation.identifiers.join(", "),
       };
+    }
     case "trash_items": {
       const titles = operation.itemIds.map((id) => {
         const item = zoteroGateway.getItem(id);
@@ -759,7 +961,14 @@ export function createMutateLibraryTool(
           request.userText,
         ),
       instruction:
-        "When the user asks you to change the Zotero library, call mutate_library as soon as you have the needed IDs. The confirmation card is the deliverable; do not stop with a prose summary. For folder filing, you may call mutate_library with operations:[{type:'move_to_collection', itemIds:[...]}] and let the confirmation card collect the destination folders, or prefill assignments:[{itemId, targetCollectionId}] when you already know the exact targets.",
+        "When the user asks you to change the Zotero library, call mutate_library as soon as you have the needed IDs. The confirmation card is the deliverable; do not stop with a prose summary." +
+        "\n\nOperation shapes:" +
+        "\n• Metadata (fields or authors): {type:'update_metadata', itemId:N, metadata:{title:'…', creators:[{firstName:'…', lastName:'…', creatorType:'author'}]}}" +
+        "\n  — Use 'creators' (not 'authors') inside metadata. Each creator needs firstName+lastName or name. creatorType defaults to 'author'." +
+        "\n• Tags: {type:'apply_tags', itemIds:[…], tags:['…']}" +
+        "\n• Move: {type:'move_to_collection', itemIds:[…]} — let the confirmation card collect destinations, or prefill assignments:[{itemId, targetCollectionId}]." +
+        "\n• Note: {type:'save_note', content:'…', targetItemId:N}" +
+        "\n• Trash: {type:'trash_items', itemIds:[…]}",
     },
     presentation: {
       label: "Mutate Library",
@@ -809,6 +1018,29 @@ export function createMutateLibraryTool(
       });
     },
     createPendingAction: async (input, context) => {
+      const metadataOperations = input.operations.filter(
+        (op): op is UpdateMetadataOperation => op.type === "update_metadata",
+      );
+      const showMetadataTitle = metadataOperations.length > 1;
+      const metadataReviewFields = metadataOperations
+        .map((op) => {
+          const item = zoteroGateway.resolveMetadataItem({
+            itemId: op.itemId,
+            paperContext: op.paperContext,
+            request: context.request,
+            item: context.item,
+          });
+          const title =
+            zoteroGateway.getEditableArticleMetadata(item)?.title ||
+            op.paperContext?.title ||
+            `Item ${op.itemId ?? ""}`;
+          return buildUpdateMetadataReviewField(op, zoteroGateway, context, title, showMetadataTitle);
+        })
+        .filter(
+          (f): f is NonNullable<ReturnType<typeof buildUpdateMetadataReviewField>> =>
+            Boolean(f),
+        );
+
       const moveAssignmentFields = input.operations
         .filter(
           (operation): operation is MoveToCollectionOperation =>
@@ -821,25 +1053,47 @@ export function createMutateLibraryTool(
           ): field is NonNullable<ReturnType<typeof buildMoveAssignmentField>> =>
             Boolean(field),
         );
+      const tagAssignmentFields = input.operations
+        .filter(
+          (operation): operation is ApplyTagsOperation =>
+            operation.type === "apply_tags",
+        )
+        .map((operation) => buildTagAssignmentField(operation, zoteroGateway))
+        .filter(
+          (
+            field,
+          ): field is NonNullable<ReturnType<typeof buildTagAssignmentField>> =>
+            Boolean(field),
+        );
       const saveNoteReviewFields = buildSaveNoteReviewFields(input.operations);
+      const hasTagAssignments = tagAssignmentFields.length > 0;
       const hasMoveAssignments = moveAssignmentFields.length > 0;
       const hasNoteDrafts = saveNoteReviewFields.length > 0;
+      const descriptions: string[] = [];
+      if (metadataReviewFields.length > 0) descriptions.push("Review the changes below");
+      if (hasNoteDrafts) descriptions.push("review the note drafts");
+      if (hasTagAssignments) descriptions.push("edit any tag assignments");
+      if (hasMoveAssignments) descriptions.push("choose destination folders");
+      descriptions.push("uncheck any operation to skip it");
+      const description =
+        descriptions.length > 1
+          ? descriptions.slice(0, -1).join(", ") +
+            ", and " +
+            descriptions[descriptions.length - 1] +
+            "."
+          : (descriptions[0] ?? "Uncheck any operation to skip it.") + ".";
       return {
         toolName: "mutate_library",
         title: `Review ${input.operations.length} library change${
           input.operations.length === 1 ? "" : "s"
         }`,
         description:
-          hasMoveAssignments && hasNoteDrafts
-            ? "Review the note drafts below, choose destination folders, uncheck any operation to skip it, or edit the JSON below before approval."
-            : hasMoveAssignments
-              ? "Choose destination folders below, uncheck any operation to skip it, or edit the JSON below before approval."
-              : hasNoteDrafts
-                ? "Review the note drafts below, uncheck any operation to skip it, or edit the JSON below before approval."
-                : "Uncheck any operation to skip it, or edit the JSON below before approval.",
+          description.charAt(0).toUpperCase() + description.slice(1),
         confirmLabel: "Apply changes",
         cancelLabel: "Cancel",
         fields: [
+          ...metadataReviewFields,
+          ...tagAssignmentFields,
           ...moveAssignmentFields,
           ...saveNoteReviewFields,
           {
@@ -856,14 +1110,6 @@ export function createMutateLibraryTool(
               };
             }),
           },
-          {
-            type: "textarea",
-            id: "operationsJson",
-            label: "Operations JSON",
-            value: JSON.stringify(input.operations, null, 2),
-            editorMode: "json",
-            spellcheck: false,
-          },
         ],
       };
     },
@@ -878,7 +1124,9 @@ export function createMutateLibraryTool(
           )
           .map((operation) => [operation.id || "save_note", operation.content]),
       );
-      let operations = normalizeOperations(
+      // Fall back to _input.operations when no JSON was submitted (e.g. when
+      // the confirmation card shows review_table instead of a raw JSON editor).
+      const rawOps =
         typeof resolutionData.operationsJson === "string"
           ? (() => {
               try {
@@ -887,10 +1135,10 @@ export function createMutateLibraryTool(
                 return null;
               }
             })()
-          : resolutionData.operations,
-      );
+          : (resolutionData.operations ?? _input.operations);
+      let operations = normalizeOperations(rawOps);
       if (!operations?.length) {
-        return fail("operationsJson must contain a valid operations array");
+        return fail("No valid operations to apply");
       }
       const selectedIds = normalizeSelectedOperationIds(
         resolutionData.selectedOperations,
@@ -918,6 +1166,42 @@ export function createMutateLibraryTool(
               };
             }
             return operation;
+          }
+          if (operation.type === "apply_tags") {
+            const selectedAssignments = normalizeTagAssignmentsFromResolution(
+              resolutionData[getTagAssignmentFieldId(operation)],
+            );
+            if (selectedAssignments) {
+              if (!selectedAssignments.length) {
+                return null;
+              }
+              return {
+                ...operation,
+                assignments: selectedAssignments,
+                itemIds: undefined,
+                tags: undefined,
+              } satisfies ApplyTagsOperation;
+            }
+            const directAssignments =
+              operation.assignments
+                ?.filter(
+                  (assignment) =>
+                    Array.isArray(assignment.tags) && assignment.tags.length > 0,
+                )
+                .map((assignment) => ({
+                  itemId: assignment.itemId,
+                  tags: assignment.tags,
+                })) || [];
+            if (directAssignments.length) {
+              return {
+                ...operation,
+                assignments: directAssignments,
+              } satisfies ApplyTagsOperation;
+            }
+            if (operation.itemIds?.length && operation.tags?.length) {
+              return operation;
+            }
+            return null;
           }
           if (operation.type !== "move_to_collection") {
             return operation;

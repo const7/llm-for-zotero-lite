@@ -92,6 +92,7 @@ export type ImportIdentifiersOperation = {
   type: "import_identifiers";
   identifiers: string[];
   libraryID?: number;
+  targetCollectionId?: number;
 };
 
 export type LibraryMutationOperation =
@@ -471,6 +472,7 @@ export class LibraryMutationService {
         const result = await this.zoteroGateway.importPapersByIdentifiers(
           operation.identifiers,
           operation.libraryID,
+          operation.targetCollectionId,
         );
         return {
           result: {

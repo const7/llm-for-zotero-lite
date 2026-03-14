@@ -1917,7 +1917,9 @@ async function locateQuoteBySegments(
 export async function locateQuoteInLivePdfReader(
   reader: any,
   quoteText: string,
+  options?: { skipFindController?: boolean },
 ): Promise<LivePdfSelectionLocateResult> {
+  const skipFindController = options?.skipFindController ?? false;
   const cleanQuote = stripBoundaryEllipsis(sanitizeText(quoteText || "").trim());
   if (!cleanQuote) {
     return {
@@ -2003,14 +2005,16 @@ export async function locateQuoteInLivePdfReader(
           }
         }
 
-        const segmentFallback = await locateQuoteBySegments(
-          reader,
-          cleanQuote,
-          allPages,
-          expectedPageIndex,
-        );
-        if (segmentFallback) {
-          return segmentFallback;
+        if (!skipFindController) {
+          const segmentFallback = await locateQuoteBySegments(
+            reader,
+            cleanQuote,
+            allPages,
+            expectedPageIndex,
+          );
+          if (segmentFallback) {
+            return segmentFallback;
+          }
         }
       }
 
@@ -2021,12 +2025,17 @@ export async function locateQuoteInLivePdfReader(
     }
 
     // Final fallback: use live reader find controller search strategies.
-    const findControllerResult = await locateQuoteWithFindController(
-      reader,
-      cleanQuote,
-    );
-    if (findControllerResult) {
-      return findControllerResult;
+    // Skipped when skipFindController is true (e.g. background page-label
+    // resolution during decoration) to avoid opening the find bar and
+    // visibly scrolling the reader without user interaction.
+    if (!skipFindController) {
+      const findControllerResult = await locateQuoteWithFindController(
+        reader,
+        cleanQuote,
+      );
+      if (findControllerResult) {
+        return findControllerResult;
+      }
     }
 
     // ── Not found — return error immediately ─────────────────────────

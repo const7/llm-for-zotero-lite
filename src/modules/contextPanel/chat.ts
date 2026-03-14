@@ -37,6 +37,7 @@ import type {
   ReasoningLevelSelection,
   AdvancedModelParams,
   ChatAttachment,
+  NoteContextRef,
   SelectedTextContext,
   SelectedTextSource,
   PaperContextRef,
@@ -92,6 +93,7 @@ import {
   resolvePromptText,
 } from "./textUtils";
 import {
+  normalizeSelectedTextNoteContexts,
   normalizeSelectedTextPaperContexts as normalizeSelectedTextPaperContextEntries,
   normalizeSelectedTextSources,
   normalizePaperContextRefs,
@@ -285,6 +287,15 @@ function normalizeSelectedTextPaperContextsByIndex(
       sanitizeText,
     },
   );
+}
+
+function normalizeSelectedTextNoteContextsByIndex(
+  selectedTextNoteContexts: unknown,
+  count: number,
+): (NoteContextRef | undefined)[] {
+  return normalizeSelectedTextNoteContexts(selectedTextNoteContexts, count, {
+    sanitizeText,
+  });
 }
 
 function normalizePaperContexts(paperContexts: unknown): PaperContextRef[] {
@@ -732,6 +743,10 @@ function toPanelMessage(message: StoredChatMessage): Message {
     message.selectedTextPaperContexts,
     selectedTexts.length,
   );
+  const selectedTextNoteContexts = normalizeSelectedTextNoteContextsByIndex(
+    (message as Message).selectedTextNoteContexts,
+    selectedTexts.length,
+  );
   const paperContexts = normalizePaperContexts(message.paperContexts);
   const fullTextPaperContexts = normalizePaperContexts(
     message.fullTextPaperContexts,
@@ -752,6 +767,11 @@ function toPanelMessage(message: StoredChatMessage): Message {
       Boolean(entry),
     )
       ? selectedTextPaperContexts
+      : undefined,
+    selectedTextNoteContexts: selectedTextNoteContexts.some((entry) =>
+      Boolean(entry),
+    )
+      ? selectedTextNoteContexts
       : undefined,
     selectedTextExpandedIndex: -1,
     paperContexts: paperContexts.length ? paperContexts : undefined,
@@ -1615,11 +1635,16 @@ function syncComposeContextForInlineEdit(
     userMessage.selectedTextPaperContexts,
     selectedTexts.length,
   );
+  const selectedTextNoteContexts = normalizeSelectedTextNoteContextsByIndex(
+    userMessage.selectedTextNoteContexts,
+    selectedTexts.length,
+  );
   const selectedTextEntries: SelectedTextContext[] = selectedTexts.map(
     (text, index) => ({
       text,
       source: selectedTextSources[index] || "pdf",
       paperContext: selectedTextPaperContexts[index],
+      noteContext: selectedTextNoteContexts[index],
     }),
   );
   setSelectedTextContextEntries(conversationKey, selectedTextEntries);
@@ -1683,6 +1708,7 @@ export async function editLatestUserMessageAndRetry(
   selectedTexts?: string[],
   selectedTextSources?: SelectedTextSource[],
   selectedTextPaperContexts?: (PaperContextRef | undefined)[],
+  selectedTextNoteContexts?: (NoteContextRef | undefined)[],
   screenshotImages?: string[],
   paperContexts?: PaperContextRef[],
   fullTextPaperContexts?: PaperContextRef[],
@@ -1721,6 +1747,11 @@ export async function editLatestUserMessageAndRetry(
   const selectedTextPaperContextsForMessage =
     normalizeSelectedTextPaperContextsByIndex(
       selectedTextPaperContexts,
+      selectedTextsForMessage.length,
+    );
+  const selectedTextNoteContextsForMessage =
+    normalizeSelectedTextNoteContextsByIndex(
+      selectedTextNoteContexts,
       selectedTextsForMessage.length,
     );
   const selectedTextForMessage = selectedTextsForMessage[0] || "";
@@ -1762,6 +1793,10 @@ export async function editLatestUserMessageAndRetry(
   retryPair.userMessage.selectedTextPaperContexts =
     selectedTextPaperContextsForMessage.some((entry) => Boolean(entry))
       ? selectedTextPaperContextsForMessage
+      : undefined;
+  retryPair.userMessage.selectedTextNoteContexts =
+    selectedTextNoteContextsForMessage.some((entry) => Boolean(entry))
+      ? selectedTextNoteContextsForMessage
       : undefined;
   retryPair.userMessage.selectedTextExpandedIndex = -1;
   retryPair.userMessage.screenshotImages = screenshotImagesForMessage.length
@@ -2131,6 +2166,7 @@ export async function editUserTurnAndRetry(
   selectedTexts?: string[],
   selectedTextSources?: SelectedTextSource[],
   selectedTextPaperContexts?: (PaperContextRef | undefined)[],
+  selectedTextNoteContexts?: (NoteContextRef | undefined)[],
   screenshotImages?: string[],
   paperContexts?: PaperContextRef[],
   fullTextPaperContexts?: PaperContextRef[],
@@ -2210,6 +2246,11 @@ export async function editUserTurnAndRetry(
       selectedTextPaperContexts,
       selectedTextsForMessage.length,
     );
+  const selectedTextNoteContextsForMessage =
+    normalizeSelectedTextNoteContextsByIndex(
+      selectedTextNoteContexts,
+      selectedTextsForMessage.length,
+    );
   const selectedTextForMessage = selectedTextsForMessage[0] || "";
   const screenshotImagesForMessage = Array.isArray(screenshotImages)
     ? screenshotImages
@@ -2242,6 +2283,11 @@ export async function editUserTurnAndRetry(
     (entry) => Boolean(entry),
   )
     ? selectedTextPaperContextsForMessage
+    : undefined;
+  userMsg.selectedTextNoteContexts = selectedTextNoteContextsForMessage.some(
+    (entry) => Boolean(entry),
+  )
+    ? selectedTextNoteContextsForMessage
     : undefined;
   userMsg.selectedTextExpandedIndex = -1;
   userMsg.screenshotImages = screenshotImagesForMessage.length
@@ -2404,6 +2450,7 @@ function buildAgentEngineDeps(): AgentEngineDeps {
     normalizeSelectedTexts,
     normalizeSelectedTextSources,
     normalizeSelectedTextPaperContextsByIndex,
+    normalizeSelectedTextNoteContextsByIndex,
     normalizePaperContexts,
     includeAutoLoadedPaperContext,
     findLatestRetryPair,
@@ -2455,6 +2502,7 @@ async function sendAgentQuestion(
   selectedTexts?: string[],
   selectedTextSources?: SelectedTextSource[],
   selectedTextPaperContexts?: (PaperContextRef | undefined)[],
+  selectedTextNoteContexts?: (NoteContextRef | undefined)[],
   paperContexts?: PaperContextRef[],
   fullTextPaperContexts?: PaperContextRef[],
   attachments?: ChatAttachment[],
@@ -2462,6 +2510,7 @@ async function sendAgentQuestion(
   await sendAgentTurn(
     body, item, question, images, model, apiBase, apiKey, reasoning, advanced,
     displayQuestion, selectedTexts, selectedTextSources, selectedTextPaperContexts,
+    selectedTextNoteContexts,
     paperContexts, fullTextPaperContexts, attachments,
     buildAgentEngineDeps(),
   );
@@ -2481,6 +2530,7 @@ export async function sendQuestion(
   selectedTexts?: string[],
   selectedTextSources?: SelectedTextSource[],
   selectedTextPaperContexts?: (PaperContextRef | undefined)[],
+  selectedTextNoteContexts?: (NoteContextRef | undefined)[],
   paperContexts?: PaperContextRef[],
   fullTextPaperContexts?: PaperContextRef[],
   attachments?: ChatAttachment[],
@@ -2503,6 +2553,7 @@ export async function sendQuestion(
       selectedTexts,
       selectedTextSources,
       selectedTextPaperContexts,
+      selectedTextNoteContexts,
       paperContexts,
       fullTextPaperContexts,
       attachments,
@@ -2548,6 +2599,11 @@ export async function sendQuestion(
       selectedTextPaperContexts,
       selectedTextsForMessage.length,
     );
+  const selectedTextNoteContextsForMessage =
+    normalizeSelectedTextNoteContextsByIndex(
+      selectedTextNoteContexts,
+      selectedTextsForMessage.length,
+    );
   const selectedTextForMessage = selectedTextsForMessage[0] || "";
   const normalizedPaperContexts = normalizePaperContexts(paperContexts);
   const normalizedFullTextPaperContexts = normalizePaperContexts(
@@ -2588,6 +2644,11 @@ export async function sendQuestion(
       (entry) => Boolean(entry),
     )
       ? selectedTextPaperContextsForMessage
+      : undefined,
+    selectedTextNoteContexts: selectedTextNoteContextsForMessage.some(
+      (entry) => Boolean(entry),
+    )
+      ? selectedTextNoteContextsForMessage
       : undefined,
     selectedTextExpandedIndex: -1,
     paperContexts: paperContextsForMessage.length

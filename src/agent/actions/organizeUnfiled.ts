@@ -99,10 +99,14 @@ export const organizeUnfiledAction: AgentAction<OrganizeUnfiledInput, OrganizeUn
       for (const col of colResults) {
         if (col && typeof col === "object") {
           const c = col as Record<string, unknown>;
-          if (c.id || c.collectionID) {
+          const collectionId =
+            (typeof c.collectionId === "number" ? c.collectionId : null) ??
+            (typeof c.id === "number" ? c.id : null) ??
+            (typeof c.collectionID === "number" ? c.collectionID : null);
+          if (collectionId) {
             collections.push({
-              id: (c.id || c.collectionID) as number | string,
-              name: typeof c.name === "string" ? c.name : String(c.id || c.collectionID),
+              id: collectionId,
+              name: typeof c.name === "string" ? c.name : String(collectionId),
             });
           }
         }
@@ -147,8 +151,15 @@ export const organizeUnfiledAction: AgentAction<OrganizeUnfiledInput, OrganizeUn
     );
 
     const mutateContent = mutateResult.content as Record<string, unknown>;
+    const mutateResults = Array.isArray(mutateContent.results) ? mutateContent.results : [];
     const movedCount = mutateResult.ok
-      ? (typeof mutateContent.moved === "number" ? mutateContent.moved : itemIds.length)
+      ? mutateResults.reduce((total, entry) => {
+          if (!entry || typeof entry !== "object") return total;
+          const result = (entry as { result?: unknown }).result;
+          if (!result || typeof result !== "object") return total;
+          const moved = Number((result as { movedCount?: unknown }).movedCount || 0);
+          return total + (Number.isFinite(moved) ? moved : 0);
+        }, 0)
       : 0;
 
     ctx.onProgress({

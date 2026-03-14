@@ -44,8 +44,11 @@ function cleanupPinnedOwnerIfEmpty(
 
 function normalizeTextSource(
   source: SelectedTextContext["source"],
-): "pdf" | "model" {
-  return source === "model" ? "model" : "pdf";
+): "pdf" | "model" | "note" | "note-edit" {
+  if (source === "model") return "model";
+  if (source === "note") return "note";
+  if (source === "note-edit") return "note-edit";
+  return "pdf";
 }
 
 function normalizeText(value: unknown): string {
@@ -61,13 +64,16 @@ export function buildPinnedSelectedTextKey(
   const paperKey = paperContext
     ? `${Math.floor(paperContext.itemId)}:${Math.floor(paperContext.contextItemId)}`
     : "-";
+  const noteKey = context.noteContext
+    ? `${Math.floor(context.noteContext.noteItemId)}:${context.noteContext.noteKind}`
+    : "-";
   const contextItemId = Number.isFinite(context.contextItemId)
     ? Math.max(0, Math.floor(context.contextItemId!))
     : 0;
   const pageIndex = Number.isFinite(context.pageIndex)
     ? Math.max(0, Math.floor(context.pageIndex!))
     : -1;
-  return `${source}\u241f${paperKey}\u241f${contextItemId}\u241f${pageIndex}\u241f${text}`;
+  return `${source}\u241f${noteKey}\u241f${paperKey}\u241f${contextItemId}\u241f${pageIndex}\u241f${text}`;
 }
 
 export function buildPinnedImageKey(imageUrl: string): string {

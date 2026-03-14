@@ -6,6 +6,7 @@ import type {
   ChatAttachment,
   SelectedTextContext,
   PaperContextRef,
+  OtherContextRef,
   ChatRuntimeMode,
   PaperContextSendMode,
 } from "./types";
@@ -93,6 +94,7 @@ export const selectedImageCache = new Map<number, string[]>();
 export const selectedFileAttachmentCache = new Map<number, ChatAttachment[]>();
 export const selectedFilePreviewExpandedCache = new Map<number, boolean>();
 export const selectedPaperContextCache = new Map<number, PaperContextRef[]>();
+export const selectedOtherRefContextCache = new Map<number, OtherContextRef[]>();
 export const paperContextModeOverrides = new Map<
   number,
   Map<string, PaperContextSendMode>

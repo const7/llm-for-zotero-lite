@@ -15,6 +15,7 @@ import type {
 import type {
   AdvancedModelParams,
   ChatAttachment,
+  NoteContextRef,
   PaperContextRef,
   SelectedTextSource,
 } from "../../../shared/types";
@@ -154,6 +155,10 @@ export type AgentEngineDeps = {
     contexts: unknown,
     count: number,
   ) => (PaperContextRef | undefined)[];
+  normalizeSelectedTextNoteContextsByIndex: (
+    contexts: unknown,
+    count: number,
+  ) => (NoteContextRef | undefined)[];
   normalizePaperContexts: (paperContexts: unknown) => PaperContextRef[];
   includeAutoLoadedPaperContext: (
     item: Zotero.Item,
@@ -200,6 +205,7 @@ export type AgentEngineDeps = {
     selectedTexts: string[] | undefined,
     selectedTextSources: SelectedTextSource[] | undefined,
     selectedTextPaperContexts: (PaperContextRef | undefined)[] | undefined,
+    selectedTextNoteContexts: (NoteContextRef | undefined)[] | undefined,
     paperContexts: PaperContextRef[] | undefined,
     fullTextPaperContexts: PaperContextRef[] | undefined,
     attachments: ChatAttachment[] | undefined,
@@ -233,6 +239,7 @@ export async function sendAgentTurn(
   selectedTexts: string[] | undefined,
   selectedTextSources: SelectedTextSource[] | undefined,
   selectedTextPaperContexts: (PaperContextRef | undefined)[] | undefined,
+  selectedTextNoteContexts: (NoteContextRef | undefined)[] | undefined,
   paperContexts: PaperContextRef[] | undefined,
   fullTextPaperContexts: PaperContextRef[] | undefined,
   attachments: ChatAttachment[] | undefined,
@@ -300,6 +307,7 @@ export async function sendAgentTurn(
         selectedTexts,
         selectedTextSources,
         selectedTextPaperContexts,
+        selectedTextNoteContexts,
         paperContexts,
         fullTextPaperContexts,
         attachments,
@@ -322,6 +330,11 @@ export async function sendAgentTurn(
   const selectedTextPaperContextsForMessage =
     deps.normalizeSelectedTextPaperContextsByIndex(
       selectedTextPaperContexts,
+      selectedTextsForMessage.length,
+    );
+  const selectedTextNoteContextsForMessage =
+    deps.normalizeSelectedTextNoteContextsByIndex(
+      selectedTextNoteContexts,
       selectedTextsForMessage.length,
     );
   const screenshotImagesForMessage = Array.isArray(images)
@@ -348,6 +361,11 @@ export async function sendAgentTurn(
       (entry) => Boolean(entry),
     )
       ? selectedTextPaperContextsForMessage
+      : undefined,
+    selectedTextNoteContexts: selectedTextNoteContextsForMessage.some(
+      (entry) => Boolean(entry),
+    )
+      ? selectedTextNoteContextsForMessage
       : undefined,
     selectedTextExpandedIndex: -1,
     paperContexts: paperContextsForMessage.length

@@ -99,6 +99,8 @@ function buildUserMessage(request: AgentRuntimeRequest): AgentModelMessage {
         const sourceLabel =
           source === "model"
             ? "model response"
+            : source === "note"
+              ? "Zotero note"
             : source === "note-edit"
               ? "active note editing focus"
               : "PDF reader";

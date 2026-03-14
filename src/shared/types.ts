@@ -3,7 +3,7 @@
  * This file has zero imports — all types are pure data shapes.
  */
 
-export type SelectedTextSource = "pdf" | "model" | "note-edit";
+export type SelectedTextSource = "pdf" | "model" | "note" | "note-edit";
 
 export type ChatAttachmentCategory =
   | "image"
@@ -39,6 +39,23 @@ export type PaperContextRef = {
   attachmentTitle?: string;
   firstCreator?: string;
   year?: string;
+};
+
+/** A Zotero note (item note or standalone) selected as a reference context. */
+export type NoteContextRef = {
+  noteItemId: number;
+  parentItemId?: number;
+  noteKind: "item" | "standalone";
+  title: string;
+};
+
+/** A non-PDF, non-note file attachment (image/figure or other file) selected as reference context. */
+export type OtherContextRef = {
+  contextItemId: number;
+  parentItemId?: number;
+  title: string;
+  contentType: string;
+  refKind: "figure" | "other";
 };
 
 export type ActiveNoteSession = {

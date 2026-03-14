@@ -9,6 +9,9 @@ import type {
   AgentToolResult,
 } from "./types";
 import { normalizeNoteSourceText } from "../modules/contextPanel/notes";
+import type { EditableArticleMetadataPatch } from "./services/zoteroGateway";
+import type { PaperContextRef } from "../shared/types";
+import { normalizeToolPaperContext } from "./tools/shared";
 
 type SearchLiteratureOnlineMode =
   | "recommendations"
@@ -38,6 +41,14 @@ type SearchReviewMetadataRow = {
   multiline?: boolean;
 };
 
+type SearchReviewMetadataChoice = {
+  rowId: string;
+  title: string;
+  subtitle?: string;
+  badge?: string;
+  raw: Record<string, unknown>;
+};
+
 type SearchReviewPrepared =
   | {
       kind: "paper_results";
@@ -50,6 +61,7 @@ type SearchReviewPrepared =
       kind: "metadata";
       mode: "metadata";
       rows: SearchReviewMetadataRow[];
+      choices: SearchReviewMetadataChoice[];
       noteContent: string;
     };
 
@@ -58,6 +70,12 @@ type SearchReviewArgs = {
   source?: SearchLiteratureOnlineSource;
   limit?: number;
   libraryID?: number;
+  itemId?: number;
+  paperContext?: PaperContextRef;
+  doi?: string;
+  title?: string;
+  arxivId?: string;
+  query?: string;
 };
 
 function readString(value: unknown): string | undefined {
@@ -145,7 +163,9 @@ function describeMetadataResult(result: Record<string, unknown>): string {
       : readString(result.year) || "";
   const venue = readString(result.venue) || "";
   const abstract = readString(result.abstract) || "";
-  return [title, [authors, year, venue].filter(Boolean).join(" · "), abstract]
+  const abstractSnippet =
+    abstract.length > 220 ? `${abstract.slice(0, 220).trimEnd()}...` : abstract;
+  return [title, [authors, year, venue].filter(Boolean).join(" · "), abstractSnippet]
     .filter(Boolean)
     .join("\n");
 }
@@ -158,6 +178,142 @@ function getReferencePaperTitle(context: AgentToolContext): string | undefined {
     context.item?.getDisplayTitle?.() ||
     undefined
   );
+}
+
+function getReferencePaperContext(
+  context: AgentToolContext,
+): PaperContextRef | undefined {
+  return (
+    context.request.selectedPaperContexts?.[0] ||
+    context.request.fullTextPaperContexts?.[0] ||
+    context.request.pinnedPaperContexts?.[0] ||
+    undefined
+  );
+}
+
+function normalizeTitleKey(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function scoreMetadataChoice(
+  record: Record<string, unknown>,
+  args: SearchReviewArgs,
+  context: AgentToolContext,
+): number {
+  let score = 0;
+  const candidateDoi = bareDoi(record.doi);
+  const targetDoi = bareDoi(args.doi);
+  if (candidateDoi && targetDoi && candidateDoi.toLowerCase() === targetDoi.toLowerCase()) {
+    score += 100;
+  }
+  const candidateTitle = readString(record.title);
+  const targetTitle = args.title || args.query || getReferencePaperTitle(context);
+  if (candidateTitle && targetTitle) {
+    const candidateKey = normalizeTitleKey(candidateTitle);
+    const targetKey = normalizeTitleKey(targetTitle);
+    if (candidateKey && targetKey) {
+      if (candidateKey === targetKey) {
+        score += 60;
+      } else if (candidateKey.includes(targetKey) || targetKey.includes(candidateKey)) {
+        score += 25;
+      }
+    }
+  }
+  const source = readString(record.source)?.toLowerCase();
+  if (source === "crossref" || source === "crossref") {
+    score += 5;
+  }
+  return score;
+}
+
+function describeMetadataChoice(
+  record: Record<string, unknown>,
+): { title: string; subtitle?: string; badge?: string } {
+  const source = readString(record.source) || "Metadata result";
+  const title = readString(record.title) || source;
+  const year =
+    typeof record.year === "number" ? String(record.year) : readString(record.year);
+  const venue = readString(record.venue);
+  const subtitle = [source, year, venue].filter(Boolean).join(" · ") || undefined;
+  const doi = bareDoi(record.doi);
+  return {
+    title,
+    subtitle,
+    badge: doi ? `DOI: ${doi}` : undefined,
+  };
+}
+
+function buildMetadataUpdatePatch(
+  record: Record<string, unknown>,
+): EditableArticleMetadataPatch | null {
+  const metadata: EditableArticleMetadataPatch = {};
+  const title = readString(record.title);
+  if (title) metadata.title = title;
+  const abstract = readString(record.abstract);
+  if (abstract) metadata.abstractNote = abstract;
+  const doi = bareDoi(record.doi);
+  if (doi) metadata.DOI = doi;
+  const url = readString(record.url);
+  if (url) metadata.url = url;
+  const date =
+    typeof record.year === "number"
+      ? String(record.year)
+      : readString(record.publicationDate) || readString(record.year);
+  if (date) metadata.date = date;
+  const venue = readString(record.venue);
+  if (venue) metadata.publicationTitle = venue;
+  const authors = Array.isArray(record.authors)
+    ? record.authors
+        .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+        .map((name) => ({
+          creatorType: "author",
+          name: name.trim(),
+          fieldMode: 1 as const,
+        }))
+    : [];
+  if (authors.length) metadata.creators = authors;
+  return Object.keys(metadata).length ? metadata : null;
+}
+
+function resolveMetadataChoice(
+  prepared: Extract<SearchReviewPrepared, { kind: "metadata" }>,
+  selectedRowId: string | undefined,
+  args: SearchReviewArgs,
+  context: AgentToolContext,
+): SearchReviewMetadataChoice | null {
+  if (selectedRowId) {
+    const direct = prepared.choices.find((choice) => choice.rowId === selectedRowId);
+    if (direct) return direct;
+  }
+  let best: SearchReviewMetadataChoice | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const choice of prepared.choices) {
+    const score = scoreMetadataChoice(choice.raw, args, context);
+    if (score > bestScore) {
+      best = choice;
+      bestScore = score;
+    }
+  }
+  return best || prepared.choices[0] || null;
+}
+
+function buildMetadataChoiceOptions(
+  prepared: Extract<SearchReviewPrepared, { kind: "metadata" }>,
+  args: SearchReviewArgs,
+  context: AgentToolContext,
+): Array<{ id: string; label: string }> {
+  const selected = resolveMetadataChoice(prepared, undefined, args, context);
+  return prepared.choices.map((choice) => {
+    const detail = [choice.title, choice.subtitle].filter(Boolean).join(" — ");
+    return {
+      id: choice.rowId,
+      label: choice.rowId === selected?.rowId ? `${detail} (Recommended)` : detail,
+    };
+  });
 }
 
 function buildPaperNoteTemplate(
@@ -235,15 +391,25 @@ function prepareSearchReview(
 
   if (mode === "metadata") {
     const rows: SearchReviewMetadataRow[] = [];
+    const choices: SearchReviewMetadataChoice[] = [];
     for (const [index, entry] of results.entries()) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
       const record = entry as Record<string, unknown>;
+      const rowId = `metadata-${index + 1}`;
       rows.push({
-        key: `metadata-${index + 1}`,
+        key: rowId,
         label: readString(record.source) || `Result ${index + 1}`,
         before: readString(record.url) || bareDoi(record.doi),
         after: describeMetadataResult(record),
         multiline: true,
+      });
+      const choiceDetails = describeMetadataChoice(record);
+      choices.push({
+        rowId,
+        title: choiceDetails.title,
+        subtitle: choiceDetails.subtitle,
+        badge: choiceDetails.badge,
+        raw: record,
       });
     }
     if (!rows.length) return null;
@@ -251,6 +417,7 @@ function prepareSearchReview(
       kind: "metadata",
       mode,
       rows,
+      choices,
       noteContent: "",
     };
   }
@@ -285,7 +452,7 @@ function prepareSearchReview(
 function getSearchActionButtons(kind: SearchReviewPrepared["kind"]) {
   if (kind === "metadata") {
     return [
-      { id: "continue", label: "Continue", style: "primary" as const },
+      { id: "review_changes", label: "Review changes", style: "primary" as const },
       {
         id: "save_note",
         label: "Save metadata as note",
@@ -355,12 +522,25 @@ function normalizeSearchReviewArgs(args: unknown): SearchReviewArgs {
     return {};
   }
   const record = args as Record<string, unknown>;
+  const paperContext = validateMetadataPaperContext(record.paperContext);
   return {
     mode: readString(record.mode) as SearchLiteratureOnlineMode | undefined,
     source: readString(record.source) as SearchLiteratureOnlineSource | undefined,
     limit: readPositiveInt(record.limit),
     libraryID: readPositiveInt(record.libraryID),
+    itemId: readPositiveInt(record.itemId),
+    paperContext,
+    doi: readString(record.doi),
+    title: readString(record.title),
+    arxivId: readString(record.arxivId),
+    query: readString(record.query),
   };
+}
+
+function validateMetadataPaperContext(value: unknown): PaperContextRef | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? normalizeToolPaperContext(value as Record<string, unknown>) || undefined
+    : undefined;
 }
 
 export function createSearchLiteratureReviewAction(
@@ -372,16 +552,18 @@ export function createSearchLiteratureReviewAction(
   if (!prepared) return null;
   if (prepared.kind === "metadata") {
     const noteContent = buildMetadataNoteTemplate(context, prepared.rows);
+    const normalizedArgs = normalizeSearchReviewArgs(args);
+    const selectedChoice = resolveMetadataChoice(prepared, undefined, normalizedArgs, context);
     return {
       toolName: "search_literature_online",
       mode: "review",
-      title: "Review external metadata",
+      title: "Choose metadata source",
       description:
-        "Review the metadata below. Continue to use it in the agent flow, save it to a note, or stop here.",
-      confirmLabel: "Continue",
+        "Choose the external source that best matches this paper. The next screen will show exact Zotero field changes before anything is applied.",
+      confirmLabel: "Review changes",
       cancelLabel: "Cancel",
       actions: getSearchActionButtons(prepared.kind),
-      defaultActionId: "continue",
+      defaultActionId: "review_changes",
       cancelActionId: "cancel",
       fields: [
         {
@@ -389,6 +571,13 @@ export function createSearchLiteratureReviewAction(
           id: "metadataResults",
           label: "Metadata results",
           rows: prepared.rows,
+        },
+        {
+          type: "select",
+          id: "selectedMetadataResult",
+          label: "Source to turn into Zotero changes",
+          value: selectedChoice?.rowId || prepared.choices[0]?.rowId || "",
+          options: buildMetadataChoiceOptions(prepared, normalizedArgs, context),
         },
         ...buildNoteDraftReviewFields(noteContent),
       ],
@@ -506,6 +695,46 @@ export function resolveSearchLiteratureReview(
           onSuccess: "Saved the reviewed metadata to a note.",
           onDenied: "Saving the metadata note was cancelled.",
           onError: "Could not save the reviewed metadata to a note.",
+        },
+      };
+    }
+    if (actionId === "review_changes") {
+      const selectedChoice = resolveMetadataChoice(
+        prepared,
+        readString(data.selectedMetadataResult),
+        normalizedArgs,
+        context,
+      );
+      const metadata = selectedChoice ? buildMetadataUpdatePatch(selectedChoice.raw) : null;
+      const paperContext = normalizedArgs.paperContext || getReferencePaperContext(context);
+      const itemId =
+        normalizedArgs.itemId ||
+        paperContext?.itemId ||
+        readPositiveInt(context.request.activeItemId);
+      if (!selectedChoice || !metadata || (!paperContext && !itemId)) {
+        return {
+          kind: "stop",
+          finalText: "Could not prepare metadata changes from the selected result.",
+        };
+      }
+      return {
+        kind: "invoke_tool",
+        call: {
+          name: "mutate_library",
+          arguments: {
+            operations: [
+              {
+                type: "update_metadata",
+                ...(paperContext ? { paperContext } : { itemId }),
+                metadata,
+              },
+            ],
+          },
+        },
+        terminalText: {
+          onSuccess: "Applied the selected metadata to the paper.",
+          onDenied: "Applying the selected metadata was cancelled.",
+          onError: "Could not apply the selected metadata.",
         },
       };
     }

@@ -6,6 +6,8 @@ import type {
   AdvancedModelParams,
   ActiveNoteSession,
   PaperContextRef,
+  NoteContextRef,
+  OtherContextRef,
   GlobalConversationSummary,
   PaperConversationSummary,
 } from "../../shared/types";
@@ -17,6 +19,8 @@ export type {
   AdvancedModelParams,
   ActiveNoteSession,
   PaperContextRef,
+  NoteContextRef,
+  OtherContextRef,
   GlobalConversationSummary,
   PaperConversationSummary,
 } from "../../shared/types";
@@ -25,6 +29,7 @@ export type SelectedTextContext = {
   text: string;
   source: SelectedTextSource;
   paperContext?: PaperContextRef;
+  noteContext?: NoteContextRef;
   contextItemId?: number;
   pageIndex?: number;
   pageLabel?: string;
@@ -41,6 +46,7 @@ export interface Message {
   selectedTexts?: string[];
   selectedTextSources?: SelectedTextSource[];
   selectedTextPaperContexts?: (PaperContextRef | undefined)[];
+  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
   selectedTextExpandedIndex?: number;
   screenshotImages?: string[];
   paperContexts?: PaperContextRef[];

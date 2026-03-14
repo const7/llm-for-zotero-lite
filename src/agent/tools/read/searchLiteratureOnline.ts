@@ -116,6 +116,7 @@ export function createSearchLiteratureOnlineTool(
       if (!validateObject<Record<string, unknown>>(args)) {
         return fail("Expected an object");
       }
+      const itemId = normalizePositiveInt(args.itemId);
       const mode =
         args.mode === "recommendations" ||
         args.mode === "references" ||
@@ -146,8 +147,8 @@ export function createSearchLiteratureOnlineTool(
         typeof args.arxivId === "string" && args.arxivId.trim()
           ? args.arxivId.trim()
           : undefined;
-      if (mode === "metadata" && !doi && !title && !arxivId && !query) {
-        return fail("metadata mode requires doi, title, arxivId, or query");
+      if (mode === "metadata" && !doi && !title && !arxivId && !query && !itemId && !paperContext) {
+        return fail("metadata mode requires doi, title, arxivId, query, itemId, or paperContext");
       }
       if (mode === "search" && !query && !title) {
         return fail("search mode requires query or title");
@@ -160,7 +161,7 @@ export function createSearchLiteratureOnlineTool(
           args.source === "europepmc"
             ? args.source
             : undefined,
-        itemId: normalizePositiveInt(args.itemId),
+        itemId,
         paperContext,
         doi,
         title,

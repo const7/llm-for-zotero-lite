@@ -1348,6 +1348,7 @@ async function resolvePageForCitationButton(params: {
         const result = await locateQuoteInLivePdfReader(
           activeReader,
           normalizedQuoteText,
+          { skipFindController: true },
         );
         if (result.status === "resolved" && result.computedPageIndex !== null) {
           const pageIndex = Math.floor(result.computedPageIndex);

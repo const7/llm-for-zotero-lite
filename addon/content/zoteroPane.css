@@ -3140,6 +3140,12 @@ label.llm-search-results-item:hover {
   margin: 0;
 }
 
+.llm-context-previews
+  > #llm-selected-context-list
+  > .llm-note-context-chip[data-note-chip-kind="selected"] {
+  order: 1;
+}
+
 .llm-context-previews > #llm-runtime-mode-toggle,
 .llm-context-previews
   > #llm-selected-context-list
@@ -3198,6 +3204,62 @@ label.llm-search-results-item:hover {
   flex: 0 0 auto;
   max-width: 100%;
   width: fit-content;
+}
+
+/* Figure / other ref chip */
+.llm-other-ref-chip {
+  flex: 0 0 auto;
+  max-width: 100%;
+  width: fit-content;
+}
+
+.llm-other-ref-chip-label {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 4px 3px 8px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fill-secondary);
+  font-size: var(--llm-fs-12);
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.llm-other-ref-chip:hover .llm-other-ref-chip-label {
+  color: var(--fill-primary);
+}
+
+.llm-other-ref-chip-header {
+  gap: 0;
+  padding-right: 4px;
+  cursor: default;
+}
+
+.llm-other-ref-chip-header .llm-other-ref-clear {
+  display: grid;
+  place-items: center;
+  align-self: center;
+  width: 14px;
+  min-width: 14px;
+  font-size: var(--llm-fs-12);
+  line-height: 1;
+  padding: 0;
+  margin-left: -2px;
+  transform: translateY(-1px);
+}
+
+/* Picker item-type icon (emoji) */
+.llm-paper-picker-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.1em;
+  font-size: var(--llm-fs-12);
+  line-height: 1;
 }
 
 .llm-paper-context-chip.llm-paper-context-chip-full
@@ -3304,6 +3366,7 @@ label.llm-search-results-item:hover {
   border-radius: 12px;
   background: var(--material-background, #fff);
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+  scroll-padding-block: 6px;
 }
 
 .llm-paper-picker-list {
@@ -3327,11 +3390,13 @@ label.llm-search-results-item:hover {
   border-radius: 8px;
   background: transparent;
   color: inherit;
+  min-width: 0;
   text-align: left;
   font: inherit;
   padding: 7px 9px;
   cursor: pointer;
   outline: none;
+  scroll-margin-block: 6px;
 }
 
 .llm-paper-picker-item:hover {
@@ -3377,7 +3442,7 @@ label.llm-search-results-item:hover {
   min-width: 0;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
 }
 
@@ -3426,12 +3491,13 @@ label.llm-search-results-item:hover {
 
 .llm-paper-picker-attachment-row {
   grid-template-columns: 12px minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   column-gap: 8px;
   padding-left: 9px;
 }
 
 .llm-paper-picker-attachment-indent {
+  align-self: center;
   width: 10px;
   height: 1px;
   border-radius: 1px;
@@ -3440,6 +3506,13 @@ label.llm-search-results-item:hover {
 }
 
 .llm-paper-picker-attachment-main {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.llm-paper-picker-attachment-text {
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -3452,6 +3525,8 @@ label.llm-search-results-item:hover {
 
 .llm-paper-picker-title {
   display: block;
+  min-width: 0;
+  flex: 1 1 auto;
   color: var(--fill-primary);
   font-size: var(--llm-fs-11);
   font-weight: 600;
@@ -3463,6 +3538,7 @@ label.llm-search-results-item:hover {
 
 .llm-paper-picker-meta {
   display: block;
+  min-width: 0;
   color: var(--fill-tertiary);
   font-size: var(--llm-fs-10);
   line-height: 1.3;
@@ -3477,6 +3553,10 @@ label.llm-search-results-item:hover {
   font-size: var(--llm-fs-11);
   line-height: 1.35;
   padding: 8px;
+}
+
+.llm-paper-picker-attachment-main .llm-paper-picker-item-icon {
+  margin-top: 1px;
 }
 
 /* ── Action picker ──────────────────────────────────────────────────────── */
@@ -3672,6 +3752,17 @@ label.llm-search-results-item:hover {
 .llm-selected-context.llm-selected-context-pinned .llm-selected-context-header {
   border: 1px solid var(--llm-pin-border-color);
   border-radius: 8px;
+  background: var(--llm-pin-bg);
+}
+
+.llm-note-context-chip .llm-selected-context-header {
+  border: 1px solid var(--stroke-secondary);
+  border-radius: 8px;
+  background: var(--material-background);
+}
+
+.llm-note-context-chip.llm-selected-context-pinned .llm-selected-context-header {
+  border-color: var(--llm-pin-border-color);
   background: var(--llm-pin-bg);
 }
 

@@ -7,9 +7,14 @@ import {
 
 describe("contextResolution note-edit sync", function () {
   const itemId = 777;
+  const globalScope = globalThis as typeof globalThis & {
+    Zotero?: Record<string, unknown>;
+  };
+  const originalZotero = globalScope.Zotero;
 
   afterEach(function () {
     setSelectedTextContextEntries(itemId, []);
+    globalScope.Zotero = originalZotero;
   });
 
   it("adds and removes transient note-edit context without dropping manual contexts", function () {
@@ -53,5 +58,51 @@ describe("contextResolution note-edit sync", function () {
     assert.isFalse(
       syncSelectedTextContextForSource(itemId, "Tighten this wording", "note-edit"),
     );
+  });
+
+  it("refreshes note-backed text contexts from the current note snapshot", function () {
+    const noteItem = {
+      id: 501,
+      libraryID: 1,
+      isNote: () => true,
+      getNote: () => "<p>Updated note body</p>",
+      getDisplayTitle: () => "Context note",
+    };
+    globalScope.Zotero = {
+      ...(originalZotero || {}),
+      Items: {
+        get: (id: number) => (id === 501 ? noteItem : null),
+      },
+    };
+
+    setSelectedTextContextEntries(itemId, [
+      {
+        text: "Stale note body",
+        source: "note",
+        noteContext: {
+          noteItemId: 501,
+          noteKind: "standalone",
+          title: "Old title",
+        },
+      },
+    ]);
+
+    const entries = getSelectedTextContextEntries(itemId);
+    assert.deepEqual(entries, [
+      {
+        text: "Updated note body",
+        source: "note",
+        noteContext: {
+          noteItemId: 501,
+          parentItemId: undefined,
+          noteKind: "standalone",
+          title: "Context note",
+        },
+        paperContext: undefined,
+        contextItemId: undefined,
+        pageIndex: undefined,
+        pageLabel: undefined,
+      },
+    ]);
   });
 });

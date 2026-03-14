@@ -624,16 +624,45 @@ async function lookupSemanticScholar(params: {
 export class LiteratureSearchService {
   constructor(private readonly zoteroGateway: ZoteroGateway) {}
 
+  private resolveLookupSeed(
+    input: SearchInput,
+    context: AgentToolContext,
+  ): {
+    doi?: string;
+    title?: string;
+    arxivId?: string;
+  } {
+    let doi = input.doi;
+    let title = input.title || input.query;
+    const arxivId = input.arxivId;
+    if (doi || title || arxivId) {
+      return { doi, title, arxivId };
+    }
+    const metadataItem = this.zoteroGateway.resolveMetadataItem({
+      request: context.request,
+      item: context.item,
+      itemId: input.itemId ?? input.paperContext?.itemId,
+      paperContext: input.paperContext,
+    });
+    if (!metadataItem) {
+      return { doi, title, arxivId };
+    }
+    const snapshot = this.zoteroGateway.getEditableArticleMetadata(metadataItem);
+    if (!doi && snapshot?.fields.DOI) {
+      doi = snapshot.fields.DOI.trim();
+    }
+    if (!title && snapshot?.title) {
+      title = snapshot.title.trim();
+    }
+    return { doi, title, arxivId };
+  }
+
   async execute(
     input: SearchInput,
     context: AgentToolContext,
   ): Promise<LiteratureSearchResult> {
     if (input.mode === "metadata") {
-      return this.lookupMetadata({
-        doi: input.doi,
-        title: input.title || input.query,
-        arxivId: input.arxivId,
-      });
+      return this.lookupMetadata(this.resolveLookupSeed(input, context));
     }
     return this.search(input, context);
   }
