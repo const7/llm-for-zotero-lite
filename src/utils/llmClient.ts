@@ -31,14 +31,10 @@ import type {
   RuntimeReasoningOption,
 } from "./reasoningProfiles";
 import {
-  API_ENDPOINT,
-  RESPONSES_ENDPOINT,
   EMBEDDINGS_ENDPOINT,
   FILES_ENDPOINT,
-  isGeminiBase,
   resolveEndpoint,
   usesMaxCompletionTokens,
-  isResponsesBase,
 } from "./apiHelpers";
 import { pathToFileUrl } from "./pathFileUrl";
 import {
@@ -51,7 +47,15 @@ import {
   getDefaultProviderGroup,
   type ModelProviderAuthMode,
 } from "./modelProviders";
-import { isGrokApiBase, providerSupportsResponsesEndpoint } from "./providerPresets";
+import { isGrokApiBase } from "./providerPresets";
+import type { ProviderProtocol } from "./providerProtocol";
+import {
+  buildProviderTransportHeaders,
+  resolveAnthropicMessagesEndpoint,
+  resolveGeminiNativeEndpoint,
+  resolveProviderTransportEndpoint,
+} from "./providerTransport";
+import { parseDataUrl } from "../agent/model/shared";
 import {
   applyModelInputTokenCap,
   estimateConversationTokens,
@@ -126,6 +130,8 @@ export type ChatParams = {
   attachments?: ChatFileAttachment[];
   /** Extra system-only guidance added to the same request */
   systemMessages?: string[];
+  /** Override provider protocol for this request */
+  providerProtocol?: ProviderProtocol;
 };
 
 export type ReasoningEvent = {
@@ -157,6 +163,7 @@ export type PreparedChatRequest = {
   systemPrompt: string;
   messages: ChatMessage[];
   inputCap: InputCapResult;
+  providerProtocol: ProviderProtocol;
 };
 
 interface StreamChoice {
@@ -209,6 +216,7 @@ function getApiConfig(overrides?: {
   apiKey?: string;
   authMode?: ModelProviderAuthMode;
   model?: string;
+  providerProtocol?: ProviderProtocol;
 }) {
   const defaultEntry = getDefaultModelEntry();
   const defaultProviderGroup = getDefaultProviderGroup();
@@ -245,6 +253,11 @@ function getApiConfig(overrides?: {
   const model = (overrides?.model || modelPrimary).trim();
   const embeddingModel = getPref("embeddingModel") || DEFAULT_EMBEDDING_MODEL;
   const customSystemPrompt = getPref("systemPrompt") || "";
+  const providerProtocol: ProviderProtocol =
+    overrides?.providerProtocol ||
+    defaultEntry?.providerProtocol ||
+    defaultProviderGroup?.providerProtocol ||
+    "openai_chat_compat";
 
   if (!apiBase) {
     throw new Error("API URL is missing in preferences");
@@ -257,6 +270,7 @@ function getApiConfig(overrides?: {
     model,
     embeddingModel,
     systemPrompt: customSystemPrompt || DEFAULT_SYSTEM_PROMPT,
+    providerProtocol,
   };
 }
 
@@ -1043,11 +1057,12 @@ function buildMessages(
 }
 
 export function prepareChatRequest(params: ChatParams): PreparedChatRequest {
-  const { apiBase, apiKey, authMode, model, systemPrompt } = getApiConfig({
+  const { apiBase, apiKey, authMode, model, systemPrompt, providerProtocol } = getApiConfig({
     apiBase: params.apiBase,
     apiKey: params.apiKey,
     authMode: params.authMode,
     model: params.model,
+    providerProtocol: params.providerProtocol,
   });
   const rawMessages = buildMessages(params, systemPrompt);
   const inputCap = applyModelInputTokenCap(
@@ -1063,6 +1078,7 @@ export function prepareChatRequest(params: ChatParams): PreparedChatRequest {
     systemPrompt,
     messages: inputCap.messages as ChatMessage[],
     inputCap,
+    providerProtocol,
   };
 }
 
@@ -1698,6 +1714,199 @@ export function buildReasoningPayload(
   return emptyReasoningPayload();
 }
 
+function buildAnthropicMessagesPayload(params: {
+  model: string;
+  messages: ChatMessage[];
+  effectiveMaxTokens: number;
+  effectiveTemperature: number;
+  stream: boolean;
+}): Record<string, unknown> {
+  const systemParts = params.messages
+    .filter((m) => m.role === "system")
+    .map((m) => (typeof m.content === "string" ? m.content : m.content.map((c) => ("text" in c ? c.text : "")).join("")))
+    .filter(Boolean);
+  const nonSystemMessages = params.messages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({
+      role: m.role as "user" | "assistant",
+      content:
+        typeof m.content === "string"
+          ? [{ type: "text", text: m.content }]
+          : m.content.map((c) =>
+              c.type === "image_url"
+                ? (() => {
+                    const parsed = parseDataUrl((c as { image_url: { url: string } }).image_url.url);
+                    return {
+                      type: "image",
+                      source: { type: "base64", media_type: parsed?.mimeType || "image/jpeg", data: parsed?.data || "" },
+                    };
+                  })()
+                : { type: "text", text: (c as { text: string }).text },
+            ),
+    }));
+  const payload: Record<string, unknown> = {
+    model: params.model,
+    max_tokens: params.effectiveMaxTokens,
+    messages: nonSystemMessages,
+  };
+  if (systemParts.length > 0) {
+    payload.system = systemParts.join("\n\n");
+  }
+  if (params.stream) {
+    payload.stream = true;
+  }
+  return payload;
+}
+
+async function parseAnthropicStreamResponse(
+  body: ReadableStream<Uint8Array>,
+  onDelta: (delta: string) => void,
+  onUsage?: (usage: UsageStats) => void,
+): Promise<string> {
+  const reader = body.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let fullText = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+
+        const data = trimmed.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+
+        try {
+          const parsed = JSON.parse(data) as {
+            type?: string;
+            delta?: { type?: string; text?: string };
+            usage?: { output_tokens?: number };
+            message?: { usage?: { input_tokens?: number; output_tokens?: number } };
+          };
+          if (parsed.type === "content_block_delta" && parsed.delta?.type === "text_delta" && parsed.delta.text) {
+            fullText += parsed.delta.text;
+            onDelta(parsed.delta.text);
+          }
+          if (parsed.type === "message_delta" && parsed.usage && onUsage) {
+            const outputTokens = parsed.usage.output_tokens ?? 0;
+            if (outputTokens > 0) {
+              onUsage({ promptTokens: 0, completionTokens: outputTokens, totalTokens: outputTokens });
+            }
+          }
+        } catch (_err) {
+          // ignore parse errors
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return fullText;
+}
+
+function buildGeminiNativePayload(params: {
+  messages: ChatMessage[];
+  effectiveMaxTokens: number;
+  effectiveTemperature: number;
+}): Record<string, unknown> {
+  const systemParts = params.messages
+    .filter((m) => m.role === "system")
+    .map((m) => ({ text: typeof m.content === "string" ? m.content : m.content.map((c) => ("text" in c ? c.text : "")).join("") }))
+    .filter((p) => p.text);
+  const contents = params.messages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts:
+        typeof m.content === "string"
+          ? [{ text: m.content }]
+          : m.content.map((c) =>
+              c.type === "image_url"
+                ? (() => {
+                    const parsed = parseDataUrl((c as { image_url: { url: string } }).image_url.url);
+                    return { inline_data: { mime_type: parsed?.mimeType || "image/jpeg", data: parsed?.data || "" } };
+                  })()
+                : { text: (c as { text: string }).text },
+            ),
+    }));
+  const payload: Record<string, unknown> = {
+    contents,
+    generationConfig: {
+      maxOutputTokens: params.effectiveMaxTokens,
+      temperature: params.effectiveTemperature,
+    },
+  };
+  if (systemParts.length > 0) {
+    payload.systemInstruction = { parts: systemParts };
+  }
+  return payload;
+}
+
+async function parseGeminiNativeStreamResponse(
+  body: ReadableStream<Uint8Array>,
+  onDelta: (delta: string) => void,
+  onUsage?: (usage: UsageStats) => void,
+): Promise<string> {
+  const reader = body.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let fullText = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const data = trimmed.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+        try {
+          const parsed = JSON.parse(data) as {
+            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+            usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
+          };
+          const text = parsed.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+          if (text) {
+            fullText += text;
+            onDelta(text);
+          }
+          if (parsed.usageMetadata && onUsage) {
+            const total = parsed.usageMetadata.totalTokenCount ?? 0;
+            if (total > 0) {
+              onUsage({
+                promptTokens: parsed.usageMetadata.promptTokenCount ?? 0,
+                completionTokens: parsed.usageMetadata.candidatesTokenCount ?? 0,
+                totalTokens: total,
+              });
+            }
+          }
+        } catch (_err) {
+          // ignore parse errors
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return fullText;
+}
+
 function createChatPayloadBuilder(params: {
   model: string;
   messages: ChatMessage[];
@@ -1938,6 +2147,7 @@ async function postWithTemperatureFallback(params: {
   auth: RequestAuthState;
   payload: Record<string, unknown>;
   signal?: AbortSignal;
+  headers?: Record<string, string>;
 }) {
   const policyKey = getTemperaturePolicyKey(params.url, params.payload);
   const hasTemperature = Object.prototype.hasOwnProperty.call(
@@ -1947,7 +2157,7 @@ async function postWithTemperatureFallback(params: {
   const send = (bodyPayload: Record<string, unknown>, auth: RequestAuthState) =>
     getFetch()(params.url, {
       method: "POST",
-      headers: buildAuthHeaders(auth.token),
+      headers: params.headers ?? buildAuthHeaders(auth.token),
       body: JSON.stringify(bodyPayload),
       signal: params.signal,
     });
@@ -2049,6 +2259,7 @@ export async function postWithReasoningFallback(params: {
     reasoningOverride: ReasoningConfig | undefined,
   ) => Record<string, unknown>;
   signal?: AbortSignal;
+  headers?: Record<string, string>;
 }) {
   let reasoningSelection = params.initialReasoning;
   let retries = 0;
@@ -2068,6 +2279,7 @@ export async function postWithReasoningFallback(params: {
         auth: params.auth,
         payload,
         signal: params.signal,
+        headers: params.headers,
       });
     } catch (err) {
       lastError = err;
@@ -2141,11 +2353,65 @@ export async function resolveRequestAuthState(params: {
 // =============================================================================
 
 /**
+ * Handles anthropic_messages and gemini_native protocols for both streaming and
+ * non-streaming calls. Passing onDelta enables streaming.
+ */
+async function callNativeProtocol(params: {
+  protocol: "anthropic_messages" | "gemini_native";
+  apiBase: string;
+  apiKey: string;
+  model: string;
+  messages: ChatMessage[];
+  effectiveMaxTokens: number;
+  effectiveTemperature: number;
+  signal?: AbortSignal;
+  onDelta?: (delta: string) => void;
+  onUsage?: (usage: UsageStats) => void;
+}): Promise<string> {
+  const { protocol, apiBase, apiKey, model, messages, effectiveMaxTokens, effectiveTemperature, signal, onDelta, onUsage } = params;
+  const isStreaming = Boolean(onDelta);
+  const url =
+    protocol === "anthropic_messages"
+      ? resolveAnthropicMessagesEndpoint(apiBase)
+      : resolveGeminiNativeEndpoint({ apiBase, model, stream: isStreaming });
+  const headers = buildProviderTransportHeaders({ protocol, apiKey });
+  const body =
+    protocol === "anthropic_messages"
+      ? buildAnthropicMessagesPayload({ model, messages, effectiveMaxTokens, effectiveTemperature, stream: isStreaming })
+      : buildGeminiNativePayload({ messages, effectiveMaxTokens, effectiveTemperature });
+  const res = await getFetch()(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+  if (!res.ok) {
+    throw new Error(`${res.status} (${url}) - ${await res.text()}`);
+  }
+  if (isStreaming) {
+    if (!res.body) return callNativeProtocol({ ...params, onDelta: undefined });
+    return protocol === "anthropic_messages"
+      ? parseAnthropicStreamResponse(res.body, onDelta!, onUsage)
+      : parseGeminiNativeStreamResponse(res.body, onDelta!, onUsage);
+  }
+  if (protocol === "anthropic_messages") {
+    const data = (await res.json()) as { content?: Array<{ type?: string; text?: string }> };
+    return data?.content?.find((c) => c.type === "text")?.text ?? JSON.stringify(data);
+  }
+  const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+  return data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") ?? JSON.stringify(data);
+}
+
+/**
  * Call LLM API (non-streaming)
  */
 export async function callLLM(params: ChatParams): Promise<string> {
   const prepared = prepareChatRequest(params);
-  const { apiBase, apiKey, authMode, model, messages, inputCap } = prepared;
+  const { apiBase, apiKey, authMode, model, messages, inputCap, providerProtocol } = prepared;
+  if (providerProtocol === "anthropic_messages" || providerProtocol === "gemini_native") {
+    return callNativeProtocol({
+      protocol: providerProtocol,
+      apiBase, apiKey, model, messages,
+      effectiveMaxTokens: normalizeMaxTokens(params.maxTokens),
+      effectiveTemperature: normalizeTemperature(params.temperature),
+      signal: params.signal,
+    });
+  }
   if (authMode === "codex_auth") {
     let output = "";
     const streamed = await callLLMStream(
@@ -2173,10 +2439,7 @@ export async function callLLM(params: ChatParams): Promise<string> {
       effects: inputCap.effects,
     });
   }
-  // codex_auth is handled above via callLLMStream
-  const useResponses =
-    !isGeminiBase(apiBase) &&
-    (isResponsesBase(apiBase) || providerSupportsResponsesEndpoint(apiBase));
+  const useResponses = providerProtocol === "responses_api" || providerProtocol === "codex_responses";
   const responseFileIds = useResponses
     ? await uploadFilesForResponses({
         apiBase,
@@ -2188,10 +2451,8 @@ export async function callLLM(params: ChatParams): Promise<string> {
   const effectiveTemperature = normalizeTemperature(params.temperature);
   const effectiveMaxTokens = normalizeMaxTokens(params.maxTokens);
 
-  const url = resolveEndpoint(
-    apiBase,
-    useResponses ? RESPONSES_ENDPOINT : API_ENDPOINT,
-  );
+  const url = resolveProviderTransportEndpoint({ protocol: providerProtocol, apiBase, model, stream: false });
+  const requestHeaders = buildProviderTransportHeaders({ protocol: providerProtocol, apiKey: auth.token });
   const buildPayload = createChatPayloadBuilder({
     model,
     messages,
@@ -2206,6 +2467,7 @@ export async function callLLM(params: ChatParams): Promise<string> {
   const res = await postWithReasoningFallback({
     url,
     auth,
+    headers: requestHeaders,
     modelName: model,
     initialReasoning: params.reasoning,
     buildPayload,
@@ -2236,7 +2498,18 @@ export async function callLLMStream(
   onUsage?: (usage: UsageStats) => void,
 ): Promise<string> {
   const prepared = prepareChatRequest(params);
-  const { apiBase, apiKey, authMode, model, messages, inputCap } = prepared;
+  const { apiBase, apiKey, authMode, model, messages, inputCap, providerProtocol } = prepared;
+  if (providerProtocol === "anthropic_messages" || providerProtocol === "gemini_native") {
+    return callNativeProtocol({
+      protocol: providerProtocol,
+      apiBase, apiKey, model, messages,
+      effectiveMaxTokens: normalizeMaxTokens(params.maxTokens),
+      effectiveTemperature: normalizeTemperature(params.temperature),
+      signal: params.signal,
+      onDelta,
+      onUsage,
+    });
+  }
   const auth = await resolveRequestAuthState({
     authMode,
     apiKey,
@@ -2252,15 +2525,12 @@ export async function callLLMStream(
       effects: inputCap.effects,
     });
   }
-  const useResponses =
-    authMode === "codex_auth" ||
-    (!isGeminiBase(apiBase) &&
-      (isResponsesBase(apiBase) || providerSupportsResponsesEndpoint(apiBase)));
   if (authMode === "codex_auth" && Array.isArray(params.attachments) && params.attachments.length) {
     throw new Error(
       "codex auth currently does not support file attachments in this plugin v1.",
     );
   }
+  const useResponses = providerProtocol === "responses_api" || providerProtocol === "codex_responses";
   const responseFileIds = useResponses
     ? await uploadFilesForResponses({
         apiBase,
@@ -2272,10 +2542,8 @@ export async function callLLMStream(
   const effectiveTemperature = normalizeTemperature(params.temperature);
   const effectiveMaxTokens = normalizeMaxTokens(params.maxTokens);
 
-  const url = resolveEndpoint(
-    apiBase,
-    useResponses ? RESPONSES_ENDPOINT : API_ENDPOINT,
-  );
+  const url = resolveProviderTransportEndpoint({ protocol: providerProtocol, apiBase, model, stream: true });
+  const requestHeaders = buildProviderTransportHeaders({ protocol: providerProtocol, apiKey: auth.token });
   const buildPayload = createChatPayloadBuilder({
     model,
     messages,
@@ -2290,6 +2558,7 @@ export async function callLLMStream(
   const res = await postWithReasoningFallback({
     url,
     auth,
+    headers: requestHeaders,
     modelName: model,
     initialReasoning: params.reasoning,
     buildPayload,

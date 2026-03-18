@@ -49,7 +49,7 @@ function rewriteApiBasePath(parsed: ParsedApiBase, pathname: string): string {
   return `${parsed.origin}${pathname}`;
 }
 
-function normalizeOpenAICompatibleBase(apiBase: string): string {
+export function normalizeOpenAICompatibleBase(apiBase: string): string {
   const cleaned = trimTrailingSlash(apiBase);
   const parsed = parseApiBase(cleaned);
   if (!parsed) return cleaned;
