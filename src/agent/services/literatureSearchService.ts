@@ -137,6 +137,38 @@ async function fetchJson(
   return response.json();
 }
 
+/**
+ * Use Zotero's privileged HTTP API which bypasses CORS restrictions.
+ * This is necessary for external APIs like arXiv and Europe PMC that
+ * do not send Access-Control-Allow-Origin headers.
+ */
+async function zoteroFetchText(url: string): Promise<string> {
+  Zotero.debug(`[llm-for-zotero] zoteroFetchText: ${url.slice(0, 120)}...`);
+  try {
+    const xhr = await Zotero.HTTP.request("GET", url, {
+      headers: { "User-Agent": USER_AGENT },
+      responseType: "text",
+      timeout: 15000,
+    });
+    const text = xhr.responseText ?? "";
+    Zotero.debug(`[llm-for-zotero] zoteroFetchText: status=${xhr.status}, responseLength=${text.length}`);
+    return text;
+  } catch (error) {
+    Zotero.debug(`[llm-for-zotero] zoteroFetchText FAILED: ${error instanceof Error ? error.message : String(error)}`);
+    throw error;
+  }
+}
+
+async function zoteroFetchJson(url: string): Promise<unknown> {
+  const text = await zoteroFetchText(url);
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    Zotero.debug(`[llm-for-zotero] zoteroFetchJson: JSON parse failed, text preview: ${text.slice(0, 200)}`);
+    throw new Error(`JSON parse failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function oaFetch(url: string): Promise<unknown> {
   const separator = url.includes("?") ? "&" : "?";
   return fetchJson(`${url}${separator}${OA_MAILTO}`);
@@ -301,24 +333,32 @@ async function fetchArxivSearch(
     `https://export.arxiv.org/api/query` +
     `?search_query=all:${encodeURIComponent(query)}` +
     `&start=0&max_results=${limit}&sortBy=relevance&sortOrder=descending`;
-  const response = await (
-    globalThis as typeof globalThis & { fetch?: FetchTextLike }
-  ).fetch!(url, {
-    headers: {
-      Accept: "application/atom+xml",
-      "User-Agent": USER_AGENT,
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`arXiv HTTP ${response.status}`);
+  const xmlText = await zoteroFetchText(url);
+  if (!(globalThis as Record<string, unknown>).DOMParser) {
+    throw new Error("DOMParser is not available in this environment");
   }
-
-  const xmlText = await response.text();
+  // Strip the default Atom namespace so querySelectorAll matches bare element
+  // names. Gecko-based DOMParser (used by Zotero) treats namespaced elements
+  // as unreachable via plain CSS selectors like querySelectorAll("entry").
+  const cleanXml = xmlText.replace(/\s+xmlns="[^"]*"/g, "");
   const domParser = new (
     globalThis as typeof globalThis & { DOMParser: new () => XmlDomParser }
   ).DOMParser();
-  const doc = domParser.parseFromString(xmlText, "text/xml");
+  let doc;
+  try {
+    doc = domParser.parseFromString(cleanXml, "text/xml");
+  } catch (parseError) {
+    throw new Error(
+      `Failed to parse arXiv XML response: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+    );
+  }
   const entries = doc.querySelectorAll("entry");
+  if (!entries.length && xmlText.length > 200) {
+    // The XML had content but no entries were parsed — likely a parsing issue.
+    throw new Error(
+      `arXiv returned XML (${xmlText.length} chars) but no entries could be parsed`,
+    );
+  }
   const results: OnlinePaperResult[] = [];
 
   for (const entry of entries) {
@@ -348,11 +388,14 @@ async function fetchArxivSearch(
       }
     }
     const sourceUrl = entry.querySelector("id")?.textContent?.trim() ?? undefined;
-    const pdfLink =
-      entry
-        .querySelectorAll("link")
-        .find((node: XmlElement) => node.getAttribute("type") === "application/pdf")
-        ?.getAttribute("href") ?? undefined;
+    const linkNodes = entry.querySelectorAll("link");
+    let pdfLink: string | undefined;
+    for (const node of linkNodes) {
+      if (node.getAttribute("type") === "application/pdf") {
+        pdfLink = node.getAttribute("href") ?? undefined;
+        break;
+      }
+    }
     const doi = entry.querySelector("doi")?.textContent?.trim() || undefined;
     results.push({
       title,
@@ -375,11 +418,28 @@ async function fetchEuropePmcSearch(
   const url =
     `https://www.ebi.ac.uk/europepmc/webservices/rest/search` +
     `?query=${encodeURIComponent(query)}` +
-    `&format=json&pageSize=${limit}&resultType=core&sort=RELEVANCE`;
-  const raw = (await fetchJson(url)) as {
+    `&format=json&pageSize=${limit}&resultType=core`;
+  let raw: unknown;
+  try {
+    raw = await zoteroFetchJson(url);
+  } catch (error) {
+    throw new Error(
+      `Europe PMC API request failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const body = raw as {
     resultList?: { result?: Array<Record<string, unknown>> };
   };
-  const items = raw.resultList?.result ?? [];
+  const items = body.resultList?.result ?? [];
+  if (!items.length && raw && typeof raw === "object") {
+    // Check if we got an error response or unexpected structure
+    const keys = Object.keys(raw as Record<string, unknown>);
+    if (!keys.includes("resultList")) {
+      throw new Error(
+        `Europe PMC returned unexpected response structure (keys: ${keys.slice(0, 5).join(", ")})`,
+      );
+    }
+  }
   return items
     .map((item): OnlinePaperResult | null => {
       const title = typeof item.title === "string" ? item.title.trim() : "";
@@ -737,13 +797,26 @@ export class LiteratureSearchService {
       if (!query) {
         return { results: [], message: "No search query available for arXiv." };
       }
-      const results = dedupe(await fetchArxivSearch(query, limit));
-      return {
-        results,
-        total: results.length,
-        source: "arXiv",
-        query,
-      };
+      try {
+        Zotero.debug(`[llm-for-zotero] arXiv search: query="${query}", limit=${limit}`);
+        const results = dedupe(await fetchArxivSearch(query, limit));
+        Zotero.debug(`[llm-for-zotero] arXiv search returned ${results.length} results`);
+        return {
+          results,
+          total: results.length,
+          source: "arXiv",
+          query,
+        };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        Zotero.debug(`[llm-for-zotero] arXiv search failed: ${msg}`);
+        return {
+          results: [],
+          source: "arXiv",
+          query,
+          message: `arXiv search failed: ${msg}`,
+        };
+      }
     }
 
     if (source === "europepmc") {
@@ -751,13 +824,26 @@ export class LiteratureSearchService {
       if (!query) {
         return { results: [], message: "No search query available for Europe PMC." };
       }
-      const results = dedupe(await fetchEuropePmcSearch(query, limit));
-      return {
-        results,
-        total: results.length,
-        source: "Europe PMC",
-        query,
-      };
+      try {
+        Zotero.debug(`[llm-for-zotero] Europe PMC search: query="${query}", limit=${limit}`);
+        const results = dedupe(await fetchEuropePmcSearch(query, limit));
+        Zotero.debug(`[llm-for-zotero] Europe PMC search returned ${results.length} results`);
+        return {
+          results,
+          total: results.length,
+          source: "Europe PMC",
+          query,
+        };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        Zotero.debug(`[llm-for-zotero] Europe PMC search failed: ${msg}`);
+        return {
+          results: [],
+          source: "Europe PMC",
+          query,
+          message: `Europe PMC search failed: ${msg}`,
+        };
+      }
     }
 
     if (mode === "search") {
@@ -765,13 +851,22 @@ export class LiteratureSearchService {
       if (!query) {
         return { results: [], message: "No search query available." };
       }
-      const results = dedupe(await fetchKeywordSearch(query, limit));
-      return {
-        results,
-        total: results.length,
-        source: "OpenAlex",
-        query,
-      };
+      try {
+        const results = dedupe(await fetchKeywordSearch(query, limit));
+        return {
+          results,
+          total: results.length,
+          source: "OpenAlex",
+          query,
+        };
+      } catch (error) {
+        return {
+          results: [],
+          source: "OpenAlex",
+          query,
+          message: `OpenAlex search failed: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
     }
 
     if (!doi) {

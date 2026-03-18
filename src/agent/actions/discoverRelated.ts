@@ -40,8 +40,8 @@ export const discoverRelatedAction: AgentAction<DiscoverRelatedInput, DiscoverRe
       },
       source: {
         type: "string",
-        enum: ["openalex", "arxiv", "europepmc"],
-        description: "Search source. Default: openalex.",
+        enum: ["openalex"],
+        description: "Search source. Only OpenAlex supports recommendations, references, and citations.",
       },
       limit: {
         type: "number",

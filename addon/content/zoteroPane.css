@@ -2701,6 +2701,10 @@ label.llm-search-results-item:hover {
   gap: 6px;
 }
 
+.llm-agent-hitl-action-choices[hidden] {
+  display: none;
+}
+
 .llm-agent-hitl-actions {
   display: flex;
   flex-wrap: wrap;

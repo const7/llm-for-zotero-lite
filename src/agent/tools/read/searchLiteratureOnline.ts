@@ -62,6 +62,8 @@ export function createSearchLiteratureOnlineTool(
           source: {
             type: "string",
             enum: ["openalex", "arxiv", "europepmc"],
+            description:
+              "Search source. OpenAlex (default) supports all modes. arXiv (preprints, CS/ML/physics) and europepmc (biomedical) only support search mode.",
           },
           itemId: { type: "number" },
           paperContext: PAPER_CONTEXT_REF_SCHEMA,
@@ -82,7 +84,10 @@ export function createSearchLiteratureOnlineTool(
           request.userText,
         ),
       instruction:
-        "For live paper discovery requests, call search_literature_online and let the review card present the result. Do not stop with an empty chat answer before using the tool.",
+        "For live paper discovery requests, call search_literature_online and let the review card present the result. Do not stop with an empty chat answer before using the tool." +
+        "\n\nSource selection:" +
+        "\n• recommendations, references, citations modes → always use source:'openalex' (only OpenAlex supports these)." +
+        "\n• search mode → source:'openalex' (default, broadest coverage), source:'arxiv' (preprints, CS/ML/physics), or source:'europepmc' (biomedical/life sciences).",
     },
     presentation: {
       label: "Search Literature Online",
@@ -151,14 +156,21 @@ export function createSearchLiteratureOnlineTool(
       if (mode === "search" && !query && !title) {
         return fail("search mode requires query or title");
       }
+      // Only OpenAlex supports recommendations, references, and citations.
+      // Auto-correct source for these modes to prevent silent degradation.
+      const requiresOpenAlex =
+        mode === "recommendations" || mode === "references" || mode === "citations";
+      const rawSource =
+        args.source === "openalex" ||
+        args.source === "arxiv" ||
+        args.source === "europepmc"
+          ? args.source
+          : undefined;
+      const source = requiresOpenAlex ? "openalex" : rawSource;
+
       return ok<SearchLiteratureOnlineInput>({
         mode,
-        source:
-          args.source === "openalex" ||
-          args.source === "arxiv" ||
-          args.source === "europepmc"
-            ? args.source
-            : undefined,
+        source,
         itemId,
         paperContext,
         doi,
