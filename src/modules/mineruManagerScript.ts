@@ -22,7 +22,7 @@ function fmtDate(d: string): string {
   catch { return d.slice(0,10); }
 }
 
-type SortKey = "title" | "firstCreator" | "year" | "dateAdded";
+type SortKey = "cached" | "title" | "firstCreator" | "year" | "dateAdded";
 type SortDir = "asc" | "desc";
 
 export async function registerMineruManagerScript(
@@ -91,6 +91,11 @@ export async function registerMineruManagerScript(
     const copy = [...items];
     const dir = sortDir === "asc" ? 1 : -1;
     copy.sort((a, b) => {
+      if (sortKey === "cached") {
+        const va = a.cached ? 1 : 0;
+        const vb = b.cached ? 1 : 0;
+        return (va - vb) * dir;
+      }
       const va = a[sortKey] || "";
       const vb = b[sortKey] || "";
       return va < vb ? -dir : va > vb ? dir : 0;
@@ -215,12 +220,16 @@ export async function registerMineruManagerScript(
     for (let i = 0; i < spans.length; i++) {
       const sp = spans[i] as HTMLElement;
       const key = sp.getAttribute("data-sort-key") as SortKey;
-      const label = { title: "Title", firstCreator: "Author", year: "Year", dateAdded: "Added" }[key];
+      const label = { cached: "\u25CF", title: "Title", firstCreator: "Author", year: "Year", dateAdded: "Added" }[key];
       if (sortKey === key) {
-        sp.textContent = `${label} ${sortDir === "asc" ? "\u25B2" : "\u25BC"}`;
+        if (key === "cached") {
+          sp.textContent = sortDir === "asc" ? "\u25B2" : "\u25BC";
+        } else {
+          sp.textContent = `${label} ${sortDir === "asc" ? "\u25B2" : "\u25BC"}`;
+        }
         sp.style.color = "FieldText";
       } else {
-        sp.textContent = label;
+        sp.textContent = label || "";
         sp.style.color = "#888";
       }
     }
@@ -239,6 +248,21 @@ export async function registerMineruManagerScript(
   }
 
   // ── Items list rendering ───────────────────────────────────────────────────
+  const CHECKBOX_SPACER_ID = `${idPrefix}-mineru-mgr-cb-spacer`;
+
+  function syncHeaderCheckboxSpacer(hasSelection: boolean): void {
+    if (!colHeaders) return;
+    const existing = doc.getElementById(CHECKBOX_SPACER_ID);
+    if (hasSelection && !existing) {
+      const spacer = doc.createElement("span");
+      spacer.id = CHECKBOX_SPACER_ID;
+      spacer.style.cssText = "width: 13px; flex-shrink: 0;";
+      colHeaders.insertBefore(spacer, colHeaders.firstChild);
+    } else if (!hasSelection && existing) {
+      existing.remove();
+    }
+  }
+
   function renderItemsList(): void {
     if (!itemsList) return;
     itemsList.innerHTML = "";
@@ -246,6 +270,7 @@ export async function registerMineruManagerScript(
 
     visibleItemsOrdered = getVisibleItems();
     const hasSelection = selectedIds.size > 0;
+    syncHeaderCheckboxSpacer(hasSelection);
     const fragment = doc.createDocumentFragment();
 
     for (const item of visibleItemsOrdered) {
