@@ -15,7 +15,11 @@ import {
   formatPaperSourceLabel,
 } from "./paperAttribution";
 import { readNoteSnapshot } from "./notes";
-import { pdfTextCache, pdfTextLoadingTasks } from "./state";
+import { pdfTextCache, pdfTextLoadingTasks, mineruParsingStatus } from "./state";
+import { activeContextPanelStateSync } from "./state";
+import { isMineruEnabled, getMineruApiKey } from "../../utils/mineruConfig";
+import { parsePdfWithMineruCloud } from "../../utils/mineruClient";
+import { readCachedMineruMd, writeMineruCacheFiles, invalidateMineruMd } from "./mineruCache";
 import type {
   PdfContext,
   ChunkStat,
@@ -25,11 +29,31 @@ import type {
   PdfChunkKind,
 } from "./types";
 
+function needsMineruUpgrade(itemId: number): boolean {
+  const existing = pdfTextCache.get(itemId);
+  if (!existing) return false;
+  return (
+    existing.sourceType !== "mineru" &&
+    isMineruEnabled() &&
+    Boolean(getMineruApiKey())
+  );
+}
+
+function notifyPanelStateSync(): void {
+  for (const [el, sync] of activeContextPanelStateSync) {
+    if ((el as Element).isConnected) {
+      try { sync(); } catch { /* ignore */ }
+    }
+  }
+}
+
 async function cachePDFText(item: Zotero.Item) {
-  if (pdfTextCache.has(item.id)) return;
+  const existing = pdfTextCache.get(item.id);
+  if (existing && !needsMineruUpgrade(item.id)) return;
 
   try {
     let pdfText = "";
+    let sourceType: "mineru" | "zotero-worker" | undefined;
     const mainItem =
       item.isAttachment() && item.parentID
         ? Zotero.Items.get(item.parentID)
@@ -42,11 +66,52 @@ async function cachePDFText(item: Zotero.Item) {
         ? item
         : null;
 
-    if (pdfItem) {
+    // 1. Try MinerU disk cache
+    if (isMineruEnabled() && getMineruApiKey()) {
+      const cachedMd = await readCachedMineruMd(item.id);
+      if (cachedMd) {
+        pdfText = cachedMd;
+        sourceType = "mineru";
+      }
+    }
+
+    // 2. Try MinerU cloud API (if enabled, has API key, and not cached)
+    if (!pdfText && isMineruEnabled() && getMineruApiKey() && pdfItem) {
+      const pdfPath = await (pdfItem as unknown as { getFilePathAsync?: () => Promise<string | false> }).getFilePathAsync?.();
+      if (pdfPath) {
+        mineruParsingStatus.set(item.id, { status: "parsing", message: "Starting MinerU…" });
+        notifyPanelStateSync();
+        try {
+          const result = await parsePdfWithMineruCloud(
+            pdfPath as string,
+            getMineruApiKey(),
+            (stage) => {
+              mineruParsingStatus.set(item.id, { status: "parsing", message: stage });
+              notifyPanelStateSync();
+            },
+          );
+          if (result?.mdContent) {
+            pdfText = result.mdContent;
+            sourceType = "mineru";
+            await writeMineruCacheFiles(item.id, pdfText, result.files);
+            mineruParsingStatus.set(item.id, { status: "done", message: "Done" });
+          } else {
+            mineruParsingStatus.set(item.id, { status: "failed", message: "MinerU extraction failed" });
+          }
+        } catch (e) {
+          ztoolkit.log("MinerU cloud parsing failed:", e);
+          mineruParsingStatus.set(item.id, { status: "failed", message: `Error: ${(e as Error).message}` });
+        }
+      }
+    }
+
+    // 3. Fallback to Zotero.PDFWorker (existing behavior)
+    if (!pdfText && pdfItem) {
       try {
         const result = await Zotero.PDFWorker.getFullText(pdfItem.id);
         if (result && result.text) {
           pdfText = result.text;
+          sourceType = "zotero-worker";
         }
       } catch (e) {
         ztoolkit.log("PDF extraction failed:", e);
@@ -66,8 +131,13 @@ async function cachePDFText(item: Zotero.Item) {
         avgChunkLength,
         fullLength: pdfText.length,
         embeddingFailed: false,
+        sourceType,
       });
-    } else {
+      if (sourceType === "mineru" && existing) {
+        // MinerU upgraded an existing PDFWorker entry — refresh UI
+        notifyPanelStateSync();
+      }
+    } else if (!existing) {
       pdfTextCache.set(item.id, {
         title,
         chunks: [],
@@ -81,21 +151,24 @@ async function cachePDFText(item: Zotero.Item) {
     }
   } catch (e) {
     ztoolkit.log("Error caching PDF:", e);
-    pdfTextCache.set(item.id, {
-      title: "",
-      chunks: [],
-      chunkMeta: [],
-      chunkStats: [],
-      docFreq: {},
-      avgChunkLength: 0,
-      fullLength: 0,
-      embeddingFailed: false,
-    });
+    if (!existing) {
+      pdfTextCache.set(item.id, {
+        title: "",
+        chunks: [],
+        chunkMeta: [],
+        chunkStats: [],
+        docFreq: {},
+        avgChunkLength: 0,
+        fullLength: 0,
+        embeddingFailed: false,
+      });
+    }
   }
 }
 
 export async function ensurePDFTextCached(item: Zotero.Item): Promise<void> {
-  if (pdfTextCache.has(item.id)) return;
+  const existing = pdfTextCache.get(item.id);
+  if (existing && !needsMineruUpgrade(item.id)) return;
   const existingTask = pdfTextLoadingTasks.get(item.id);
   if (existingTask) {
     await existingTask;
@@ -182,6 +255,10 @@ export function invalidateCachedContextText(itemId: number): void {
   const normalizedItemId = Math.floor(itemId);
   pdfTextCache.delete(normalizedItemId);
   pdfTextLoadingTasks.delete(normalizedItemId);
+  mineruParsingStatus.delete(normalizedItemId);
+  invalidateMineruMd(normalizedItemId).catch((e) => {
+    ztoolkit.log("MinerU cache invalidation failed:", e);
+  });
 }
 
 function splitIntoChunks(text: string, targetLength: number): string[] {

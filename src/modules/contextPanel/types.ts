@@ -119,6 +119,7 @@ export type PdfContext = {
   embeddings?: number[][];
   embeddingPromise?: Promise<number[][] | null>;
   embeddingFailed?: boolean;
+  sourceType?: "mineru" | "zotero-worker";
 };
 
 export type PdfChunkKind =

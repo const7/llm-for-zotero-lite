@@ -31,6 +31,13 @@ import {
   type ProviderProtocol,
 } from "../utils/providerProtocol";
 import { runProviderConnectionTest } from "../utils/providerConnectionTest";
+import {
+  isMineruEnabled,
+  getMineruApiKey,
+  setMineruEnabled,
+  setMineruApiKey,
+} from "../utils/mineruConfig";
+import { testMineruConnection } from "../utils/mineruClient";
 
 type PrefKey = "systemPrompt";
 
@@ -1001,5 +1008,62 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         true,
       );
     });
+  }
+
+  // ── MinerU settings ─────────────────────────────────────────────
+
+  const mineruEnabledInput = doc.querySelector(
+    `#${config.addonRef}-mineru-enabled`,
+  ) as HTMLInputElement | null;
+  const mineruApiKeyInput = doc.querySelector(
+    `#${config.addonRef}-mineru-api-key`,
+  ) as HTMLInputElement | null;
+  const mineruTestBtn = doc.querySelector(
+    `#${config.addonRef}-mineru-test`,
+  ) as HTMLButtonElement | null;
+  const mineruTestStatus = doc.querySelector(
+    `#${config.addonRef}-mineru-test-status`,
+  ) as HTMLSpanElement | null;
+
+  if (mineruEnabledInput) {
+    mineruEnabledInput.checked = isMineruEnabled();
+    mineruEnabledInput.addEventListener("change", () => {
+      setMineruEnabled(mineruEnabledInput.checked);
+    });
+  }
+
+  if (mineruApiKeyInput) {
+    mineruApiKeyInput.value = getMineruApiKey();
+    mineruApiKeyInput.addEventListener("input", () => {
+      setMineruApiKey(mineruApiKeyInput.value);
+    });
+  }
+
+  if (mineruTestBtn && mineruTestStatus) {
+    const runMineruTest = async () => {
+      const apiKey = getMineruApiKey().trim();
+      if (!apiKey) {
+        mineruTestStatus.style.display = "inline";
+        mineruTestStatus.textContent = "Enter an API key first";
+        mineruTestStatus.style.color = "var(--fill-secondary, #888)";
+        return;
+      }
+      mineruTestBtn.disabled = true;
+      mineruTestStatus.style.display = "inline";
+      mineruTestStatus.textContent = "Testing…";
+      mineruTestStatus.style.color = "var(--fill-secondary, #888)";
+      try {
+        await testMineruConnection(apiKey);
+        mineruTestStatus.textContent = "✓ Connection successful";
+        mineruTestStatus.style.color = "green";
+      } catch (error) {
+        mineruTestStatus.textContent = `✗ ${(error as Error).message}`;
+        mineruTestStatus.style.color = "red";
+      } finally {
+        mineruTestBtn.disabled = false;
+      }
+    };
+    mineruTestBtn.addEventListener("click", () => void runMineruTest());
+    mineruTestBtn.addEventListener("command", () => void runMineruTest());
   }
 }
