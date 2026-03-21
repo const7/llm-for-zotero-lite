@@ -60,7 +60,8 @@ export function createEditCurrentNoteTool(
     guidance: {
       matches: (request) => Boolean(request.activeNoteContext),
       instruction:
-        "When the user asks you to edit, rewrite, or update the current open note, call `edit_current_note` with mode 'edit'. When the user asks you to create a new note for a paper, call `edit_current_note` with mode 'create'. Always pass plain text or Markdown, never raw HTML.",
+        "MANDATORY: When a note is open and the user asks to edit, rewrite, revise, polish, or update ANY text, you MUST call `edit_current_note` with mode 'edit'. NEVER output rewritten or edited text directly in chat — always use the tool so the user sees a diff review card. " +
+        "When the user asks to create a new note for a paper, call `edit_current_note` with mode 'create'. Always pass plain text or Markdown, never raw HTML.",
     },
     presentation: {
       label: "Edit / Create Note",
@@ -136,7 +137,7 @@ export function createEditCurrentNoteTool(
               before: "",
               after: normalizedContent,
               sourceFieldId: "content",
-              contextLines: 2,
+              contextLines: 0,
               emptyMessage: "No note content yet.",
             },
             {
@@ -174,7 +175,7 @@ export function createEditCurrentNoteTool(
             before: snapshot.text,
             after: normalizedContent,
             sourceFieldId: "content",
-            contextLines: 2,
+            contextLines: 0,
             emptyMessage: "No note changes yet.",
           },
           {

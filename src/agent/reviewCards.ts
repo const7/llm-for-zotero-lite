@@ -793,11 +793,6 @@ export function resolveSearchLiteratureReview(
             sourceMode: "review",
           } satisfies AgentInheritedApproval,
         },
-        terminalText: {
-          onSuccess: "Saved the reviewed metadata to a note.",
-          onDenied: "Saving the metadata note was cancelled.",
-          onError: "Could not save the reviewed metadata to a note.",
-        },
       };
     }
     if (actionId === "apply_direct") {
@@ -828,11 +823,6 @@ export function resolveSearchLiteratureReview(
             sourceActionId: "apply_direct",
             sourceMode: "review",
           } satisfies AgentInheritedApproval,
-        },
-        terminalText: {
-          onSuccess: "Applied the metadata changes to the paper.",
-          onDenied: "Applying the metadata changes was cancelled.",
-          onError: "Could not apply the metadata changes.",
         },
       };
     }
@@ -868,11 +858,6 @@ export function resolveSearchLiteratureReview(
             sourceActionId: "review_changes",
             sourceMode: "review",
           } satisfies AgentInheritedApproval,
-        },
-        terminalText: {
-          onSuccess: "Applied the selected metadata to the paper.",
-          onDenied: "Applying the selected metadata was cancelled.",
-          onError: "Could not apply the selected metadata.",
         },
       };
     }
@@ -914,11 +899,6 @@ export function resolveSearchLiteratureReview(
           sourceMode: "review",
         } satisfies AgentInheritedApproval,
       },
-      terminalText: {
-        onSuccess: "Imported the selected papers into Zotero.",
-        onDenied: "Importing the selected papers was cancelled.",
-        onError: "Could not import the selected papers.",
-      },
     };
   }
 
@@ -940,11 +920,6 @@ export function resolveSearchLiteratureReview(
           sourceActionId: "save_paper_note",
           sourceMode: "review",
         } satisfies AgentInheritedApproval,
-      },
-      terminalText: {
-        onSuccess: "Saved the selected papers to a note.",
-        onDenied: "Saving the selected papers to a note was cancelled.",
-        onError: "Could not save the selected papers to a note.",
       },
     };
   }

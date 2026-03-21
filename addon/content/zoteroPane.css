@@ -2404,7 +2404,7 @@ label.llm-search-results-item:hover {
 
 .llm-agent-hitl-diff-line {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-columns: 46px minmax(0, 1fr);
   align-items: stretch;
   min-width: 0;
   border-top: 1px solid color-mix(in srgb, var(--stroke-secondary) 70%, transparent);
@@ -2428,10 +2428,10 @@ label.llm-search-results-item:hover {
 
 .llm-agent-hitl-diff-gutter {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 16px;
-  gap: 6px;
+  grid-template-columns: 1fr 14px;
+  gap: 2px;
   align-items: center;
-  padding: 7px 8px 7px 10px;
+  padding: 3px 4px 3px 6px;
   border-right: 1px solid color-mix(in srgb, var(--stroke-secondary) 70%, transparent);
   color: var(--fill-tertiary);
   font-family:
@@ -2444,7 +2444,7 @@ label.llm-search-results-item:hover {
     "Courier New",
     monospace;
   font-size: var(--llm-fs-9);
-  line-height: 1.45;
+  line-height: 1.35;
 }
 
 .llm-agent-hitl-diff-line-number {
@@ -2468,9 +2468,9 @@ label.llm-search-results-item:hover {
 
 .llm-agent-hitl-diff-content {
   margin: 0;
-  padding: 7px 12px;
+  padding: 3px 10px;
   min-width: 0;
-  min-height: 1.45em;
+  min-height: 1.35em;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -2484,7 +2484,7 @@ label.llm-search-results-item:hover {
     "Courier New",
     monospace;
   font-size: var(--llm-fs-10);
-  line-height: 1.45;
+  line-height: 1.35;
   color: var(--fill-primary);
 }
 
@@ -2500,7 +2500,7 @@ label.llm-search-results-item:hover {
 
 .llm-agent-hitl-diff-gap,
 .llm-agent-hitl-diff-empty {
-  padding: 9px 12px;
+  padding: 4px 10px;
   font-size: var(--llm-fs-10);
   color: var(--fill-tertiary);
   background: color-mix(in srgb, var(--fill-quaternary) 94%, transparent);

@@ -222,22 +222,21 @@ function renderDiffPreviewField(
       const gutter = doc.createElement("div");
       gutter.className = "llm-agent-hitl-diff-gutter";
 
-      const oldLineNumber = doc.createElement("span");
-      oldLineNumber.className = "llm-agent-hitl-diff-line-number";
-      oldLineNumber.textContent =
-        typeof line.oldLineNumber === "number" ? String(line.oldLineNumber) : "";
-
-      const newLineNumber = doc.createElement("span");
-      newLineNumber.className = "llm-agent-hitl-diff-line-number";
-      newLineNumber.textContent =
-        typeof line.newLineNumber === "number" ? String(line.newLineNumber) : "";
+      const lineNumber = doc.createElement("span");
+      lineNumber.className = "llm-agent-hitl-diff-line-number";
+      lineNumber.textContent =
+        typeof line.oldLineNumber === "number"
+          ? String(line.oldLineNumber)
+          : typeof line.newLineNumber === "number"
+            ? String(line.newLineNumber)
+            : "";
 
       const marker = doc.createElement("span");
       marker.className = "llm-agent-hitl-diff-marker";
       marker.textContent =
-        line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " ";
+        line.kind === "add" ? "+" : line.kind === "remove" ? "\u2212" : " ";
 
-      gutter.append(oldLineNumber, newLineNumber, marker);
+      gutter.append(lineNumber, marker);
 
       const content = doc.createElement("pre");
       content.className = "llm-agent-hitl-diff-content";
