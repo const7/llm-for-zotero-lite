@@ -2054,7 +2054,7 @@ export async function retryLatestAssistantResponse(
       return;
     }
 
-    const allImages = [...(screenshotImages || []), ...contextPlan.mineruImages];
+    const allImages = [...(screenshotImages || []), ...(contextPlan.mineruImages || [])];
     const requestParams = {
       prompt: question,
       context: combinedContext,
@@ -2821,7 +2821,7 @@ export async function sendQuestion(
       return;
     }
 
-    const allSendImages = [...(images || []), ...contextPlan.mineruImages];
+    const allSendImages = [...(images || []), ...(contextPlan.mineruImages || [])];
     const requestParams = {
       prompt: question,
       context: combinedContext,

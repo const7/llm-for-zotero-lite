@@ -17,6 +17,7 @@ import {
 import { readNoteSnapshot } from "./notes";
 import { pdfTextCache, pdfTextLoadingTasks } from "./state";
 import { readCachedMineruMd, invalidateMineruMd } from "./mineruCache";
+import { isMineruEnabled } from "../../utils/mineruConfig";
 import type {
   PdfContext,
   ChunkStat,
@@ -44,8 +45,10 @@ async function cachePDFText(item: Zotero.Item) {
         ? item
         : null;
 
-    // 1. Try MinerU disk cache (silent — no cloud API calls here)
-    const cachedMd = await readCachedMineruMd(item.id);
+    // 1. Try MinerU disk cache (only if MinerU is enabled)
+    const cachedMd = isMineruEnabled()
+      ? await readCachedMineruMd(item.id)
+      : null;
     if (cachedMd) {
       pdfText = cachedMd;
       sourceType = "mineru";

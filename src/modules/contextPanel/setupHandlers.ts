@@ -9398,7 +9398,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     ) {
       await activeReader.navigate(location);
       if (selectedContext.text) {
-        await scrollToExactQuoteInReader(activeReader, selectedContext.text);
+        try {
+          await scrollToExactQuoteInReader(activeReader, selectedContext.text);
+        } catch {
+          await flashPageInLivePdfReader(activeReader, pageIndex);
+        }
       } else {
         await flashPageInLivePdfReader(activeReader, pageIndex);
       }
@@ -9440,7 +9444,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         getActiveReaderForSelectedTab();
       if (nextReader) {
         if (selectedContext.text) {
-          await scrollToExactQuoteInReader(nextReader, selectedContext.text);
+          try {
+            await scrollToExactQuoteInReader(nextReader, selectedContext.text);
+          } catch {
+            await flashPageInLivePdfReader(nextReader, pageIndex);
+          }
         } else {
           await flashPageInLivePdfReader(nextReader, pageIndex);
         }
@@ -9461,7 +9469,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       const nextReader = getActiveReaderForSelectedTab();
       if (nextReader) {
         if (selectedContext.text) {
-          await scrollToExactQuoteInReader(nextReader, selectedContext.text);
+          try {
+            await scrollToExactQuoteInReader(nextReader, selectedContext.text);
+          } catch {
+            await flashPageInLivePdfReader(nextReader, pageIndex);
+          }
         } else {
           await flashPageInLivePdfReader(nextReader, pageIndex);
         }

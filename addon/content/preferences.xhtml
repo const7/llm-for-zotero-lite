@@ -165,8 +165,9 @@
             <html:span style="font-size: 14px; font-weight: 800; color: var(--fill-primary, inherit);">
               MinerU PDF Parsing
             </html:span>
-            <html:span style="font-size: 11.5px; color: var(--fill-secondary, #888);">
-              Use MinerU cloud API for high-quality PDF extraction with preserved math, tables, and figures.
+            <html:span style="font-size: 11.5px; color: var(--fill-secondary, #888); line-height: 1.5;">
+              Extract high-quality structured text from PDFs with preserved math formulas, tables, and figures.
+              MinerU dramatically improves how the AI understands your papers.
             </html:span>
           </html:div>
 
@@ -189,19 +190,40 @@
 
           <html:div
             id="__addonRef__-mineru-sub-settings"
-            style="display: none; flex-direction: column; gap: 8px;"
+            style="display: none; flex-direction: column; gap: 10px;"
           >
+            <!-- Info box -->
+            <html:div style="
+              background: color-mix(in srgb, var(--color-accent, #2563eb) 8%, transparent);
+              border: 1px solid color-mix(in srgb, var(--color-accent, #2563eb) 20%, transparent);
+              border-radius: 6px;
+              padding: 10px 12px;
+              font-size: 11.5px;
+              line-height: 1.6;
+              color: var(--fill-primary, inherit);
+            ">
+              <html:span style="font-weight: 600;">No API key needed to get started!</html:span>
+              You can parse up to 5 papers per day using the built-in community quota.
+              <html:br />
+              <html:br />
+              For unlimited parsing (2,000 pages/day), get your own free API key from
+              <html:a href="https://mineru.net" target="_blank" rel="noopener"
+                style="color: var(--color-accent, #2563eb); text-decoration: underline;">mineru.net</html:a>
+              and paste it below.
+            </html:div>
+
+            <!-- API key section -->
             <html:div style="display: flex; flex-direction: column; gap: 4px">
               <html:label
                 for="__addonRef__-mineru-api-key"
-                style="display: block; font-weight: 600; font-size: 12px; color: var(--fill-primary, inherit); margin-bottom: 4px;"
+                style="display: block; font-weight: 600; font-size: 12px; color: var(--fill-primary, inherit); margin-bottom: 2px;"
               >
-                API Key
+                API Key (Optional)
               </html:label>
               <html:input
                 id="__addonRef__-mineru-api-key"
                 type="password"
-                placeholder="Enter your mineru.net API key"
+                placeholder="Leave empty to use community quota (5/day)"
                 style="
                   width: 100%;
                   padding: 6px 10px;
@@ -213,6 +235,9 @@
                   color: FieldText;
                 "
               ></html:input>
+              <html:span style="font-size: 10.5px; color: var(--fill-secondary, #888); margin-top: 1px;">
+                With your own key: unlimited parsing, direct connection to mineru.net
+              </html:span>
             </html:div>
 
             <html:div style="display: flex; align-items: center; gap: 8px;">
@@ -239,12 +264,7 @@
               ></html:span>
             </html:div>
 
-              <html:span style="font-size: 11px; color: var(--fill-secondary, #888); margin-top: 1px; display: block;">
-              Get your API key from mineru.net. MinerU provides structured markdown with LaTeX math, HTML tables, and figure references.
-            </html:span>
-          </html:div>
-
-          <!-- ── Embedded MinerU manager ── -->
+            <!-- ── Embedded MinerU manager ── -->
           <html:div style="margin-top: 8px; border-top: 1px solid var(--stroke-secondary, rgba(128,128,128,0.25)); padding-top: 12px;">
             <html:div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
               <html:span style="font-size: 13px; font-weight: 700;">Manage Files</html:span>
@@ -312,6 +332,7 @@
               <html:div style="border-top: 1px solid rgba(128,128,128,0.2); margin: 2px 0;"></html:div>
               <html:div id="__addonRef__-mineru-mgr-ctx-delete" style="padding: 4px 12px; font-size: 11.5px; cursor: pointer; color: #dc2626;">Delete MinerU Cache</html:div>
             </html:div>
+          </html:div>
           </html:div>
         </html:div>
       </html:div>

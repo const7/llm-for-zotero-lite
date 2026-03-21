@@ -522,8 +522,9 @@ export async function registerMineruManagerScript(
   });
 
   // Poll-based dot updater: check every 500ms if there's an active item
-  // and set its dot to yellow. This works around timing issues where the
-  // batch state listener fires but the DOM hasn't repainted yet.
+  // and set its dot to yellow. Guard against duplicate intervals.
+  const existingInterval = (win as unknown as { _mineruDotPoll?: number })._mineruDotPoll;
+  if (existingInterval) win.clearInterval(existingInterval);
   const dotPollInterval = win.setInterval(() => {
     const s = getMineruBatchState();
     if (s.currentItemId) {
@@ -533,6 +534,7 @@ export async function registerMineruManagerScript(
       }
     }
   }, 500);
+  (win as unknown as { _mineruDotPoll?: number })._mineruDotPoll = dotPollInterval;
   win.addEventListener("unload", () => clearInterval(dotPollInterval));
 
   // ── Button handlers ────────────────────────────────────────────────────────
