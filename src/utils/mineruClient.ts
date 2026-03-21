@@ -1,4 +1,18 @@
-const MINERU_API_BASE = "https://mineru.net/api/v4";
+const MINERU_DIRECT_API_BASE = "https://mineru.net/api/v4";
+const MINERU_PROXY_API_BASE = "https://llm-for-zotero.ylwwayne.workers.dev/api/v4";
+
+/**
+ * When the user provides their own API key, call mineru.net directly.
+ * Otherwise, use the community proxy (which injects the shared key server-side).
+ */
+function getMineruApiBase(apiKey: string): string {
+  return apiKey ? MINERU_DIRECT_API_BASE : MINERU_PROXY_API_BASE;
+}
+
+function getMineruAuthHeaders(apiKey: string): Record<string, string> {
+  // When using the proxy, no Authorization header needed — the proxy injects it
+  return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+}
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 10 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 60000;
@@ -407,9 +421,9 @@ async function parsePdfViaUpload(
 
   const batchResult = await httpJson(
     "POST",
-    `${MINERU_API_BASE}/file-urls/batch`,
+    `${getMineruApiBase(apiKey)}/file-urls/batch`,
     {
-      Authorization: `Bearer ${apiKey}`,
+      ...getMineruAuthHeaders(apiKey),
       "Content-Type": "application/json",
     },
     JSON.stringify({
@@ -471,8 +485,8 @@ async function parsePdfViaUpload(
 
     const pollResult = await httpJson(
       "GET",
-      `${MINERU_API_BASE}/extract-results/batch/${batchId}`,
-      { Authorization: `Bearer ${apiKey}` },
+      `${getMineruApiBase(apiKey)}/extract-results/batch/${batchId}`,
+      getMineruAuthHeaders(apiKey),
     );
 
     if (pollResult.status < 200 || pollResult.status >= 300) {
@@ -536,10 +550,24 @@ export async function parsePdfWithMineruCloud(
 export async function testMineruConnection(apiKey: string): Promise<void> {
   const result = await httpJson(
     "GET",
-    `${MINERU_API_BASE}/extract-results/batch/_test`,
-    { Authorization: `Bearer ${apiKey}` },
+    `${getMineruApiBase(apiKey)}/extract-results/batch/_test`,
+    getMineruAuthHeaders(apiKey),
   );
   if (result.status === 401 || result.status === 403) {
     throw new Error("Invalid API key — authentication failed");
+  }
+}
+
+/**
+ * Test the community proxy connection (no user API key needed).
+ */
+export async function testProxyConnection(): Promise<void> {
+  const result = await httpJson(
+    "GET",
+    `${MINERU_PROXY_API_BASE}/extract-results/batch/_test`,
+    {},
+  );
+  if (result.status === 401 || result.status === 403) {
+    throw new Error("Proxy authentication failed — please provide your own API key");
   }
 }

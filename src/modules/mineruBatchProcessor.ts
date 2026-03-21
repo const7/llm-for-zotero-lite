@@ -164,20 +164,7 @@ async function processNext(): Promise<void> {
       return;
     }
 
-    const apiKey = getMineruApiKey();
-    if (!apiKey) {
-      state.running = false;
-      state.paused = true;
-      state.error = "No API key configured";
-      state.currentItemId = null;
-      state.currentItemTitle = "";
-      state.statusMessage = "";
-      // Put entry back
-      queue.unshift(entry);
-      notify();
-      return;
-    }
-
+    const apiKey = getMineruApiKey(); // empty string = use community proxy
     const result = await parsePdfWithMineruCloud(pdfPath as string, apiKey, (stage) => {
       state.statusMessage = stage;
       notify();
