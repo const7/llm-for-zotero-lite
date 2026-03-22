@@ -517,7 +517,7 @@ export async function registerMineruManagerScript(
       const dot = dotElements.get(lastSeenCurrentId);
       if (dot) dot.style.background = failed ? "#ef4444" : "#10b981";
       const entry = allItems.find((i) => i.attachmentId === lastSeenCurrentId);
-      if (entry) entry.cached = !failed;
+      if (entry && !failed) entry.cached = true;
       lastSeenCurrentId = null;
     }
   });
