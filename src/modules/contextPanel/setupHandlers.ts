@@ -67,6 +67,7 @@ import {
   setInlineEditCleanup,
   setInlineEditInputSection,
   setInlineEditSavedDraft,
+  pdfTextCache,
 } from "./state";
 import {
   sanitizeText,
@@ -1495,6 +1496,44 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     return mode === "full-next" || mode === "full-sticky";
   };
 
+  const isPaperContextMineru = (paperContext: PaperContextRef): boolean => {
+    // Check in-memory cache first (available after ensurePDFTextCached completes)
+    const cached = pdfTextCache.get(paperContext.contextItemId);
+    if (cached?.sourceType === "mineru") return true;
+    // Cache may not be populated yet — trigger async check and update chip later
+    if (!cached) {
+      void checkAndApplyMineruChipStyle(paperContext.contextItemId);
+    }
+    return false;
+  };
+
+  const checkAndApplyMineruChipStyle = async (contextItemId: number): Promise<void> => {
+    try {
+      const { hasCachedMineruMd } = await import("./mineruCache");
+      const { isMineruEnabled } = await import("../../utils/mineruConfig");
+      if (!isMineruEnabled()) return;
+      const hasCache = await hasCachedMineruMd(contextItemId);
+      if (!hasCache) return;
+      // Find the chip in the DOM and apply the MinerU class
+      if (!paperPreviewList) return;
+      const chips = paperPreviewList.querySelectorAll(
+        `.llm-paper-context-chip[data-paper-context-item-id="${contextItemId}"]`,
+      );
+      for (let i = 0; i < chips.length; i++) {
+        const chip = chips[i] as HTMLDivElement;
+        if (!chip.classList.contains("llm-paper-context-chip-mineru")) {
+          chip.classList.add("llm-paper-context-chip-mineru");
+          chip.dataset.mineru = "true";
+          // Update tooltip
+          const label = chip.querySelector(".llm-paper-context-chip-label") as HTMLElement | null;
+          if (label && label.title && !label.title.includes("MinerU")) {
+            label.title = `${label.title}\nSource: MinerU (enhanced markdown)`;
+          }
+        }
+      }
+    } catch { /* ignore */ }
+  };
+
   const resolvePaperContextNextSendMode = (
     itemId: number,
     paperContext: PaperContextRef,
@@ -2048,10 +2087,12 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       removableIndex?: number;
       autoLoaded?: boolean;
       fullText?: boolean;
+      mineru?: boolean;
     },
   ) => {
     const removable = options?.removable === true;
     const fullText = options?.fullText === true;
+    const mineru = options?.mineru === true;
     const chip = createElement(
       ownerDoc,
       "div",
@@ -2068,6 +2109,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     }
     chip.dataset.fullText = fullText ? "true" : "false";
     chip.classList.toggle("llm-paper-context-chip-full", fullText);
+    chip.dataset.mineru = mineru ? "true" : "false";
+    chip.classList.toggle("llm-paper-context-chip-mineru", mineru);
     chip.classList.add("collapsed");
 
     const chipHeader = createElement(
@@ -2075,13 +2118,14 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       "div",
       "llm-image-preview-header llm-selected-context-header llm-paper-context-chip-header",
     );
+    const chipTitle = formatPaperContextChipTitle(paperContext);
     const chipLabel = createElement(
       ownerDoc,
       "span",
       "llm-paper-context-chip-label",
       {
         textContent: formatPaperContextChipLabel(paperContext),
-        title: formatPaperContextChipTitle(paperContext),
+        title: mineru ? `${chipTitle}\nSource: MinerU (enhanced markdown)` : chipTitle,
       },
     );
     chipHeader.append(chipLabel);
@@ -2209,6 +2253,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           isPaperContextFullTextMode(
             resolvePaperContextNextSendMode(itemId, autoLoadedPaperContext),
           ),
+        mineru: isPaperContextMineru(autoLoadedPaperContext),
       });
     }
     selectedPapers.forEach((paperContext, index) => {
@@ -2219,6 +2264,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           isPaperContextFullTextMode(
             resolvePaperContextNextSendMode(itemId, paperContext),
         ),
+        mineru: isPaperContextMineru(paperContext),
       });
     });
     selectedOtherRefs.forEach((ref, index) => {
@@ -7095,9 +7141,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     selectedPaperPreviewExpandedCache.set(item.id, false);
     updatePaperPreviewPreservingScroll();
     if (status) {
+      const addedPaper = nextPapers[nextPapers.length - 1];
+      const mineruTag = isPaperContextMineru(addedPaper) ? " (MinerU)" : "";
       setStatus(
         status,
-        "Paper context added. Full text will be sent on the next turn.",
+        `Paper context added. Full text will be sent on the next turn.${mineruTag}`,
         "ready",
       );
     }
@@ -9242,11 +9290,12 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       );
       closePaperChipMenu();
       if (status) {
+        const mineruTag = isPaperContextMineru(paperContext) ? " (MinerU)" : "";
         setStatus(
           status,
           nextMode === "full-sticky"
-            ? "Paper set to always send full text."
-            : "Paper set to retrieval mode.",
+            ? `Paper set to always send full text.${mineruTag}`
+            : `Paper set to retrieval mode.${mineruTag}`,
           "ready",
         );
       }
