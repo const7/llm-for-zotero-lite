@@ -24,6 +24,10 @@ export type MineruBatchState = {
   rateLimited: boolean;
   /** ID of the last item that failed processing (null if last item succeeded) */
   lastFailedItemId: number | null;
+  /** Human-readable reason for the most recent failure (persists across items) */
+  lastFailedMessage: string | null;
+  /** Number of items that failed during the current batch run */
+  failedCount: number;
 };
 
 type QueueEntry = {
@@ -45,6 +49,8 @@ let state: MineruBatchState = {
   error: null,
   rateLimited: false,
   lastFailedItemId: null,
+  lastFailedMessage: null,
+  failedCount: 0,
 };
 
 let queue: QueueEntry[] = [];
@@ -177,8 +183,11 @@ async function processNext(): Promise<void> {
       state.processedCount++;
       state.lastFailedItemId = null;
     } else {
+      const failReason = state.statusMessage || "No content returned";
       ztoolkit.log(`MinerU batch: no content returned for "${entry.title}", skipping`);
       state.lastFailedItemId = entry.attachmentId;
+      state.lastFailedMessage = `"${entry.title}": ${failReason}`;
+      state.failedCount++;
     }
   } catch (e) {
     if (e instanceof MineruRateLimitError) {
@@ -187,6 +196,8 @@ async function processNext(): Promise<void> {
       state.running = false;
       state.error = e.message || "Daily limit reached. Resume tomorrow.";
       state.lastFailedItemId = entry.attachmentId;
+      state.lastFailedMessage = `"${entry.title}": ${e.message}`;
+      state.failedCount++;
       state.currentItemId = null;
       state.currentItemTitle = "";
       // Put entry back at front so it retries next time
@@ -194,8 +205,11 @@ async function processNext(): Promise<void> {
       notify();
       return;
     }
+    const errMsg = (e as Error).message || String(e);
     ztoolkit.log(`MinerU batch: error processing "${entry.title}":`, e);
     state.lastFailedItemId = entry.attachmentId;
+    state.lastFailedMessage = `"${entry.title}": ${errMsg}`;
+    state.failedCount++;
   }
 
   scheduleNext();
@@ -222,6 +236,9 @@ export async function startBatchProcessing(): Promise<void> {
   state.rateLimited = false;
   state.error = null;
   state.running = true;
+  state.failedCount = 0;
+  state.lastFailedMessage = null;
+  state.lastFailedItemId = null;
   notify();
 
   if (!queueBuilt) {
@@ -263,6 +280,9 @@ export async function processSelectedItems(
   state.running = true;
   state.totalCount = queue.length;
   state.processedCount = 0;
+  state.failedCount = 0;
+  state.lastFailedMessage = null;
+  state.lastFailedItemId = null;
   notify();
 
   void processNext();

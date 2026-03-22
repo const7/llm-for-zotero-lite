@@ -483,8 +483,29 @@ export async function registerMineruManagerScript(
     }
     updateButtons();
     if (statusEl) {
-      statusEl.textContent = s.statusMessage || "";
-      statusEl.title = s.statusMessage || "";
+      if (s.statusMessage) {
+        // Currently processing — show live status
+        statusEl.textContent = s.statusMessage;
+        statusEl.title = s.statusMessage;
+        statusEl.style.color = "";
+      } else if (s.failedCount > 0 && s.lastFailedMessage) {
+        // Not actively processing, but there were failures — show error summary
+        const prefix = s.failedCount > 1
+          ? `${s.failedCount} items failed. Last error: `
+          : "Failed: ";
+        const msg = prefix + s.lastFailedMessage;
+        statusEl.textContent = msg;
+        statusEl.title = msg;
+        statusEl.style.color = "#dc2626";
+      } else if (!s.running && s.processedCount > 0 && s.failedCount === 0) {
+        statusEl.textContent = "";
+        statusEl.title = "";
+        statusEl.style.color = "";
+      } else {
+        statusEl.textContent = "";
+        statusEl.title = "";
+        statusEl.style.color = "";
+      }
     }
     if (errorSpan) {
       if (s.error) { errorSpan.style.display = "inline"; errorSpan.textContent = s.error; }
@@ -605,7 +626,65 @@ export async function registerMineruManagerScript(
     updateProgressBar();
   }
 
-  win.addEventListener("unload", () => { unsubscribe(); });
+  // ── Auto-refresh on library changes ────────────────────────────────────────
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  const debouncedRefresh = () => {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(async () => {
+      refreshTimer = null;
+      const prevCollectionId = activeCollectionId;
+      await loadData();
+      // If the previously selected collection no longer exists, reset to "all"
+      if (typeof prevCollectionId === "number" && !recursiveItemsMap.has(prevCollectionId)) {
+        activeCollectionId = "all";
+      }
+      renderSidebar();
+      renderItemsList();
+    }, 1000);
+  };
+
+  let notifierId: string | null = null;
+  try {
+    const notifier = (Zotero as unknown as {
+      Notifier?: {
+        registerObserver?: (
+          observer: { notify: (event: string, type: string, ids: unknown[]) => void },
+          types: string[],
+          id?: string,
+        ) => string;
+        unregisterObserver?: (id: string) => void;
+      };
+    }).Notifier;
+    if (notifier?.registerObserver) {
+      notifierId = notifier.registerObserver(
+        {
+          notify(event: string, type: string) {
+            if (
+              (type === "item" && ["add", "modify", "delete", "trash", "remove"].includes(event)) ||
+              (type === "collection" && ["add", "modify", "delete", "remove"].includes(event))
+            ) {
+              debouncedRefresh();
+            }
+          },
+        },
+        ["item", "collection"],
+        "mineruManager",
+      );
+    }
+  } catch { /* Notifier not available */ }
+
+  win.addEventListener("unload", () => {
+    unsubscribe();
+    if (refreshTimer) clearTimeout(refreshTimer);
+    if (notifierId) {
+      try {
+        const notifier = (Zotero as unknown as {
+          Notifier?: { unregisterObserver?: (id: string) => void };
+        }).Notifier;
+        notifier?.unregisterObserver?.(notifierId);
+      } catch { /* ignore */ }
+    }
+  });
 
   await loadData();
   renderSidebar();
