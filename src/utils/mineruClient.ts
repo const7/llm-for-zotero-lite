@@ -284,6 +284,33 @@ async function downloadAndExtractZip(
 
 // ── Presigned URL upload workflow ──────────────────────────────────────────────
 
+function getCurlPath(): string | null {
+  const xulRuntime = (globalThis as {
+    Components?: {
+      classes?: Record<string, { getService?: (iface: unknown) => { OS?: string } }>;
+      interfaces?: Record<string, unknown>;
+    };
+  }).Components;
+  let osName = "";
+  try {
+    const xr = xulRuntime?.classes?.["@mozilla.org/xre/app-info;1"]
+      ?.getService?.(xulRuntime?.interfaces?.nsIXULRuntime as unknown);
+    osName = (xr?.OS || "").toLowerCase();
+  } catch { /* ignore */ }
+
+  if (osName === "winnt") return "C:\\Windows\\System32\\curl.exe";
+  if (osName === "darwin") return "/usr/bin/curl";
+  if (osName === "linux") return "/usr/bin/curl";
+
+  // Fallback: try platform string from Zotero
+  try {
+    const platform = (Zotero as unknown as { platform?: string }).platform || "";
+    if (/win/i.test(platform)) return "C:\\Windows\\System32\\curl.exe";
+  } catch { /* ignore */ }
+
+  return "/usr/bin/curl";
+}
+
 async function uploadViaCurl(
   url: string,
   pdfPath: string,
@@ -302,13 +329,25 @@ async function uploadViaCurl(
 
       const localFile = Cc["@mozilla.org/file/local;1"]?.createInstance(Ci.nsIFile as unknown) as {
         initWithPath?: (path: string) => void;
+        exists?: () => boolean;
       } | undefined;
       if (!localFile?.initWithPath) {
         ztoolkit.log("MinerU upload [curl]: nsIFile unavailable");
         resolve({ status: 0 });
         return;
       }
-      localFile.initWithPath("/usr/bin/curl");
+      const curlPath = getCurlPath();
+      if (!curlPath) {
+        ztoolkit.log("MinerU upload [curl]: cannot determine curl path for this OS");
+        resolve({ status: 0 });
+        return;
+      }
+      localFile.initWithPath(curlPath);
+      if (localFile.exists && !localFile.exists()) {
+        ztoolkit.log(`MinerU upload [curl]: ${curlPath} not found`);
+        resolve({ status: 0 });
+        return;
+      }
 
       const process = Cc["@mozilla.org/process/util;1"]?.createInstance(Ci.nsIProcess as unknown) as {
         init?: (executable: unknown) => void;

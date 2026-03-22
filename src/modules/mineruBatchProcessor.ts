@@ -22,6 +22,8 @@ export type MineruBatchState = {
   totalCount: number;
   error: string | null;
   rateLimited: boolean;
+  /** ID of the last item that failed processing (null if last item succeeded) */
+  lastFailedItemId: number | null;
 };
 
 type QueueEntry = {
@@ -42,6 +44,7 @@ let state: MineruBatchState = {
   totalCount: 0,
   error: null,
   rateLimited: false,
+  lastFailedItemId: null,
 };
 
 let queue: QueueEntry[] = [];
@@ -172,8 +175,10 @@ async function processNext(): Promise<void> {
     if (result?.mdContent) {
       await writeMineruCacheFiles(entry.attachmentId, result.mdContent, result.files);
       state.processedCount++;
+      state.lastFailedItemId = null;
     } else {
       ztoolkit.log(`MinerU batch: no content returned for "${entry.title}", skipping`);
+      state.lastFailedItemId = entry.attachmentId;
     }
   } catch (e) {
     if (e instanceof MineruRateLimitError) {
@@ -189,6 +194,7 @@ async function processNext(): Promise<void> {
       return;
     }
     ztoolkit.log(`MinerU batch: error processing "${entry.title}":`, e);
+    state.lastFailedItemId = entry.attachmentId;
   }
 
   scheduleNext();

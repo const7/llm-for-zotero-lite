@@ -513,10 +513,11 @@ export async function registerMineruManagerScript(
     if (s.currentItemId) {
       lastSeenCurrentId = s.currentItemId;
     } else if (lastSeenCurrentId !== null) {
+      const failed = s.lastFailedItemId === lastSeenCurrentId;
       const dot = dotElements.get(lastSeenCurrentId);
-      if (dot) dot.style.background = "#10b981";
+      if (dot) dot.style.background = failed ? "#ef4444" : "#10b981";
       const entry = allItems.find((i) => i.attachmentId === lastSeenCurrentId);
-      if (entry) entry.cached = true;
+      if (entry) entry.cached = !failed;
       lastSeenCurrentId = null;
     }
   });
