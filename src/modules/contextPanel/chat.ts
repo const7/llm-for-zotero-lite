@@ -1,4 +1,5 @@
 import { renderMarkdown, renderMarkdownForNote } from "../../utils/markdown";
+import { getWelcomeHtml } from "../../utils/i18n";
 import {
   appendMessage as appendStoredMessage,
   clearConversation as clearStoredConversation,
@@ -3116,20 +3117,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
     );
 
   if (history.length === 0) {
-    chatBox.innerHTML = `
-      <div class="llm-welcome">
-        <div class="llm-welcome-icon">💬</div>
-        <div class="llm-welcome-text">
-          <div class="llm-welcome-title">Start chatting — here's what you can do.</div>
-          <ul class="llm-welcome-list">
-            <li><strong>Paper chat</strong> answers questions about the currently open PDF. <strong>Open chat</strong> is a free-form workspace for questions across multiple papers and files.</li>
-            <li>Type <strong>/</strong> to open quick actions: attach files, add a reference, send the current PDF page, or send the entire PDF. Type <strong>@</strong> to add a paper from your library as context.</li>
-            <li>Enable <strong>Agent mode</strong> with the toggle in the toolbar to let the assistant autonomously search your library, inspect papers, and complete multi-step research tasks.</li>
-            <li>Add context inline: select text in the PDF reader for <strong>text context</strong>, use the screenshot button for <strong>figure context</strong>, or use <strong>@</strong> for <strong>paper context</strong>. Right-click a paper chip to force sending its full text; right-click again to switch it back to retrieval mode.</li>
-          </ul>
-        </div>
-      </div>
-    `;
+    chatBox.innerHTML = getWelcomeHtml();
     return;
   }
 

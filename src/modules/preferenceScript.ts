@@ -412,30 +412,46 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   }
   // Walk all labels, spans, and helper text in the preference panels
   // and translate their text content if it matches a known key.
+  // Collapse multi-line whitespace into a single space for translation lookup
+  const normalizeWs = (s: string): string => s.replace(/\s+/g, " ").trim();
+
   const translateTextNodes = (container: Element) => {
-    const elements = container.querySelectorAll("label, span");
+    const elements = container.querySelectorAll("label, span, div");
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i] as HTMLElement;
-      // Skip elements with children that are not just text (e.g., labels with checkboxes)
       // For labels with inputs, translate the text node after the input
       if (el.tagName.toLowerCase() === "label" && el.querySelector("input")) {
         for (const child of Array.from(el.childNodes)) {
           if (child && child.nodeType === 3 /* TEXT_NODE */ && child.textContent && child.textContent.trim()) {
-            const original = child.textContent.trim();
+            const original = normalizeWs(child.textContent);
             const translated = t(original);
             if (translated !== original) {
-              child.textContent = `\n            ${translated}\n          `;
+              child.textContent = ` ${translated}`;
             }
           }
         }
         continue;
       }
-      // For plain text elements
-      const text = el.textContent?.trim();
-      if (text && el.children.length === 0) {
-        const translated = t(text);
-        if (translated !== text) {
-          el.textContent = translated;
+      // For plain text elements (no children) — replace directly
+      if (el.children.length === 0) {
+        const text = normalizeWs(el.textContent || "");
+        if (text) {
+          const translated = t(text);
+          if (translated !== text) {
+            el.textContent = translated;
+          }
+        }
+        continue;
+      }
+      // For elements with inline children (e.g., <a>, <br>, <strong>) —
+      // translate each text node individually
+      for (const child of Array.from(el.childNodes)) {
+        if (child && child.nodeType === 3 /* TEXT_NODE */ && child.textContent && child.textContent.trim()) {
+          const original = normalizeWs(child.textContent);
+          const translated = t(original);
+          if (translated !== original) {
+            child.textContent = ` ${translated} `;
+          }
         }
       }
     }
