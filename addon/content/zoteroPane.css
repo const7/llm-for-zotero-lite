@@ -17,6 +17,13 @@
     var(--stroke-secondary)
   );
   --llm-pin-bg: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  --llm-mineru-color: #10b981;
+  --llm-mineru-border-color: color-mix(
+    in srgb,
+    #10b981 55%,
+    var(--stroke-secondary)
+  );
+  --llm-mineru-bg: color-mix(in srgb, #10b981 10%, transparent);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -3351,6 +3358,22 @@ label.llm-search-results-item:hover {
   .llm-paper-chip-menu-row {
   border-color: var(--llm-pin-border-color);
   background: var(--llm-pin-bg);
+}
+
+/* MinerU (green) overrides — only in full text mode, replacing blue with green.
+   Only chip background/border color changes; font/hover colors stay the same. */
+.llm-paper-context-chip.llm-paper-context-chip-full.llm-paper-context-chip-mineru
+  .llm-paper-context-chip-header {
+  border: 1px solid var(--llm-mineru-border-color);
+  background: var(--llm-mineru-bg);
+  box-shadow: inset 0 0 0 1px var(--llm-mineru-border-color);
+}
+
+.llm-paper-context-chip.llm-paper-context-chip-full.llm-paper-context-chip-mineru
+  .llm-paper-context-chip-expanded
+  .llm-paper-chip-menu-row {
+  border-color: var(--llm-mineru-border-color);
+  background: var(--llm-mineru-bg);
 }
 
 .llm-paper-context-chip-label {
