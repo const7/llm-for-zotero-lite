@@ -80,9 +80,100 @@ async function httpJson(
   return { status: xhr.status, data };
 }
 
+async function downloadViaCurl(url: string): Promise<Uint8Array | null> {
+  // Use system curl to download binary data, bypassing Firefox ESR's TLS stack
+  // which cannot connect to Alibaba Cloud OSS.
+  return new Promise((resolve) => {
+    try {
+      const Cc = (globalThis as { Components?: { classes?: Record<string, { createInstance: (iface: unknown) => unknown }> } }).Components?.classes;
+      const Ci = (globalThis as { Components?: { interfaces?: Record<string, unknown> } }).Components?.interfaces;
+      if (!Cc || !Ci) { resolve(null); return; }
+
+      // Get temp directory to write the downloaded data to
+      const dirService = Cc["@mozilla.org/file/directory_service;1"]
+        ?.createInstance(Ci.nsIProperties as unknown) as {
+          get?: (prop: string, iface: unknown) => { path?: string };
+        } | undefined;
+      const tempDir = dirService?.get?.("TmpD", Ci.nsIFile as unknown);
+      if (!tempDir?.path) { resolve(null); return; }
+
+      const outPath = `${tempDir.path}${tempDir.path.includes("\\") ? "\\" : "/"}mineru_dl_${Date.now()}.bin`;
+
+      const localFile = Cc["@mozilla.org/file/local;1"]?.createInstance(Ci.nsIFile as unknown) as {
+        initWithPath?: (path: string) => void;
+        exists?: () => boolean;
+      } | undefined;
+      if (!localFile?.initWithPath) { resolve(null); return; }
+
+      const curlPath = getCurlPath();
+      if (!curlPath) { resolve(null); return; }
+      localFile.initWithPath(curlPath);
+      if (localFile.exists && !localFile.exists()) { resolve(null); return; }
+
+      const process = Cc["@mozilla.org/process/util;1"]?.createInstance(Ci.nsIProcess as unknown) as {
+        init?: (executable: unknown) => void;
+        run?: (blocking: boolean, args: string[], count: number) => void;
+        exitValue?: number;
+      } | undefined;
+      if (!process?.init || !process.run) { resolve(null); return; }
+
+      process.init(localFile);
+      const args = [
+        "-s", "-f",
+        "-o", outPath,
+        "--max-time", "300",
+        "-L",
+        url,
+      ];
+
+      const observer = {
+        observe(_subject: unknown, topic: string) {
+          const exitCode = (process as { exitValue?: number }).exitValue ?? -1;
+          if (topic === "process-finished" && exitCode === 0) {
+            ztoolkit.log("MinerU download [curl]: success");
+            // Read the temp file using IOUtils or OS.File
+            const readTempFile = async (): Promise<Uint8Array | null> => {
+              try {
+                const io = getIOUtils();
+                if (io?.read) {
+                  const data = await io.read(outPath);
+                  // Clean up temp file (best effort)
+                  try {
+                    const ioFull = (globalThis as unknown as {
+                      IOUtils?: { remove?: (path: string) => Promise<void> };
+                    }).IOUtils;
+                    await ioFull?.remove?.(outPath);
+                  } catch { /* ignore */ }
+                  return data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
+                }
+                const osFile = getOSFile();
+                if (osFile?.read) {
+                  const data = await osFile.read(outPath);
+                  return data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
+                }
+              } catch { /* ignore */ }
+              return null;
+            };
+            readTempFile().then(resolve).catch(() => resolve(null));
+          } else {
+            ztoolkit.log(`MinerU download [curl]: failed topic=${topic} exit=${exitCode}`);
+            resolve(null);
+          }
+        },
+        QueryInterface: () => observer,
+      };
+      (process as { runAsync?: (args: string[], count: number, observer: unknown) => void })
+        .runAsync?.(args, args.length, observer);
+    } catch (e) {
+      ztoolkit.log(`MinerU download [curl] threw: ${(e as Error).message}`);
+      resolve(null);
+    }
+  });
+}
+
 async function httpGetBinary(url: string): Promise<Uint8Array | null> {
   // Try fetch first (works for cloud storage/CDN URLs with CORS),
-  // fall back to Zotero.HTTP.request.
+  // fall back to Zotero.HTTP.request, then curl.
   try {
     const fetchFn = ztoolkit.getGlobal("fetch") as typeof fetch;
     const resp = await fetchFn(url);
@@ -105,6 +196,9 @@ async function httpGetBinary(url: string): Promise<Uint8Array | null> {
   } catch {
     /* fall through */
   }
+  // Attempt 3: curl (bypasses Firefox ESR TLS issues with Alibaba Cloud OSS)
+  const curlBytes = await downloadViaCurl(url);
+  if (curlBytes) return curlBytes;
   return null;
 }
 
@@ -594,6 +688,33 @@ export async function testMineruConnection(apiKey: string): Promise<void> {
   );
   if (result.status === 401 || result.status === 403) {
     throw new Error("Invalid API key — authentication failed");
+  }
+
+  // Also verify connectivity to Alibaba Cloud OSS (used for upload/download).
+  // A HEAD request to the OSS endpoint will return 403 (no valid signature),
+  // but that proves the TLS connection works. Status 0 = network/TLS failure.
+  const ossTestUrl = "https://mineru.oss-cn-shanghai.aliyuncs.com";
+  let ossReachable = false;
+  try {
+    const fetchFn = ztoolkit.getGlobal("fetch") as typeof fetch;
+    const resp = await fetchFn(ossTestUrl, { method: "HEAD" });
+    // Any HTTP status (even 403) means the connection succeeded
+    ossReachable = resp.status > 0;
+  } catch { /* fall through */ }
+  if (!ossReachable) {
+    try {
+      const xhr = await Zotero.HTTP.request("HEAD", ossTestUrl, {
+        successCodes: false,
+        timeout: 10000,
+      });
+      ossReachable = xhr.status > 0;
+    } catch { /* fall through */ }
+  }
+  if (!ossReachable) {
+    throw new Error(
+      "API key is valid, but cannot reach Alibaba Cloud OSS (mineru.oss-cn-shanghai.aliyuncs.com). " +
+      "This may be caused by your network environment. MinerU parsing will likely fail.",
+    );
   }
 }
 
