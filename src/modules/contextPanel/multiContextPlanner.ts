@@ -908,16 +908,58 @@ export async function resolveMultiContextPlan(params: {
     params.conversationMode === "paper" && isFirstPaperTurn(params.history);
 
   if (params.conversationMode === "paper" && activePaper) {
+    // Collect other explicitly selected papers (@-referenced) beyond the
+    // active paper so they are not silently dropped.
+    const otherPapers = papers.filter((p) => !p.isActive);
+    const otherPinned = otherPapers.filter((p) => p.pinKind !== "none");
+    const otherUnpinned = otherPapers.filter((p) => p.pinKind === "none");
+
     if (activePaper.pinKind !== "none") {
-      const full = assembleFullMultiPaperContext({ papers: [activePaper] });
+      // Active paper + any other pinned papers in full text.
+      const pinnedPapers = [activePaper, ...otherPinned];
+      const full = assembleFullMultiPaperContext({ papers: pinnedPapers });
+
+      // Include remaining @-referenced (unpinned) papers via retrieval if
+      // there is token budget left.
+      let extraRetrieved: RetrievedAssembly | null = null;
+      if (otherUnpinned.length) {
+        const remainingTokens = Math.max(
+          0,
+          adjustedContextBudget.contextBudgetTokens - full.estimatedTokens,
+        );
+        if (remainingTokens > 0) {
+          const enrichedQuestion = buildEnrichedRetrievalQuery(
+            params.question,
+            params.history,
+          );
+          extraRetrieved = await assembleRetrievedMultiPaperContext({
+            papers: otherUnpinned,
+            question: enrichedQuestion,
+            contextBudgetTokens: remainingTokens,
+            minChunksByPaper: buildMinChunkMapForRetrievedPapers(otherUnpinned),
+            apiOverrides: {
+              apiBase: params.apiBase,
+              apiKey: params.apiKey,
+            },
+          });
+        }
+      }
+
+      const combinedContext = appendContextBlocks([
+        full.contextText,
+        extraRetrieved?.selectedChunkCount ? extraRetrieved.contextText : "",
+      ]);
+      const usedContextTokens = estimateTextTokens(combinedContext);
       return {
         mode: "full",
         strategy: firstPaperTurn ? "paper-first-full" : "paper-manual-full",
-        contextText: full.contextText,
+        contextText: combinedContext,
         contextBudget: adjustedContextBudget,
-        usedContextTokens: full.estimatedTokens,
-        selectedPaperCount: full.contextText ? 1 : 0,
-        selectedChunkCount: 0,
+        usedContextTokens,
+        selectedPaperCount:
+          (full.contextText ? pinnedPapers.length : 0) +
+          (extraRetrieved?.selectedPaperCount || 0),
+        selectedChunkCount: extraRetrieved?.selectedChunkCount || 0,
       };
     }
 
@@ -927,11 +969,14 @@ export async function resolveMultiContextPlan(params: {
       params.question,
       params.history,
     );
+    // Include all papers (active + @-referenced) in retrieval, not just the
+    // active paper alone.
+    const allRetrievalPapers = [activePaper, ...otherPapers];
     const retrieved = await assembleRetrievedMultiPaperContext({
-      papers: [activePaper],
+      papers: allRetrievalPapers,
       question: enrichedQuestion,
       contextBudgetTokens: adjustedContextBudget.contextBudgetTokens,
-      minChunksByPaper: new Map<string, number>(),
+      minChunksByPaper: buildMinChunkMapForRetrievedPapers(allRetrievalPapers),
       apiOverrides: {
         apiBase: params.apiBase,
         apiKey: params.apiKey,
