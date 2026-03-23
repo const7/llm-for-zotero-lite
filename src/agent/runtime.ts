@@ -20,6 +20,7 @@ import type { AgentModelAdapter } from "./model/adapter";
 import { resolveAgentLimits } from "./model/limits";
 import { classifyRequest } from "./model/requestClassifier";
 import { buildAgentInitialMessages } from "./model/messageBuilder";
+import { getMatchedSkillIds } from "./skills";
 import {
   appendAgentRunEvent,
   createAgentRun,
@@ -319,6 +320,11 @@ export class AgentRuntime {
       request,
       this.registry.listToolDefinitionsForRequest(request),
     )) as AgentModelMessage[];
+
+    const matchedSkills = getMatchedSkillIds(request);
+    for (const skillId of matchedSkills) {
+      await emit({ type: "status", text: `Skill activated: ${skillId}` });
+    }
 
     let consecutiveToolErrors = 0;
     const intent = classifyRequest(request);

@@ -5,6 +5,7 @@ import type {
 } from "../types";
 import { AGENT_PERSONA_INSTRUCTIONS } from "./agentPersona";
 import { buildAgentMemoryBlock } from "../store/conversationMemory";
+import { AGENT_SKILLS, matchesSkill } from "../skills";
 
 export function isMultimodalRequestSupported(
   request: AgentRuntimeRequest,
@@ -189,6 +190,11 @@ function collectGuidanceInstructions(
     if (!guidance) continue;
     if (!guidance.matches(request)) continue;
     const instruction = guidance.instruction.trim();
+    if (instruction) instructions.add(instruction);
+  }
+  for (const skill of AGENT_SKILLS) {
+    if (!matchesSkill(skill, request)) continue;
+    const instruction = skill.instruction.trim();
     if (instruction) instructions.add(instruction);
   }
   if (!instructions.size) return [];
