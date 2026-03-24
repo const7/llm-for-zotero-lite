@@ -20,6 +20,8 @@ export function getModelPdfSupport(
   // Text-only models: no PDF, no vision
   if (isScreenshotUnsupportedModel(m)) return "none";
   if (/reasoner|text-only|embedding/.test(m)) return "none";
+  // Copilot auth: no file upload, unreliable image payloads — disable PDF mode
+  if (authMode === "copilot_auth") return "none";
   // Only first-party APIs support native PDF file upload
   const proto = (providerProtocol || "").trim().toLowerCase();
   if (proto === "anthropic_messages") return "native";

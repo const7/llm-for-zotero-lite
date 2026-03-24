@@ -9638,6 +9638,18 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       const currentSource = resolvePaperContentSourceMode(item.id, paperContext);
       const mineruAvailable = isPaperContextMineru(paperContext);
       const nextSource = getNextContentSourceMode(currentSource, mineruAvailable);
+      // Block PDF mode for models that don't support it (e.g., Copilot)
+      if (nextSource === "pdf") {
+        const selectedProfile = getSelectedProfile();
+        const modelName = (selectedProfile?.model || getSelectedModelInfo().currentModel || "").trim();
+        const pdfSupport = getModelPdfSupport(modelName, selectedProfile?.providerProtocol, selectedProfile?.authMode);
+        if (pdfSupport === "none") {
+          if (status) {
+            setStatus(status, t("PDF mode is not available for this model. Use Text or MD mode."), "error");
+          }
+          return;
+        }
+      }
       setPaperContentSourceOverride(item.id, paperContext, nextSource);
       updatePaperPreviewPreservingScroll();
       if (status) {
