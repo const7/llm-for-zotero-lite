@@ -2517,7 +2517,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           if (status) {
             setStatus(
               status,
-              `Screenshot removed (${nextImages.length}/${MAX_SELECTED_IMAGES})`,
+              `Screenshot removed (${nextImages.length})`,
               "ready",
             );
           }
@@ -2533,7 +2533,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         ? screenshotDisabledHint
         : imageCount >= MAX_SELECTED_IMAGES
           ? `Max ${MAX_SELECTED_IMAGES} screenshots`
-          : `Add screenshot (${imageCount}/${MAX_SELECTED_IMAGES})`;
+          : `Add screenshot (${imageCount})`;
     } else {
       imagePreview.style.display = "none";
       imagePreview.classList.remove("expanded", "collapsed");
@@ -7946,7 +7946,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       const dataUrls: string[] = [];
       for (const pc of paperContexts) {
         try {
-          const pages = await renderAllPdfPages(pc.contextItemId, { maxPages: 20 });
+          const pages = await renderAllPdfPages(pc.contextItemId);
           for (const page of pages) {
             // Read the persisted PNG and convert to data URL for the image pipeline
             const bytes = await readAttachmentBytes(page.storedPath);
@@ -8132,7 +8132,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           const { renderAllPdfPages } = await import("../../agent/services/pdfPageService");
           for (const pc of pdfModePapers) {
             try {
-              const pages = await renderAllPdfPages(pc.contextItemId, { maxPages: 20 });
+              const pages = await renderAllPdfPages(pc.contextItemId);
               for (const page of pages) {
                 pdfAttachments.push({
                   id: `pdf-page-${pc.contextItemId}-${page.pageIndex}-${Date.now()}`,
@@ -8693,7 +8693,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           if (status) {
             setStatus(
               status,
-              `Screenshot captured (${nextImages.length}/${MAX_SELECTED_IMAGES})`,
+              `Screenshot captured (${nextImages.length})`,
               "ready",
             );
           }
@@ -8831,7 +8831,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           );
           selectedImagePreviewActiveIndexCache.set(item.id, nextImages.length - 1);
           updateImagePreviewPreservingScroll();
-          if (status) setStatus(status, `Page captured (${nextImages.length}/${MAX_SELECTED_IMAGES})`, "ready");
+          if (status) setStatus(status, `Page captured (${nextImages.length})`, "ready");
         } else {
           if (status) setStatus(status, t("No PDF page found — open a PDF in the reader first"), "error");
           updateImagePreviewPreservingScroll();

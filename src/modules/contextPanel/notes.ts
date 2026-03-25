@@ -376,7 +376,7 @@ function normalizeScreenshotImagesForNote(images: unknown): string[] {
 }
 
 function formatScreenshotEmbeddedLabel(count: number): string {
-  return `Screenshots (${count}/${MAX_SELECTED_IMAGES}) are embedded below`;
+  return `Screenshots (${count}) are embedded below`;
 }
 
 function normalizeFileAttachmentsForNote(

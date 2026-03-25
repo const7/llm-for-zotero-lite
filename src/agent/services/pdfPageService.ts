@@ -1266,7 +1266,7 @@ export async function renderAllPdfPages(
   contextItemId: number,
   opts?: { maxPages?: number },
 ): Promise<{ storedPath: string; contentHash: string; pageIndex: number }[]> {
-  const maxPages = opts?.maxPages ?? 20;
+  const maxPages = opts?.maxPages ?? 200;
   const savedTabId = getLastKnownSelectedTabId();
   try {
     const reader = await openReaderForItem(contextItemId, {
