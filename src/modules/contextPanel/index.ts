@@ -29,6 +29,7 @@ import {
   activeConversationModeByLibrary,
   activeGlobalConversationByLibrary,
   activeContextPanels,
+  activeContextPanelRawItems,
   activeContextPanelStateSync,
   chatHistory,
   loadedConversationKeys,
@@ -129,10 +130,21 @@ export function registerReaderContextPanel() {
         const needsFullRender = !activeContextPanels.has(body) || !panelRoot;
 
         // Also check if a global lock requires switching to open chat
-        const libraryID = resolveActiveLibraryID() || 0;
+        const libraryID = resolveActiveLibraryID() ||
+          (item ? Number(item.libraryID || 0) : 0);
         const lockedKey = libraryID > 0 ? getLockedGlobalConversationKey(libraryID) : null;
         const currentKind = panelRoot?.dataset?.conversationKind;
-        const lockStale = lockedKey !== null && currentKind === "paper";
+        const currentItemKey = panelRoot?.dataset?.itemId;
+        // Lock is stale if:
+        // - lock active + panel in paper mode (need to switch to global)
+        // - lock active + panel shows different global conversation
+        // - lock cleared + panel still in global mode (need to switch back to paper)
+        const lockStale =
+          (lockedKey !== null && (
+            currentKind === "paper" ||
+            (currentItemKey !== undefined && currentItemKey !== String(lockedKey))
+          )) ||
+          (lockedKey === null && currentKind === "global" && !needsFullRender);
 
         // Detect if the active item has changed (e.g. user switched reader tabs).
         // If so, the panel must fully re-render to switch conversations.
@@ -153,11 +165,14 @@ export function registerReaderContextPanel() {
           // if we defer buildUI, the stale panel from the previous tab wins.
           buildUI(body, resolvedState.item);
           activeContextPanels.set(body, () => resolvedState.item);
-          // Defer conversation loading, handler setup, and chat rendering
+          activeContextPanelRawItems.set(body, item || null);
+          // Attach handlers synchronously so buttons (lock, send, etc.) are
+          // immediately interactive — don't gate on ensureConversationLoaded.
+          setupHandlers(body, item);
+          // Defer conversation loading and chat rendering
           void (async () => {
             try {
               if (resolvedState.item) await ensureConversationLoaded(resolvedState.item);
-              setupHandlers(body, item);
               refreshChat(body, resolvedState.item);
             } catch (err) {
               ztoolkit.log("LLM: onRender async setup failed", err);
@@ -167,6 +182,7 @@ export function registerReaderContextPanel() {
           // Same item — keep item reference current so delegated handlers
           // (e.g. Add Text) always resolve the active item.
           activeContextPanels.set(body, () => resolvedState.item);
+          activeContextPanelRawItems.set(body, item || null);
         }
       } catch { /* ignore */ }
     },
@@ -182,6 +198,7 @@ export function registerReaderContextPanel() {
       const basePaperItem = resolvedInitialState.basePaperItem;
 
       buildUI(body, resolvedItem);
+      activeContextPanelRawItems.set(body, item || null);
       
       if (resolvedItem) {
         await ensureConversationLoaded(resolvedItem);

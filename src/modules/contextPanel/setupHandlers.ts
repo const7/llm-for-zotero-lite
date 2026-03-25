@@ -61,6 +61,7 @@ import {
   activePaperConversationByPaper,
   draftInputCache,
   activeContextPanels,
+  activeContextPanelRawItems,
   activeContextPanelStateSync,
   inlineEditTarget,
   setInlineEditTarget,
@@ -147,6 +148,7 @@ import {
   setSelectedTextContextEntries,
   setSelectedTextExpandedIndex,
 } from "./contextResolution";
+import { buildUI } from "./buildUI";
 import {
   flashPageInLivePdfReader,
   resolveCurrentSelectionPageLocationFromReader,
@@ -4996,17 +4998,25 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       closeHistoryNewMenu();
       if (isGlobalMode()) {
         const libraryID = getCurrentLibraryID();
+        const hadLock = libraryID
+          ? getLockedGlobalConversationKey(libraryID) !== null
+          : false;
         if (libraryID) {
           // Explicit click always overrides the lock — clear it so
           // resolveInitialPanelItemState doesn't snap back to global on the
           // next onAsyncRender.
           setLockedGlobalConversationKey(libraryID, null);
+          setAutoLockedGlobalConversationKey(null);
         }
         // When the lock was active, resolveInitialPanelItemState set
         // basePaperItem to null.  Recover it from initialItem so that
         // switchPaperConversation can find the paper to switch to.
         if (!basePaperItem) {
           basePaperItem = resolveConversationBaseItem(initialItem) ?? null;
+        }
+        // If lock was active, sync all other panels back to paper mode
+        if (hadLock) {
+          syncLockStateToOtherPanels();
         }
         void switchPaperConversation();
       } else {
@@ -5028,6 +5038,35 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     });
   }
 
+  // Sync lock state to ALL other registered panels so they switch
+  // to/from global chat immediately (not just when the user visits them).
+  const syncLockStateToOtherPanels = () => {
+    for (const [otherBody] of activeContextPanels) {
+      if (otherBody === body) continue;
+      if (!(otherBody as Element).isConnected) {
+        activeContextPanels.delete(otherBody);
+        activeContextPanelStateSync.delete(otherBody);
+        continue;
+      }
+      // Use the raw Zotero item (stored on every onRender) to re-resolve
+      // the panel state.  This correctly handles lock→unlock transitions
+      // because resolveInitialPanelItemState re-checks the lock preference.
+      const rawItem = activeContextPanelRawItems.get(otherBody as Element) || null;
+      const resolved = resolveInitialPanelItemState(rawItem);
+      buildUI(otherBody as Element, resolved.item);
+      activeContextPanels.set(otherBody, () => resolved.item);
+      setupHandlers(otherBody as Element, rawItem);
+      void (async () => {
+        try {
+          if (resolved.item) await ensureConversationLoaded(resolved.item);
+          refreshChat(otherBody as Element, resolved.item);
+        } catch (err) {
+          ztoolkit.log("LLM: lock sync panel rebuild failed", err);
+        }
+      })();
+    }
+  };
+
   if (modeLockBtn) {
     modeLockBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
@@ -5048,6 +5087,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         setLockedGlobalConversationKey(libraryID, currentKey);
       }
       syncConversationIdentity();
+      syncLockStateToOtherPanels();
     });
   }
 

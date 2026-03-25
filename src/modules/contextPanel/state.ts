@@ -34,6 +34,9 @@ export const shortcutRenderItemState = new WeakMap<
   Zotero.Item | null | undefined
 >();
 export const activeContextPanels = new Map<Element, () => Zotero.Item | null>();
+/** Raw Zotero item (from onRender) per body — used to recover the original
+ *  paper item when clearing a global lock. */
+export const activeContextPanelRawItems = new Map<Element, Zotero.Item | null>();
 export const activeContextPanelStateSync = new Map<Element, () => void>();
 export const shortcutEscapeListenerAttached = new WeakSet<Document>();
 export let readerContextPanelRegistered = false;
