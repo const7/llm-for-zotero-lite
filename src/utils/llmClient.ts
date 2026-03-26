@@ -279,7 +279,9 @@ function getApiConfig(overrides?: {
     authMode,
     model,
     embeddingModel,
-    systemPrompt: customSystemPrompt || DEFAULT_SYSTEM_PROMPT,
+    systemPrompt: customSystemPrompt
+      ? `${DEFAULT_SYSTEM_PROMPT}\n\n${customSystemPrompt}`
+      : DEFAULT_SYSTEM_PROMPT,
     providerProtocol,
   };
 }
@@ -1398,7 +1400,9 @@ export function estimateAvailableContextBudget(params: {
       image: params.image,
       images: params.images,
     },
-    params.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+    params.systemPrompt
+      ? `${DEFAULT_SYSTEM_PROMPT}\n\n${params.systemPrompt}`
+      : DEFAULT_SYSTEM_PROMPT,
   );
   const baseInputTokens = estimateConversationTokens(baseMessages);
   const contextBudgetTokens = Math.max(
