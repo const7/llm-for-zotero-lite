@@ -229,11 +229,25 @@ function resolveMultimodalRetryHint(
     normalized.includes("too many tokens") ||
     normalized.includes("max_input_tokens") ||
     normalized.includes("input too long");
-  if (!looksLikeSizeOrTokenIssue) return "";
-  if (imageCount >= 8) {
-    return " Try fewer screenshots (for example 4-6) or tighter crops.";
+  if (looksLikeSizeOrTokenIssue) {
+    if (imageCount >= 8) {
+      return " Try fewer screenshots (for example 4-6) or tighter crops.";
+    }
+    return " Try fewer screenshots or tighter crops.";
   }
-  return " Try fewer screenshots or tighter crops.";
+  const looksLikeVisionRejection =
+    normalized.includes("model_not_supported") ||
+    normalized.includes("does not support") ||
+    normalized.includes("not support image") ||
+    normalized.includes("not support vision") ||
+    normalized.includes("unsupported_media_type") ||
+    normalized.includes("invalid_type") ||
+    (normalized.includes("invalid_request") && normalized.includes("image")) ||
+    (normalized.includes("400") && normalized.includes("not supported"));
+  if (looksLikeVisionRejection) {
+    return " This model may not support image/file input. Try removing attachments or switching to text mode.";
+  }
+  return "";
 }
 
 function openStoredAttachmentFromMessage(attachment: ChatAttachment): boolean {

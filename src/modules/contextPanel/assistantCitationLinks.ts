@@ -1625,12 +1625,33 @@ async function buildOrderedCitationCandidates(
     searchedCandidates,
     dynamicFallbackCandidates,
   );
+  // Track which candidates came from conversation context so they receive a
+  // ranking boost.  This handles cross-language author name mismatches (e.g.
+  // Chinese 王一乐 → LLM writes "Wang") where the correct context paper would
+  // otherwise be outranked by an unrelated library result with a matching
+  // romanized name.
+  const staticKeySet = new Set(
+    staticCandidates.map(
+      (c) =>
+        `${Math.floor(c.paperContext.itemId)}:${Math.floor(c.contextItemId)}`,
+    ),
+  );
   const activeReaderItemId = getReaderItemId(getActiveReaderForSelectedTab());
   return effectiveCandidates.slice().sort((left, right) => {
-    const rankDelta =
-      rankCandidateForCitation(extractedCitation, right) -
-      rankCandidateForCitation(extractedCitation, left);
+    const leftKey = `${Math.floor(left.paperContext.itemId)}:${Math.floor(left.contextItemId)}`;
+    const rightKey = `${Math.floor(right.paperContext.itemId)}:${Math.floor(right.contextItemId)}`;
+    const leftIsContext = staticKeySet.has(leftKey);
+    const rightIsContext = staticKeySet.has(rightKey);
+    const leftRank =
+      rankCandidateForCitation(extractedCitation, left) +
+      (leftIsContext ? 1 : 0);
+    const rightRank =
+      rankCandidateForCitation(extractedCitation, right) +
+      (rightIsContext ? 1 : 0);
+    const rankDelta = rightRank - leftRank;
     if (rankDelta !== 0) return rankDelta;
+    const contextDelta = Number(rightIsContext) - Number(leftIsContext);
+    if (contextDelta !== 0) return contextDelta;
     const activeDelta =
       Number(right.contextItemId === activeReaderItemId) -
       Number(left.contextItemId === activeReaderItemId);
@@ -1741,7 +1762,11 @@ async function resolveAndNavigateAssistantCitation(params: {
       }
     }
 
+    // Cache check — skip rank-0 candidates to avoid stale entries from
+    // whatever PDF happens to be open winning over the actual cited paper.
     for (const candidate of orderedCandidates) {
+      if (rankCandidateForCitation(extractedCitation, candidate) === 0)
+        continue;
       const cached = await navigateToCachedCitationPage(
         candidate.contextItemId,
         normalizedQuoteText,
@@ -1827,54 +1852,63 @@ async function resolveAndNavigateAssistantCitation(params: {
       }
     }
 
-    for (const candidate of orderedCandidates) {
-      const reader = await openReaderForItem(candidate.contextItemId);
-      if (!reader) {
-        lastReason = "Could not open the cited paper.";
-        continue;
-      }
-      const result = await locateQuoteInLivePdfReader(
-        reader,
-        normalizedQuoteText,
-      );
-      if (result.status === "resolved" && result.computedPageIndex !== null) {
-        const pageIndex = Math.floor(result.computedPageIndex);
-        const pageLabel =
-          getPageLabelForIndex(reader, pageIndex) || `${pageIndex + 1}`;
-        citationPageCache.set(
-          buildCitationCacheKey(candidate.contextItemId, normalizedQuoteText),
-          { pageIndex, pageLabel },
-        );
-        const paragraphJump = await attemptCitationParagraphJump({
-          reader,
-          contextItemId: candidate.contextItemId,
-          displayCitationLabel: params.displayCitationLabel,
-          quoteText: normalizedQuoteText,
-          pageIndex,
-          pageLabel,
-        });
-        updateCitationButtonPage(
-          params.button,
-          params.displayCitationLabel,
-          pageLabel,
-        );
-        if (status) {
-          setStatus(
-            status,
-            paragraphJump.matched
-              ? buildParagraphJumpSuccessStatus(pageLabel)
-              : buildParagraphJumpFailureStatus(pageLabel, paragraphJump),
-            "ready",
-          );
+    // Two-pass search: first try rank > 0 candidates (high confidence), then
+    // fall back to rank-0 (unrelated PDFs) only if no match is found.  This
+    // prevents the wrong paper from being opened and searched when a better
+    // candidate exists.
+    for (const pass of [1, 2] as const) {
+      for (const candidate of orderedCandidates) {
+        const rank = rankCandidateForCitation(extractedCitation, candidate);
+        if (pass === 1 && rank === 0) continue;
+        if (pass === 2 && rank !== 0) continue;
+        const reader = await openReaderForItem(candidate.contextItemId);
+        if (!reader) {
+          lastReason = "Could not open the cited paper.";
+          continue;
         }
-        return;
-      }
-      if (result.reason) {
-        lastReason = result.reason;
-      } else if (result.status === "ambiguous") {
-        lastReason = "The cited quote matched multiple pages.";
-      } else if (result.status === "not-found") {
-        lastReason = "The cited quote was not found in the paper text.";
+        const result = await locateQuoteInLivePdfReader(
+          reader,
+          normalizedQuoteText,
+        );
+        if (result.status === "resolved" && result.computedPageIndex !== null) {
+          const pageIndex = Math.floor(result.computedPageIndex);
+          const pageLabel =
+            getPageLabelForIndex(reader, pageIndex) || `${pageIndex + 1}`;
+          citationPageCache.set(
+            buildCitationCacheKey(candidate.contextItemId, normalizedQuoteText),
+            { pageIndex, pageLabel },
+          );
+          const paragraphJump = await attemptCitationParagraphJump({
+            reader,
+            contextItemId: candidate.contextItemId,
+            displayCitationLabel: params.displayCitationLabel,
+            quoteText: normalizedQuoteText,
+            pageIndex,
+            pageLabel,
+          });
+          updateCitationButtonPage(
+            params.button,
+            params.displayCitationLabel,
+            pageLabel,
+          );
+          if (status) {
+            setStatus(
+              status,
+              paragraphJump.matched
+                ? buildParagraphJumpSuccessStatus(pageLabel)
+                : buildParagraphJumpFailureStatus(pageLabel, paragraphJump),
+              "ready",
+            );
+          }
+          return;
+        }
+        if (result.reason) {
+          lastReason = result.reason;
+        } else if (result.status === "ambiguous") {
+          lastReason = "The cited quote matched multiple pages.";
+        } else if (result.status === "not-found") {
+          lastReason = "The cited quote was not found in the paper text.";
+        }
       }
     }
 

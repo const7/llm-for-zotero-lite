@@ -59,7 +59,7 @@ type SendFlowControllerDeps = {
   renderPdfPagesAsImages: (
     paperContexts: PaperContextRef[],
   ) => Promise<string[]>;
-  getModelPdfSupport: (modelName: string, providerProtocol?: string, authMode?: string, apiBase?: string) => "native" | "upload" | "vision" | "none";
+  getModelPdfSupport: (modelName: string, providerProtocol?: string, authMode?: string, apiBase?: string) => "native" | "upload" | "image_url" | "vision" | "none";
   uploadPdfForProvider: (params: {
     apiBase: string;
     apiKey: string;
@@ -67,6 +67,7 @@ type SendFlowControllerDeps = {
     fileName: string;
   }) => Promise<{ systemMessageContent: string; label: string } | null>;
   resolvePdfBytes: (paperContext: PaperContextRef) => Promise<Uint8Array>;
+  encodeBytesBase64: (bytes: Uint8Array) => string;
   getSelectedFiles: (itemId: number) => ChatAttachment[];
   getSelectedImages: (itemId: number) => string[];
   resolvePromptText: (
@@ -217,11 +218,36 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
             deps.setStatusMessage?.("PDF upload failed. Falling back to text mode.", "error");
           }
         }
-      } else if (pdfSupport === "vision") {
+      } else if (pdfSupport === "image_url") {
+        // Tier 3 (third-party) / Tier 5 (codex): encode full PDF as base64
+        // data URI and send as image_url — relay services pass this through.
         deps.inputBox.disabled = true;
-        deps.setStatusMessage?.(`Rendering PDF pages as images for ${earlyModelName}...`, "ready");
-        pdfPageImageDataUrls = await deps.renderPdfPagesAsImages(pdfModePaperContexts);
-        deps.setStatusMessage?.(`Sending ${pdfPageImageDataUrls.length} page image(s)...`, "ready");
+        deps.setStatusMessage?.(`Encoding PDF for ${earlyModelName}...`, "ready");
+        for (const pc of pdfModePaperContexts) {
+          try {
+            const pdfBytes = await deps.resolvePdfBytes(pc);
+            const base64 = deps.encodeBytesBase64(pdfBytes);
+            pdfPageImageDataUrls.push(`data:application/pdf;base64,${base64}`);
+          } catch (err) {
+            ztoolkit.log("LLM: PDF base64 encoding failed for", pc.contextItemId, err);
+            // Fall back to vision (render pages as images) for this paper
+            const fallback = await deps.renderPdfPagesAsImages([pc]);
+            pdfPageImageDataUrls.push(...fallback);
+          }
+        }
+        deps.setStatusMessage?.(`Sending ${pdfPageImageDataUrls.length} PDF(s)...`, "ready");
+      } else if (pdfSupport === "vision") {
+        if (deps.isScreenshotUnsupportedModel(earlyModelName)) {
+          deps.setStatusMessage?.(
+            "This model does not support image input. PDF pages will be sent as text.",
+            "warning",
+          );
+        } else {
+          deps.inputBox.disabled = true;
+          deps.setStatusMessage?.(`Rendering PDF pages as images for ${earlyModelName}...`, "ready");
+          pdfPageImageDataUrls = await deps.renderPdfPagesAsImages(pdfModePaperContexts);
+          deps.setStatusMessage?.(`Sending ${pdfPageImageDataUrls.length} page image(s)...`, "ready");
+        }
       } else {
         deps.setStatusMessage?.(`Sending native PDF to ${earlyModelName}...`, "ready");
         pdfFileAttachments = await deps.resolvePdfPaperAttachments(pdfModePaperContexts);

@@ -1417,6 +1417,7 @@ function summarizeFindControllerMatches(pageMatches: unknown[]): {
 async function searchFindControllerForQuery(
   reader: any,
   query: string,
+  options?: { suppressNavigation?: boolean },
 ): Promise<{
   matchedPageIndexes: number[];
   totalMatches: number;
@@ -1540,6 +1541,19 @@ async function searchFindControllerForQuery(
         result.pageMatchCounts = [];
         result.pageMatchCounts[selectedPage] = fcTotal;
       }
+    }
+  }
+
+  // When suppressNavigation is set, close the find bar immediately after
+  // reading the results so that PDF.js does not scroll to the match.  This
+  // is used by scrollToExactQuoteInReader to silently probe multiple queries
+  // and only let the final successful one trigger visible navigation.
+  if (options?.suppressNavigation) {
+    try {
+      const findBar = app?.findBar;
+      if (typeof findBar?.close === "function") findBar.close();
+    } catch {
+      /* ignore */
     }
   }
 
@@ -2158,9 +2172,14 @@ export async function scrollToExactQuoteInReader(
   const attempts: ExactQuoteJumpQueryAttempt[] = [];
   const debugSummary: string[] = [];
   let matchedOtherPagesOnly = false;
+  let successfulQuery: string | null = null;
 
+  // Probe phase: search with suppressNavigation to avoid intermediate scrolls.
+  // Only the final successful query will trigger visible navigation below.
   for (const query of queries) {
-    const searchResult = await searchFindControllerForQuery(reader, query);
+    const searchResult = await searchFindControllerForQuery(reader, query, {
+      suppressNavigation: true,
+    });
     if (!searchResult) {
       return {
         matched: false,
@@ -2187,6 +2206,14 @@ export async function scrollToExactQuoteInReader(
       matchedOtherPagesOnly = true;
       continue;
     }
+    successfulQuery = query;
+    break;
+  }
+
+  if (successfulQuery) {
+    // Re-dispatch the successful query with visible navigation (find bar stays
+    // open so the user sees the highlighted match).
+    await searchFindControllerForQuery(reader, successfulQuery);
     return {
       matched: true,
       reason:
@@ -2194,7 +2221,7 @@ export async function scrollToExactQuoteInReader(
           ? `FindController matched the quote on target page ${expectedPageIndex + 1}.`
           : "FindController matched the quote in the current reader.",
       expectedPageIndex,
-      queryUsed: query,
+      queryUsed: successfulQuery,
       queries: attempts,
       debugSummary,
     };

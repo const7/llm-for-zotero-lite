@@ -7,16 +7,12 @@ import { AGENT_PERSONA_INSTRUCTIONS } from "./agentPersona";
 import { buildAgentMemoryBlock } from "../store/conversationMemory";
 import { AGENT_SKILLS, matchesSkill } from "../skills";
 
+import { isTextOnlyModel } from "../../providers";
+
 export function isMultimodalRequestSupported(
   request: AgentRuntimeRequest,
 ): boolean {
-  const model = (request.model || "").trim().toLowerCase();
-  if (!model) return true;
-  return !(
-    model.includes("reasoner") ||
-    model.includes("text-only") ||
-    model.includes("embedding")
-  );
+  return !isTextOnlyModel(request.model || "");
 }
 
 export function stringifyMessageContent(

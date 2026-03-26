@@ -7987,6 +7987,14 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       if (!filePath) throw new Error("Could not locate PDF file");
       return readAttachmentBytes(filePath);
     },
+    encodeBytesBase64: (bytes: Uint8Array) => {
+      let binaryStr = "";
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binaryStr += String.fromCharCode(...bytes.subarray(i, Math.min(bytes.length, i + chunkSize)));
+      }
+      return btoa(binaryStr);
+    },
     getSelectedFiles: (itemId) => selectedFileAttachmentCache.get(itemId) || [],
     getSelectedImages: (itemId) => selectedImageCache.get(itemId) || [],
     resolvePromptText,
