@@ -377,6 +377,9 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         paperContexts: selectedPaperContexts,
         fullTextPaperContexts,
         attachments: selectedFiles.length ? selectedFiles : undefined,
+        pdfUploadSystemMessages: pdfUploadSystemMessages.length
+          ? pdfUploadSystemMessages
+          : undefined,
         targetRuntimeMode: runtimeMode,
         expected: activeEditSession,
         model: selectedProfile?.model,

@@ -286,7 +286,7 @@ function injectCitationLinksIntoNoteHtml(
       const extracted = extractStandalonePaperSourceLabel(plainText);
       // Check the citation page cache for a corrected page (verified by
       // FindController when the user clicked the citation in the chat panel).
-      const quoteText = bqContent.replace(/<[^>]+>/g, "").trim();
+      const quoteText = stripNoteHtml(bqContent);
       const cachedPage = lookupCachedCitationPage(
         bestCandidate.contextItemId,
         quoteText,

@@ -1806,7 +1806,8 @@ export async function editLatestUserMessageAndRetry(
   const {
     body, item, displayQuestion, selectedTexts, selectedTextSources,
     selectedTextPaperContexts, selectedTextNoteContexts, screenshotImages,
-    paperContexts, fullTextPaperContexts, attachments, targetRuntimeMode,
+    paperContexts, fullTextPaperContexts, attachments, pdfUploadSystemMessages,
+    targetRuntimeMode,
     expected, model, apiBase, apiKey, reasoning, advanced,
   } = opts;
   await ensureConversationLoaded(item);
@@ -1961,6 +1962,7 @@ export async function editLatestUserMessageAndRetry(
       apiKey,
       reasoning,
       advanced,
+      pdfUploadSystemMessages,
     );
   }
   return "ok";
@@ -1974,6 +1976,7 @@ export async function retryLatestAssistantResponse(
   apiKey?: string,
   reasoning?: LLMReasoningConfig,
   advanced?: AdvancedModelParams,
+  pdfUploadSystemMessages?: string[],
 ) {
   const ui = getPanelRequestUI(body);
 
@@ -2074,6 +2077,7 @@ export async function retryLatestAssistantResponse(
       history: llmHistory,
       effectiveRequestConfig,
       pdfModePaperKeys: retryPdfKeys.size > 0 ? retryPdfKeys : undefined,
+      pdfUploadSystemMessages,
       setStatusSafely,
     });
     const combinedContext = contextPlan.combinedContext;
@@ -2266,6 +2270,7 @@ export async function editUserTurnAndRetry(opts: {
   paperContexts?: PaperContextRef[];
   fullTextPaperContexts?: PaperContextRef[];
   attachments?: ChatAttachment[];
+  pdfUploadSystemMessages?: string[];
   targetRuntimeMode?: ChatRuntimeMode;
   model?: string;
   apiBase?: string;
@@ -2277,7 +2282,8 @@ export async function editUserTurnAndRetry(opts: {
     body, item, userTimestamp, assistantTimestamp, newText,
     selectedTexts, selectedTextSources, selectedTextPaperContexts,
     selectedTextNoteContexts, screenshotImages, paperContexts,
-    fullTextPaperContexts, attachments, targetRuntimeMode,
+    fullTextPaperContexts, attachments, pdfUploadSystemMessages,
+    targetRuntimeMode,
     model, apiBase, apiKey, reasoning, advanced,
   } = opts;
   await ensureConversationLoaded(item);
@@ -2467,6 +2473,7 @@ export async function editUserTurnAndRetry(opts: {
       resolvedApiKey,
       resolvedReasoning,
       resolvedAdvanced,
+      pdfUploadSystemMessages,
     );
   }
 }
