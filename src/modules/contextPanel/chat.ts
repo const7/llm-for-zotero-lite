@@ -30,6 +30,7 @@ import {
   formatFigureCountLabel,
   formatPaperCountLabel,
 } from "./constants";
+import { hasCachedMineruMd, getMineruItemDir } from "./mineruCache";
 import type {
   Message,
   ChatRuntimeMode,
@@ -2508,9 +2509,30 @@ function buildActiveNoteRuntimeContext(
   };
 }
 
-function buildAgentRuntimeRequest(
+async function enrichPaperContextsWithMineruCache(
+  papers: PaperContextRef[] | undefined,
+): Promise<PaperContextRef[] | undefined> {
+  if (!papers?.length) return papers;
+  const enriched: PaperContextRef[] = [];
+  for (const paper of papers) {
+    let mineruCacheDir: string | undefined;
+    try {
+      if (await hasCachedMineruMd(paper.contextItemId)) {
+        mineruCacheDir = getMineruItemDir(paper.contextItemId);
+      }
+    } catch { /* ignore */ }
+    enriched.push(mineruCacheDir ? { ...paper, mineruCacheDir } : paper);
+  }
+  return enriched;
+}
+
+async function buildAgentRuntimeRequest(
   params: BuildAgentRuntimeRequestParams,
-): AgentRuntimeRequest {
+): Promise<AgentRuntimeRequest> {
+  const [enrichedPaperContexts, enrichedFullTextPapers] = await Promise.all([
+    enrichPaperContextsWithMineruCache(params.paperContexts),
+    enrichPaperContextsWithMineruCache(params.fullTextPaperContexts),
+  ]);
   return {
     conversationKey: params.conversationKey,
     mode: "agent",
@@ -2518,8 +2540,8 @@ function buildAgentRuntimeRequest(
     activeItemId: params.item.id,
     selectedTexts: params.selectedTexts,
     selectedTextSources: params.selectedTextSources,
-    selectedPaperContexts: params.paperContexts,
-    fullTextPaperContexts: params.fullTextPaperContexts,
+    selectedPaperContexts: enrichedPaperContexts,
+    fullTextPaperContexts: enrichedFullTextPapers,
     attachments: params.attachments,
     screenshots: params.screenshots,
     model: params.effectiveRequestConfig.model,

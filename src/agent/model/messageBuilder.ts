@@ -114,7 +114,7 @@ function buildUserMessage(request: AgentRuntimeRequest): AgentModelMessage {
       "Retrieval-only paper refs:",
       ...retrievalOnlyPapers.map(
         (entry, index) =>
-          `- Retrieval paper ${index + 1}: ${entry.title} [itemId=${entry.itemId}, contextItemId=${entry.contextItemId}]`,
+          `- Retrieval paper ${index + 1}: ${entry.title} [itemId=${entry.itemId}, contextItemId=${entry.contextItemId}${entry.mineruCacheDir ? `, mineruCacheDir=${entry.mineruCacheDir}` : ""}]`,
       ),
     );
   }
@@ -126,7 +126,7 @@ function buildUserMessage(request: AgentRuntimeRequest): AgentModelMessage {
       "Full-text paper refs for this turn:",
       ...request.fullTextPaperContexts.map(
         (entry, index) =>
-          `- Full-text paper ${index + 1}: ${entry.title} [itemId=${entry.itemId}, contextItemId=${entry.contextItemId}]`,
+          `- Full-text paper ${index + 1}: ${entry.title} [itemId=${entry.itemId}, contextItemId=${entry.contextItemId}${entry.mineruCacheDir ? `, mineruCacheDir=${entry.mineruCacheDir}` : ""}]`,
       ),
     );
   }
