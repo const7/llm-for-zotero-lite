@@ -1191,6 +1191,22 @@ export function clearPageTextCache(): void {
 /**
  * Overload accepting pre-computed normalised page data (from cache).
  */
+/**
+ * Count all non-overlapping occurrences of `needle` in `haystack`.
+ */
+function countOccurrences(haystack: string, needle: string): number {
+  if (!haystack || !needle) return 0;
+  let count = 0;
+  let cursor = 0;
+  while (cursor <= haystack.length - needle.length) {
+    const idx = haystack.indexOf(needle, cursor);
+    if (idx < 0) break;
+    count++;
+    cursor = idx + 1;
+  }
+  return count;
+}
+
 export function locateQuoteByRawPrefixInPages(
   pages: LivePdfPageText[],
   quoteText: string,
@@ -1200,21 +1216,45 @@ export function locateQuoteByRawPrefixInPages(
   const normalized = normalizeLocatorText(quoteText);
   if (!normalized || normalized.length < 10) return null;
 
-  // Build queries: short first (15 → 25) then longer.
-  // Short prefixes are tried first because they are most tolerant of
-  // minor text-extraction differences while still being discriminative
-  // enough to land on a unique page in most papers.
+  // Build queries from prefix, suffix, and middle segments so the search
+  // can find the quote even when only part of it matches the extracted text.
+  // Longest queries first — they are most discriminative.
   const queries: string[] = [];
-  for (const len of [15, 25, 40, 60]) {
+  const pushQuery = (q: string) => {
+    if (q.length >= 10 && !queries.includes(q)) queries.push(q);
+  };
+
+  // Full text first (if short enough) — most specific possible query.
+  if (normalized.length <= 200) pushQuery(normalized);
+
+  // Prefix queries (beginning of quote, longest first)
+  for (const len of [100, 80, 60, 40, 30, 25, 20, 15]) {
     if (normalized.length <= len) continue;
-    const prefix = normalized.slice(0, len).replace(/\s\S*$/, "").trim();
-    if (prefix.length >= 10 && !queries.includes(prefix)) {
-      queries.push(prefix);
-    }
+    pushQuery(normalized.slice(0, len).replace(/\s\S*$/, "").trim());
   }
-  // Full text as last resort (if short enough)
-  if (normalized.length <= 200 && !queries.includes(normalized)) {
-    queries.push(normalized);
+
+  // Suffix queries (end of quote, longest first) — catches cases where the
+  // beginning of the quote has extraction differences but the end matches.
+  for (const len of [100, 80, 60, 40, 30, 25, 20, 15]) {
+    if (normalized.length <= len) continue;
+    pushQuery(normalized.slice(-len).replace(/^\S*\s/, "").trim());
+  }
+
+  // Middle segment queries (from 1/3 and 1/2 positions) — catches cases
+  // where both the beginning and end differ but the interior matches.
+  if (normalized.length >= 40) {
+    for (const fraction of [1 / 3, 1 / 2]) {
+      const midStart = Math.floor(normalized.length * fraction);
+      for (const len of [60, 40, 30, 20]) {
+        if (midStart + len > normalized.length) continue;
+        const mid = normalized
+          .slice(midStart, midStart + len)
+          .replace(/^\S*\s/, "")
+          .replace(/\s\S*$/, "")
+          .trim();
+        pushQuery(mid);
+      }
+    }
   }
 
   const pageNorms = precomputedNorms ?? pages.map((p) => ({
@@ -1224,48 +1264,67 @@ export function locateQuoteByRawPrefixInPages(
   }));
   const debugSummary: string[] = [];
 
-  // Try all queries and keep the result from the longest matching query.
-  // A longer query is more specific and less likely to false-match a
-  // different page (e.g. a 15-char prefix matching the abstract while
-  // a 60-char prefix correctly matches the body text on page 23).
+  // Try queries from longest to shortest.  For each query, count ALL
+  // occurrences across all pages (not just page presence) so we can
+  // verify the match is truly unique — a short prefix like
+  // "identification o" may appear dozens of times across a paper.
   let bestMatch: {
     pageIndex: number;
     matchedPageIndexes: number[];
-    totalMatches: number;
+    totalOccurrences: number;
     queryLen: number;
     confidence: "high" | "medium";
   } | null = null;
 
   for (const query of queries) {
     const matchedPageIndexes: number[] = [];
-    let totalMatches = 0;
+    let totalOccurrences = 0;
     for (const p of pageNorms) {
-      const idx = p.normalizedText.indexOf(query);
-      if (idx >= 0) {
+      const occurrences = countOccurrences(p.normalizedText, query);
+      if (occurrences > 0) {
         matchedPageIndexes.push(p.pageIndex);
-        totalMatches++;
+        totalOccurrences += occurrences;
       }
     }
     debugSummary.push(
-      `Raw prefix "${formatQuerySnippet(query)}" -> ${formatPageList(matchedPageIndexes)}`,
+      `Raw prefix "${formatQuerySnippet(query)}" -> ${formatPageList(matchedPageIndexes)} (${totalOccurrences} total)`,
     );
+
     if (matchedPageIndexes.length === 1) {
-      if (!bestMatch || query.length > bestMatch.queryLen) {
+      if (totalOccurrences === 1) {
+        // Globally unique match — high confidence
         bestMatch = {
           pageIndex: matchedPageIndexes[0],
           matchedPageIndexes,
-          totalMatches,
+          totalOccurrences,
           queryLen: query.length,
-          confidence: query.length >= 40 ? "high" : "medium",
+          confidence: query.length >= 25 ? "high" : "medium",
         };
+        break; // Can't do better than a unique match
       }
+      if (totalOccurrences <= 3) {
+        // Multiple occurrences but all on the same page — usable at lower
+        // confidence.  Keep looking for a longer query with fewer matches.
+        if (!bestMatch || query.length > bestMatch.queryLen) {
+          bestMatch = {
+            pageIndex: matchedPageIndexes[0],
+            matchedPageIndexes,
+            totalOccurrences,
+            queryLen: query.length,
+            confidence: "medium",
+          };
+        }
+      }
+      // > 3 occurrences on one page: too ambiguous, skip this query
     }
+    // matchedPageIndexes.length !== 1: found on multiple pages or not at
+    // all — skip and try the next (shorter) query
   }
   if (bestMatch) {
     return buildPageTextQuoteResult(
       quoteText,
       expectedPageIndex,
-      { matchedPageIndexes: bestMatch.matchedPageIndexes, totalMatches: bestMatch.totalMatches },
+      { matchedPageIndexes: bestMatch.matchedPageIndexes, totalMatches: bestMatch.totalOccurrences },
       pages.length,
       `Direct text prefix search found the quote on a single page.`,
       bestMatch.confidence,
