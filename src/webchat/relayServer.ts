@@ -1220,6 +1220,17 @@ export function relaySetCommand(cmd: { type: string; chatUrl?: string; chatId?: 
   S().pendingCommand = cmd as any;
 }
 
+/** Refresh the current ChatGPT conversation by re-navigating and re-scraping. */
+export function relayRefreshChat(): { ok: boolean; chatUrl: string | null } {
+  const chatUrl = S().remote_chat_url;
+  const chatId = S().remote_chat_id;
+  if (!chatUrl) return { ok: false, chatUrl: null };
+  setScrapedMessages(null);
+  S().turn_status = "navigating";
+  S().pendingCommand = { type: "LOAD_CHAT", chatUrl, chatId: chatId || undefined } as any;
+  return { ok: true, chatUrl };
+}
+
 /** Load a chat session directly (no HTTP). */
 export function relayLoadChat(sessionId: string): {
   ok: boolean;

@@ -1,5 +1,5 @@
 import { renderMarkdown, renderMarkdownForNote } from "../../utils/markdown";
-import { getWelcomeHtml } from "../../utils/i18n";
+import { getWelcomeHtml, getWebChatWelcomeHtml } from "../../utils/i18n";
 import {
   appendMessage as appendStoredMessage,
   clearConversation as clearStoredConversation,
@@ -1466,10 +1466,15 @@ function applyWebChatAnswerSnapshot(
   snapshot: {
     runState?: "submitted" | "active" | "settling" | "done" | "incomplete" | "error" | null;
     completionReason?: "settled" | "forced_cancel" | "timeout" | "error" | null;
+    remoteChatUrl?: string | null;
+    remoteChatId?: string | null;
   },
 ): void {
   message.text = sanitizeText(text || "");
   message.timestamp = Date.now();
+  // [webchat] Capture chat URL from streaming snapshots so it's available for refresh
+  if (snapshot.remoteChatUrl) message.webchatChatUrl = snapshot.remoteChatUrl;
+  if (snapshot.remoteChatId) message.webchatChatId = snapshot.remoteChatId;
   if (
     snapshot.runState === "done" ||
     snapshot.runState === "incomplete" ||
@@ -2974,6 +2979,9 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
       assistantMessage.webchatCompletionReason =
         answer.completionReason ||
         (answer.runState === "done" ? "settled" : null);
+      // [webchat] Persist the ChatGPT conversation URL so refresh can navigate back
+      if (answer.remoteChatUrl) assistantMessage.webchatChatUrl = answer.remoteChatUrl;
+      if (answer.remoteChatId) assistantMessage.webchatChatId = answer.remoteChatId;
       assistantMessage.streaming = false;
 
       refreshChatSafely();
@@ -3380,7 +3388,11 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
     );
 
   if (history.length === 0) {
-    chatBox.innerHTML = getWelcomeHtml();
+    // [webchat] Show webchat-specific welcome instead of generic instructions
+    const protocol = resolveEffectiveRequestConfig({ item }).providerProtocol;
+    chatBox.innerHTML = protocol === "web_sync"
+      ? getWebChatWelcomeHtml()
+      : getWelcomeHtml();
     return;
   }
 
@@ -4244,13 +4256,55 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       meta.appendChild(retryBtn);
     }
 
+    // [webchat] Collect status row data — rendered after meta, below the timestamp
+    let webchatStatusRow: HTMLDivElement | null = null;
     if (!isUser) {
       const webchatStateLabel = getWebChatRunStateLabel(msg);
       if (webchatStateLabel) {
+        webchatStatusRow = doc.createElement("div") as HTMLDivElement;
+        webchatStatusRow.className = "llm-message-webchat-status-row";
+
         const status = doc.createElement("span") as HTMLSpanElement;
         status.className = "llm-message-webchat-status";
         status.textContent = webchatStateLabel;
-        meta.appendChild(status);
+        webchatStatusRow.appendChild(status);
+
+        // [webchat] Refresh icon — re-scrape current ChatGPT conversation
+        const refreshBtn = doc.createElement("button") as HTMLButtonElement;
+        refreshBtn.className = "llm-message-webchat-refresh";
+        refreshBtn.textContent = "\u21BB";
+        refreshBtn.title = "Re-fetch this conversation from ChatGPT";
+        refreshBtn.addEventListener("click", async () => {
+          refreshBtn.disabled = true;
+          try {
+            const { refreshCurrentConversation } = await import("../../webchat/client");
+            const { getRelayBaseUrl } = await import("../../webchat/relayServer");
+            const scraped = await refreshCurrentConversation(
+              getRelayBaseUrl(),
+              msg.webchatChatUrl || null,
+              msg.webchatChatId || null,
+            );
+            if (scraped.length > 0) {
+              const refreshed: Message[] = scraped.map((m) => ({
+                role: (m.kind === "user" ? "user" : "assistant") as "user" | "assistant",
+                text: m.text || "",
+                timestamp: Date.now(),
+                modelName: m.kind === "bot" ? "chatgpt.com" : undefined,
+                modelProviderLabel: m.kind === "bot" ? "ChatGPT" : undefined,
+                reasoningDetails: m.thinking || undefined,
+              }));
+              chatHistory.set(conversationKey, refreshed);
+              refreshChat(body, item);
+            } else {
+              refreshBtn.title = "No messages found — ChatGPT may be on a different page";
+              setTimeout(() => { refreshBtn.title = "Re-fetch this conversation from ChatGPT"; refreshBtn.disabled = false; }, 2000);
+            }
+          } catch {
+            refreshBtn.title = "Refresh failed";
+            setTimeout(() => { refreshBtn.title = "Re-fetch this conversation from ChatGPT"; refreshBtn.disabled = false; }, 2000);
+          }
+        });
+        webchatStatusRow.appendChild(refreshBtn);
       }
     }
 
@@ -4260,6 +4314,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       wrapper.appendChild(bubble);
     }
     wrapper.appendChild(meta);
+    if (webchatStatusRow) wrapper.appendChild(webchatStatusRow);
     chatBox.appendChild(wrapper);
     if (isUser && hasUserContext) {
       wrapper.classList.add("llm-user-context-aligned");

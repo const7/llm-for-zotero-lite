@@ -657,6 +657,95 @@ export async function loadChatSession(
 }
 
 // ---------------------------------------------------------------------------
+// Refresh current conversation (re-scrape from ChatGPT)
+// ---------------------------------------------------------------------------
+
+type RefreshResult = Array<{
+  speaker: string;
+  text: string;
+  kind: string;
+  thinking?: string;
+}>;
+
+/**
+ * Navigate to a ChatGPT conversation and re-scrape messages.
+ *
+ * Priority for finding the target conversation:
+ * 1. Explicit `chatUrl` / `chatId` (from the persisted message metadata)
+ * 2. Relay state's `remote_chat_url` (volatile, may be stale)
+ * 3. Mirrored history lookup by chat ID
+ */
+export async function refreshCurrentConversation(
+  _host: string,
+  chatUrl?: string | null,
+  chatId?: string | null,
+): Promise<RefreshResult> {
+  const {
+    relayRefreshChat,
+    relaySetCommand,
+    relayUpdateTurnState,
+    relayLoadChat: relayLoadChatFn,
+  } = await import("./relayServer");
+
+  // Strategy 1: explicit URL from message metadata
+  if (chatUrl) {
+    const scraped = await navigateAndScrape(_host, chatUrl, chatId || undefined, relaySetCommand, relayUpdateTurnState);
+    if (scraped.length > 0) return scraped;
+  }
+
+  // Strategy 2: relay state's current URL
+  const result = relayRefreshChat();
+  if (result.ok) {
+    try {
+      await waitForRemoteReady(_host, REMOTE_READY_TIMEOUT_MS, undefined, result.chatUrl);
+      const scraped = relayGetScrapedMessages() || [];
+      if (scraped.length > 0) return scraped.map(mapScrapedMessage);
+    } catch { /* fall through */ }
+  }
+
+  // Strategy 3: mirrored history lookup
+  const fallbackId = chatId || relayGetStateSnapshot().remote_chat_id;
+  if (fallbackId) {
+    const loaded = relayLoadChatFn(fallbackId);
+    if (loaded.ok && loaded.session.chatUrl) {
+      try {
+        await waitForRemoteReady(_host, REMOTE_READY_TIMEOUT_MS, undefined, loaded.session.chatUrl);
+        const scraped = relayGetScrapedMessages() || [];
+        if (scraped.length > 0) return scraped.map(mapScrapedMessage);
+      } catch { /* exhausted */ }
+    }
+  }
+
+  return [];
+}
+
+async function navigateAndScrape(
+  host: string,
+  chatUrl: string,
+  chatId: string | undefined,
+  relaySetCommandFn: typeof import("./relayServer").relaySetCommand,
+  relayUpdateTurnStateFn: typeof import("./relayServer").relayUpdateTurnState,
+): Promise<RefreshResult> {
+  relayUpdateTurnStateFn({ turn_status: "navigating" });
+  relaySetCommandFn({ type: "LOAD_CHAT", chatUrl, chatId });
+  try {
+    await waitForRemoteReady(host, REMOTE_READY_TIMEOUT_MS, undefined, chatUrl);
+    const scraped = relayGetScrapedMessages() || [];
+    if (scraped.length > 0) return scraped.map(mapScrapedMessage);
+  } catch { /* navigation failed */ }
+  return [];
+}
+
+function mapScrapedMessage(m: { role: string; text: string; thinking?: string }) {
+  return {
+    speaker: m.role === "user" ? "user" : "assistant",
+    text: m.text || "",
+    kind: m.role === "user" ? "user" : "bot",
+    thinking: m.thinking,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Scraped messages (direct state access)
 // ---------------------------------------------------------------------------
 
