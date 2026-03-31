@@ -67,6 +67,8 @@ export interface Message {
   reasoningOpen?: boolean;
   webchatRunState?: "done" | "incomplete" | "error";
   webchatCompletionReason?: "settled" | "forced_cancel" | "timeout" | "error" | null;
+  webchatChatUrl?: string;
+  webchatChatId?: string;
 }
 
 export type ChatRuntimeMode = "chat" | "agent";

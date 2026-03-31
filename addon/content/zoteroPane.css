@@ -455,6 +455,45 @@
   to { opacity: 1; }
 }
 
+/* ---- Webchat status row (below timestamp) ---- */
+.llm-message-webchat-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 0;
+}
+.llm-message-webchat-status {
+  font-size: var(--llm-fs-10, 10px);
+  color: var(--fill-tertiary);
+}
+.llm-message-webchat-refresh {
+  appearance: none;
+  -moz-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fill-tertiary);
+  font-size: 13px;
+  cursor: pointer;
+  flex: 0 0 18px;
+}
+.llm-message-webchat-refresh:hover {
+  background: var(--fill-quinary, rgba(255,255,255,0.08));
+  color: var(--fill-primary);
+}
+.llm-message-webchat-refresh:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ---- Lock icon (after 'Open chat' label) ---- */
 
 .llm-mode-lock {

@@ -518,9 +518,13 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   const updateRuntimeModeButton = () => {
     if (!runtimeModeBtn) return;
     const agentFeatureEnabled = getAgentModeEnabled();
-    // Hide the entire toggle when the agent mode feature is disabled in prefs.
-    runtimeModeBtn.style.display = agentFeatureEnabled ? "" : "none";
-    if (!agentFeatureEnabled) {
+    // [webchat] Agent mode not available in webchat — hide toggle
+    let webChatActive = false;
+    try { webChatActive = isWebChatMode(); } catch { /* not ready */ }
+    // Hide the entire toggle when agent feature is disabled or in webchat mode.
+    const shouldHide = !agentFeatureEnabled || webChatActive;
+    runtimeModeBtn.style.display = shouldHide ? "none" : "";
+    if (shouldHide) {
       // Force chat mode when the feature is hidden so state stays consistent.
       if (item) selectedRuntimeModeCache.set(getConversationKey(item), "chat");
       panelRoot.dataset.runtimeMode = "chat";
@@ -659,23 +663,26 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       modeCapsule.dataset.mode = mode || "";
     }
     if (modeChipBtn) {
-      const currentLabel = noteSession
-        ? (mode === "global" ? "Open note" : "Paper note")
-        : (mode === "global" ? "Open chat" : "Paper chat");
-      modeChipBtn.textContent = currentLabel;
-      modeChipBtn.title = noteSession
-        ? currentLabel
-        : mode === "global"
-          ? "Switch to paper chat"
-          : "Switch to open chat";
-      modeChipBtn.setAttribute(
-        "aria-label",
-        noteSession
+      // [webchat] Don't overwrite — applyWebChatModeUI manages the chip in webchat mode
+      if (!modeChipBtn.querySelector(".llm-webchat-dot")) {
+        const currentLabel = noteSession
+          ? (mode === "global" ? "Open note" : "Paper note")
+          : (mode === "global" ? "Open chat" : "Paper chat");
+        modeChipBtn.textContent = currentLabel;
+        modeChipBtn.title = noteSession
           ? currentLabel
           : mode === "global"
             ? "Switch to paper chat"
-            : "Switch to open chat",
-      );
+            : "Switch to open chat";
+        modeChipBtn.setAttribute(
+          "aria-label",
+          noteSession
+            ? currentLabel
+            : mode === "global"
+              ? "Switch to paper chat"
+              : "Switch to open chat",
+        );
+      }
     }
     // Lock button: visible only in open-chat mode; reflect lock state
     if (modeLockBtn) {
@@ -6633,10 +6640,17 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       }
     }
 
+    // [webchat] Hide the "/" action button — slash menu is disabled in webchat
+    if (uploadBtn) {
+      uploadBtn.style.display = isWebChat ? "none" : "";
+    }
+
     // [webchat] Re-render paper chips to reflect forced PDF content source
     if (isWebChat) {
       updatePaperPreviewPreservingScroll();
     }
+
+    updateRuntimeModeButton();
   };
 
   // [webchat] Pre-fetch history in background — triggers a scrape command then polls
@@ -6844,6 +6858,24 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   updateSelectedTextPreviewPreservingScroll();
   syncModelFromPrefs();
   applyWebChatModeUI();
+  // [webchat] Cold startup → show preload screen so user knows they're in webchat mode
+  try {
+    if (isWebChatMode()) {
+      const chatShellEl = body.querySelector(".llm-chat-shell") as HTMLElement | null;
+      if (chatShellEl) {
+        void (async () => {
+          try {
+            const { showWebChatPreloadScreen } = await import("../../webchat/preloadScreen");
+            await showWebChatPreloadScreen(chatShellEl);
+          } catch {
+            // Preload failed or was aborted — dot will show connection status
+          }
+        })();
+      }
+    }
+  } catch {
+    // isWebChatMode may not be ready during initial render
+  }
   restoreDraftInputForCurrentConversation();
   if (isNoteSession()) {
     void refreshGlobalHistoryHeader();
@@ -7196,6 +7228,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       closeActionPicker();
       return;
     }
+    // [webchat] Slash menu not available in webchat mode
+    try { if (isWebChatMode()) { closeActionPicker(); closeSlashMenu(); return; } } catch { /* */ }
     closeActionPicker();
     const token = getActiveActionToken();
     if (!token) {
@@ -8289,6 +8323,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       closePaperPicker();
       return;
     }
+    // [webchat] Paper picker not available in webchat mode
+    try { if (isWebChatMode()) { closePaperPicker(); return; } } catch { /* */ }
     const slashToken = getActiveSlashToken();
     if (!slashToken) {
       closePaperPicker();
