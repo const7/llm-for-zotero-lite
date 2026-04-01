@@ -11093,6 +11093,13 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       if (currentAbortController) {
         currentAbortController.abort();
       }
+      // [webchat] Tell the browser extension to stop ChatGPT generation
+      if (isWebChatMode()) {
+        try {
+          const { relayRequestStop } = require("../../webchat/relayServer");
+          relayRequestStop();
+        } catch { /* relay may not be loaded */ }
+      }
       setCancelledRequestId(currentRequestId);
       if (status) setStatus(status, t("Cancelled"), "ready");
       // Re-enable UI

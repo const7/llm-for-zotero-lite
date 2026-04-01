@@ -141,6 +141,8 @@ export interface RelayState {
   pendingCommand: PendingCommand | null;
   /** [webchat] Actual ChatGPT mode reported back by the extension. */
   reported_mode: string | null;
+  /** [webchat] Set by cancel button — polled separately so it works during active pipeline. */
+  stopRequested: boolean;
 }
 
 // Use Zotero object as shared namespace — guaranteed same across all contexts
@@ -197,6 +199,7 @@ if (!Z._webchatRelay) {
       activeSessionId: null,
       pendingCommand: null,
       reported_mode: null,
+      stopRequested: false,
     },
     mirroredHistory: [],
     scrapedMessages: null,
@@ -870,6 +873,15 @@ const PollCommandEndpoint = createEndpoint(["GET"], () => {
   return jsonReply({ command: null });
 });
 
+// GET /poll_stop — lightweight endpoint polled during active pipeline
+const PollStopEndpoint = createEndpoint(["GET"], () => {
+  const requested = S().stopRequested;
+  if (requested) {
+    S().stopRequested = false;
+  }
+  return jsonReply({ stop: requested });
+});
+
 // POST /new_chat
 const NewChatEndpoint = createEndpoint(["POST"], () => {
   resetState();
@@ -987,6 +999,7 @@ const ENDPOINTS: Record<string, ReturnType<typeof createEndpoint>> = {
   [`${PREFIX}/update_partial`]: UpdatePartialEndpoint,
   [`${PREFIX}/submit_response`]: SubmitResponseEndpoint,
   [`${PREFIX}/poll_command`]: PollCommandEndpoint,
+  [`${PREFIX}/poll_stop`]: PollStopEndpoint,
   [`${PREFIX}/new_chat`]: NewChatEndpoint,
   [`${PREFIX}/chat_history`]: ChatHistoryEndpoint,
   [`${PREFIX}/update_chat_history`]: UpdateChatHistoryEndpoint,
@@ -1204,6 +1217,11 @@ export function relayNewChat(): void {
 /** Set a pending command directly (no HTTP). */
 export function relaySetCommand(cmd: { type: string; chatUrl?: string; chatId?: string }): void {
   S().pendingCommand = cmd as any;
+}
+
+/** Request the extension to stop ChatGPT generation (no HTTP). */
+export function relayRequestStop(): void {
+  S().stopRequested = true;
 }
 
 /** Refresh the current ChatGPT conversation by re-navigating and re-scraping. */
