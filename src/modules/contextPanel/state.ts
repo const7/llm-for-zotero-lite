@@ -67,9 +67,18 @@ export let currentAbortController: AbortController | null = null;
 export function setCurrentAbortController(value: AbortController | null) {
   currentAbortController = value;
 }
-export let panelFontScalePercent = 120; // FONT_SCALE_DEFAULT_PERCENT
+export let panelFontScalePercent = 120; // FONT_SCALE_DEFAULT_PERCENT — overwritten by initFontScale()
 export function setPanelFontScalePercent(value: number) {
   panelFontScalePercent = value;
+  // Lazy-import to avoid circular dependency (prefHelpers imports from state).
+  import("./prefHelpers").then((m) => m.setFontScalePref(value)).catch(() => {});
+}
+/** Call once at plugin startup to restore the persisted font scale. */
+export function initFontScale(): void {
+  // Lazy-import to avoid circular dependency.
+  import("./prefHelpers").then((m) => {
+    panelFontScalePercent = m.getFontScalePref();
+  }).catch(() => {});
 }
 
 export let responseMenuTarget: {

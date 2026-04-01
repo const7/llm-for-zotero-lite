@@ -76,7 +76,7 @@ function sleep(ms: number): Promise<void> {
  */
 export async function showWebChatPreloadScreen(
   chatShell: HTMLElement,
-  signal?: AbortSignal,
+  signal?: { aborted: boolean },
 ): Promise<void> {
   const doc = chatShell.ownerDocument!;
 
@@ -184,20 +184,17 @@ export async function showWebChatPreloadScreen(
     // Retry loop
     while (!success) {
       await new Promise<void>((resolve) => {
-        const handler = () => {
-          retryBtn.removeEventListener("click", handler);
-          resolve();
+        let abortPoll: ReturnType<typeof setInterval> | null = null;
+        const cleanup = () => {
+          retryBtn.removeEventListener("click", onClick);
+          if (abortPoll !== null) clearInterval(abortPoll);
         };
-        retryBtn.addEventListener("click", handler);
-
-        // Also resolve on abort
+        const onClick = () => { cleanup(); resolve(); };
+        retryBtn.addEventListener("click", onClick);
         if (signal) {
-          const onAbort = () => {
-            retryBtn.removeEventListener("click", handler);
-            signal.removeEventListener("abort", onAbort);
-            resolve();
-          };
-          signal.addEventListener("abort", onAbort, { once: true });
+          abortPoll = setInterval(() => {
+            if (signal.aborted) { cleanup(); resolve(); }
+          }, 200);
         }
       });
 

@@ -20,7 +20,7 @@ import { runLegacyMigrations } from "./utils/migrations";
 import { createZToolkit } from "./utils/ztoolkit";
 import { getAgentApi, initAgentSubsystem, shutdownAgentSubsystem } from "./agent";
 import { pauseBatchProcessing } from "./modules/mineruBatchProcessor";
-import { clearAllState } from "./modules/contextPanel/state";
+import { clearAllState, initFontScale } from "./modules/contextPanel/state";
 
 async function onStartup() {
   await Promise.all([
@@ -37,6 +37,7 @@ async function onStartup() {
 
   initLocale();
   initI18n();
+  initFontScale();
 
   try {
     await initChatStore();

@@ -2,6 +2,9 @@ import {
   config,
   ASSISTANT_NOTE_MAP_PREF_KEY,
   CUSTOM_SHORTCUT_ID_PREFIX,
+  FONT_SCALE_DEFAULT_PERCENT,
+  FONT_SCALE_MIN_PERCENT,
+  FONT_SCALE_MAX_PERCENT,
 } from "./constants";
 import type { CustomShortcut, ReasoningLevelSelection } from "./types";
 import { selectedModelCache, panelFontScalePercent } from "./state";
@@ -55,6 +58,7 @@ export function getQueryRewriteEnabled(): boolean {
 const LAST_REASONING_LEVEL_PREF_KEY = "lastUsedReasoningLevel";
 const LAST_REASONING_EXPANDED_PREF_KEY = "lastReasoningExpanded";
 const LAST_PAPER_CONVERSATION_MAP_PREF_KEY = "lastUsedPaperConversationMap";
+const PANEL_FONT_SCALE_PREF_KEY = "panelFontScale";
 const REASONING_LEVEL_SELECTIONS = new Set<ReasoningLevelSelection>([
   "none",
   "default",
@@ -243,6 +247,28 @@ export function getProviderLabelForSettings(
 export function applyPanelFontScale(panel: HTMLElement | null): void {
   if (!panel) return;
   panel.style.setProperty("--llm-font-scale", `${panelFontScalePercent / 100}`);
+}
+
+export function getFontScalePref(): number {
+  const raw = getZoteroPrefs()?.get?.(
+    `${config.prefsPrefix}.${PANEL_FONT_SCALE_PREF_KEY}`,
+    true,
+  );
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return FONT_SCALE_DEFAULT_PERCENT;
+  return Math.max(FONT_SCALE_MIN_PERCENT, Math.min(n, FONT_SCALE_MAX_PERCENT));
+}
+
+export function setFontScalePref(value: number): void {
+  const clamped = Math.max(
+    FONT_SCALE_MIN_PERCENT,
+    Math.min(value, FONT_SCALE_MAX_PERCENT),
+  );
+  getZoteroPrefs()?.set?.(
+    `${config.prefsPrefix}.${PANEL_FONT_SCALE_PREF_KEY}`,
+    clamped,
+    true,
+  );
 }
 
 /** Get/set JSON preferences with error handling */

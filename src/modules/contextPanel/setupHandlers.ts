@@ -1,6 +1,7 @@
 import { createElement } from "../../utils/domHelpers";
 import { t } from "../../utils/i18n";
 import type { RuntimeModelEntry } from "../../utils/modelProviders";
+import { getLastUsedModelEntryId, getModelEntryById } from "../../utils/modelProviders";
 import {
   config,
   AUTO_SCROLL_BOTTOM_THRESHOLD,
@@ -6179,6 +6180,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
               selectedImageCache.delete(item.id);
               updateImagePreviewPreservingScroll();
             }
+            // Apply webchat UI immediately so model button is disabled during preload
+            applyWebChatModeUI();
             void (async () => {
               if (isGlobalMode()) {
                 await createAndSwitchGlobalConversation();
@@ -6190,14 +6193,21 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
               const chatShellEl = body.querySelector(".llm-chat-shell") as HTMLElement | null;
               if (chatShellEl) {
                 try {
+                  abortWebChatPreload();
+                  const token = { aborted: false };
+                  webchatPreloadAbort = token;
                   const { showWebChatPreloadScreen } = await import("../../webchat/preloadScreen");
-                  await showWebChatPreloadScreen(chatShellEl);
+                  await showWebChatPreloadScreen(chatShellEl, token);
                 } catch {
                   // Preload failed or was aborted — still apply UI (dot will show status)
+                } finally {
+                  webchatPreloadAbort = null;
                 }
               }
 
-              // Apply webchat UI after the conversation switch re-renders
+              // If user exited webchat during preload, don't re-apply webchat UI
+              if (!isWebChatMode()) return;
+              // Re-apply after conversation switch re-renders (refreshes connection dot etc.)
               applyWebChatModeUI();
             })();
           } else {
@@ -6350,6 +6360,15 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   let webchatForceNewChatOnNextSend = false;
   let webchatPdfUploadedInCurrentConversation = false;
   let webchatConnectionTimer: ReturnType<typeof setInterval> | null = null;
+  // Simple abort token — Zotero's Gecko context lacks AbortController.
+  let webchatPreloadAbort: { aborted: boolean } | null = null;
+
+  const abortWebChatPreload = () => {
+    if (webchatPreloadAbort) {
+      webchatPreloadAbort.aborted = true;
+      webchatPreloadAbort = null;
+    }
+  };
 
   const markNextWebChatSendAsNewChat = () => {
     webchatForceNewChatOnNextSend = true;
@@ -6592,8 +6611,15 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       const { selectedEntry } = getSelectedModelInfo();
       isWebChat = selectedEntry?.authMode === "webchat";
     } catch {
-      // getSelectedModelInfo may not be ready during initial render
-      return;
+      // getSelectedModelInfo may not be ready during initial render —
+      // fall back to checking the last-used model entry directly.
+      try {
+        const lastId = getLastUsedModelEntryId();
+        const entry = lastId ? getModelEntryById(lastId) : null;
+        isWebChat = entry?.authMode === "webchat";
+      } catch {
+        return;
+      }
     }
 
     // Mode chip: show "chatgpt.com" with connection dot, or restore original
@@ -6621,11 +6647,12 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       }
     }
 
-    // Model dropdown: disabled in webchat (model is ChatGPT, use Exit to change)
+    // Model dropdown: fully disabled in webchat (model is ChatGPT, use Exit to change)
     if (modelBtn) {
       (modelBtn as HTMLButtonElement).disabled = isWebChat;
       modelBtn.style.opacity = isWebChat ? "0.5" : "";
       modelBtn.style.cursor = isWebChat ? "default" : "";
+      modelBtn.style.pointerEvents = isWebChat ? "none" : "";
     }
 
     // [webchat] Pre-fetch history in background so it's ready when user clicks
@@ -6871,10 +6898,15 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       if (chatShellEl) {
         void (async () => {
           try {
+            abortWebChatPreload();
+            const token = { aborted: false };
+            webchatPreloadAbort = token;
             const { showWebChatPreloadScreen } = await import("../../webchat/preloadScreen");
-            await showWebChatPreloadScreen(chatShellEl);
+            await showWebChatPreloadScreen(chatShellEl, token);
           } catch {
             // Preload failed or was aborted — dot will show connection status
+          } finally {
+            webchatPreloadAbort = null;
           }
         })();
       }
@@ -9722,6 +9754,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
 
   const openModelMenu = () => {
     if (!modelMenu || !modelBtn) return;
+    if ((modelBtn as HTMLButtonElement).disabled) return;
     closeSlashMenu();
     closeRetryModelMenu();
     closeReasoningMenu();
@@ -9988,7 +10021,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     modelBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!item || !modelMenu) return;
+      if (!item || !modelMenu || (modelBtn as HTMLButtonElement).disabled) return;
       if (!isFloatingMenuOpen(modelMenu)) {
         openModelMenu();
       } else {
@@ -11095,6 +11128,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
 
       // [webchat] "Exit" button → restore previous model and leave webchat mode
       if (isWebChatMode()) {
+        abortWebChatPreload();
+        // Immediately remove preload overlay for instant visual feedback
+        body.querySelector(".llm-webchat-preload")?.remove();
         stopWebChatConnectionCheck();
         clearNextWebChatNewChatIntent();
         resetWebChatPdfUploadedForCurrentConversation();
