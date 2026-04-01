@@ -860,20 +860,6 @@ const HeartbeatEndpoint = createEndpoint(["GET"], () => {
   return jsonReply({ ok: true, ts: Date.now(), seq: S().query.seq });
 });
 
-// GET /debug (temporary — shows which state object the endpoint sees)
-const DebugEndpoint = createEndpoint(["GET"], () => {
-  const s = S();
-  return jsonReply({
-    stateRef: typeof s,
-    status: s?.status,
-    phase: s?.query?.phase,
-    attempt: s?.query?.attempt,
-    pendingCommand: s?.pendingCommand,
-    storageKeyExists: !!(Zotero.Server.Endpoints as any).__webchatRelayStorage,
-    sameRef: s === (Zotero.Server.Endpoints as any).__webchatRelayStorage?.state,
-  });
-});
-
 // GET /poll_command
 const PollCommandEndpoint = createEndpoint(["GET"], () => {
   const cmd = S().pendingCommand;
@@ -990,7 +976,7 @@ const ExtensionStatusEndpoint = createEndpoint(["POST"], (opts) => {
 const ENDPOINTS: Record<string, ReturnType<typeof createEndpoint>> = {
   [`${PREFIX}/heartbeat`]: HeartbeatEndpoint,
   [`${PREFIX}/extension_status`]: ExtensionStatusEndpoint,
-  [`${PREFIX}/debug`]: DebugEndpoint,
+
   [`${PREFIX}/submit_query`]: SubmitQueryEndpoint,
   [`${PREFIX}/poll_query`]: PollQueryEndpoint,
   [`${PREFIX}/claim_query`]: ClaimQueryEndpoint,

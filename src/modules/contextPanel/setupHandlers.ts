@@ -11146,11 +11146,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         updateModelButton();
         updateReasoningButton();
         applyWebChatModeUI();
-        if (isGlobalMode()) {
-          void createAndSwitchGlobalConversation();
-        } else {
-          void createAndSwitchPaperConversation();
-        }
+        // Clear webchat conversation (DB + in-memory) so history doesn't
+        // persist into normal mode and the panel is ready for a fresh start.
+        void clearCurrentConversation();
         return;
       }
 

@@ -46,6 +46,8 @@ export type StoredChatMessage = {
   modelProviderLabel?: string;
   webchatRunState?: "done" | "incomplete" | "error";
   webchatCompletionReason?: "settled" | "forced_cancel" | "timeout" | "error" | null;
+  webchatChatUrl?: string;
+  webchatChatId?: string;
   reasoningSummary?: string;
   reasoningDetails?: string;
 };

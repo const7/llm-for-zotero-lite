@@ -252,6 +252,7 @@ This is the first step for Agent Mode. The goal is a versatile agent that master
 
 **WebChat mode** lets you send questions directly to [chatgpt.com](https://chatgpt.com) through a browser extension — no API key needed. Your queries are relayed from Zotero to the ChatGPT web interface, and responses are streamed back into the plugin.
 
+<p align="center">
   <img src="./assets/webchat.jpeg" alt="webchat demo" width="1024" />
 </p>
 
@@ -370,7 +371,7 @@ When a personal API key is provided, the plugin calls the MinerU API directly (`
 - [x] Agent mode (beta)
 - [x] MinerU PDF parsing
 - [x] GitHub Copilot auth
-- [ ] WebChat mode (ChatGPT web sync)
+- [x] WebChat mode (ChatGPT web sync)
 - [ ] Local MinerU support
 - [ ] Customized skills
 - [ ] Agent mode between Zotero and Obsidian

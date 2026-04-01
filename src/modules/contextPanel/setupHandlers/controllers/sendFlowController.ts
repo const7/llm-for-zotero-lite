@@ -494,9 +494,6 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       webchatSendPdf,
       webchatForceNewChat,
     });
-    if (isWebChat && webchatSendPdf) {
-      deps.markWebChatPdfUploadedForCurrentConversation?.();
-    }
     if (hasPaperComposeState) {
       deps.consumePaperModeState(item.id);
       deps.retainPaperState(item.id);
@@ -509,6 +506,9 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       }, 120);
     }
     await sendTask;
+    if (isWebChat && webchatSendPdf) {
+      deps.markWebChatPdfUploadedForCurrentConversation?.();
+    }
     deps.refreshGlobalHistoryHeader();
     } finally {
       deps.autoUnlockGlobalChat();

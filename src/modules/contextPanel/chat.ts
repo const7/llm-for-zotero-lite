@@ -2918,6 +2918,8 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
       reasoningDetails: assistantMessage.reasoningDetails,
       webchatRunState: assistantMessage.webchatRunState,
       webchatCompletionReason: assistantMessage.webchatCompletionReason,
+      webchatChatUrl: assistantMessage.webchatChatUrl,
+      webchatChatId: assistantMessage.webchatChatId,
     });
   };
   const markCancelled = async () => {

@@ -150,6 +150,9 @@ export function normalizeProviderProtocolForAuthMode(params: {
       ? normalized
       : "openai_chat_compat";
   }
+  if (params.authMode === "webchat") {
+    return "web_sync";
+  }
   if (normalized === "codex_responses") {
     return fallback === "codex_responses" ? inferred : fallback;
   }
