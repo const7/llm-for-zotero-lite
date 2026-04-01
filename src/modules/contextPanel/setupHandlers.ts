@@ -6640,10 +6640,15 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         startWebChatConnectionCheck(dot);
       } else {
         const oldDot = modeChipBtn.querySelector(".llm-webchat-dot");
-        if (oldDot) oldDot.remove();
+        if (oldDot) {
+          oldDot.remove();
+          // Restore mode chip text — the normal render sync skips it while the dot is present
+          const chipLabel = isGlobalMode() ? "Open chat" : "Paper chat";
+          modeChipBtn.textContent = chipLabel;
+          modeChipBtn.title = isGlobalMode() ? "Switch to paper chat" : "Switch to open chat";
+        }
         stopWebChatConnectionCheck();
         modeChipBtn.style.cursor = "";
-        // Don't overwrite text here — the normal render sync already sets it
       }
     }
 
@@ -6854,6 +6859,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
                 );
               }
             }
+
+            // If the user exited webchat while we were fetching, discard results
+            if (!isWebChatMode()) return;
 
             chatHistory.set(key, messages);
 
