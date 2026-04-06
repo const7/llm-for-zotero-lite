@@ -40,6 +40,7 @@ const zhCN: Record<string, string> = {
   "Restore deleted conversation": "恢复已删除的对话",
   "Copy": "复制",
   "Save as note": "保存为笔记",
+  "Delete conversation": "删除对话",
   "Delete this turn": "删除此轮对话",
   "Delete this prompt and response": "删除此提问和回答",
   "Copy chat as md": "复制对话为 Markdown",

@@ -898,7 +898,8 @@
 }
 
 .llm-standalone-conv-item {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
   padding: 7px 8px;
   border: none;
@@ -908,10 +909,42 @@
   font-size: var(--llm-fs-12);
   text-align: left;
   cursor: pointer;
+  line-height: 1.4;
+}
+
+.llm-standalone-conv-title {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.4;
+}
+
+.llm-standalone-conv-delete {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--fill-tertiary);
+  font-size: 14px;
+  margin-left: 4px;
+}
+
+.llm-standalone-conv-delete::before {
+  content: "\00D7"; /* × */
+}
+
+.llm-standalone-conv-item:hover .llm-standalone-conv-delete {
+  display: flex;
+}
+
+.llm-standalone-conv-delete:hover {
+  background: color-mix(in srgb, var(--fill-quaternary) 60%, transparent);
+  color: #e74c3c;
 }
 
 .llm-standalone-conv-item:hover {

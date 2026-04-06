@@ -28,7 +28,13 @@ import { t } from "../../utils/i18n";
 import {
   createGlobalConversation,
   ensureGlobalConversationExists,
+  clearConversation as clearStoredConversation,
+  deleteGlobalConversation,
+  deletePaperConversation,
 } from "../../utils/chatStore";
+import { removeConversationAttachmentFiles } from "./attachmentStorage";
+import { clearOwnerAttachmentRefs } from "../../utils/attachmentRefStore";
+import { chatHistory, loadedConversationKeys } from "./state";
 import {
   loadConversationHistoryScope,
   type ConversationHistoryScopeEntry,
@@ -671,7 +677,16 @@ export function openStandaloneChat(options?: {
           if (conv.sessionVersion !== undefined) {
             btn.dataset.sessionVersion = String(conv.sessionVersion);
           }
-          btn.textContent = conv.title || t("Untitled chat");
+          const titleSpan = doc.createElementNS(HTML_NS, "span") as HTMLSpanElement;
+          titleSpan.className = "llm-standalone-conv-title";
+          titleSpan.textContent = conv.title || t("Untitled chat");
+          const deleteBtn = doc.createElementNS(HTML_NS, "span") as HTMLSpanElement;
+          deleteBtn.className = "llm-standalone-conv-delete";
+          deleteBtn.setAttribute("role", "button");
+          deleteBtn.setAttribute("aria-label", t("Delete conversation"));
+          deleteBtn.title = t("Delete conversation");
+          deleteBtn.dataset.action = "delete";
+          btn.append(titleSpan, deleteBtn);
           btn.title = conv.title || t("Untitled chat");
           sidebarList.appendChild(btn);
         }
@@ -828,12 +843,117 @@ export function openStandaloneChat(options?: {
       }
     });
 
+    // Sidebar click handler — delete conversation
+    sidebarList.addEventListener("click", async (e: Event) => {
+      const deleteTarget = (e.target as HTMLElement).closest(
+        ".llm-standalone-conv-delete",
+      ) as HTMLElement | null;
+      if (deleteTarget) {
+        e.preventDefault();
+        e.stopPropagation();
+        const row = deleteTarget.closest(".llm-standalone-conv-item") as HTMLElement | null;
+        if (!row) return;
+        const key = Number(row.dataset.conversationKey);
+        if (!key) return;
+        const isActive = key === activeConversationKey;
+
+        // Find a sibling conversation to switch to BEFORE deleting
+        let fallbackKey: number | null = null;
+        let fallbackSessionVersion: number | undefined;
+        if (isActive) {
+          const allItems = Array.from(
+            sidebarList.querySelectorAll(".llm-standalone-conv-item"),
+          ) as HTMLElement[];
+          const idx = allItems.indexOf(row);
+          // Prefer next sibling, then previous
+          const sibling = allItems[idx + 1] || allItems[idx - 1] || null;
+          if (sibling && Number(sibling.dataset.conversationKey) !== key) {
+            fallbackKey = Number(sibling.dataset.conversationKey);
+            fallbackSessionVersion = sibling.dataset.sessionVersion
+              ? Number(sibling.dataset.sessionVersion)
+              : undefined;
+          }
+        }
+
+        // Immediately remove the row from the DOM for instant feedback
+        const dayLabel = row.previousElementSibling;
+        row.remove();
+        // Remove orphaned day label if no more items follow it
+        if (
+          dayLabel?.classList.contains("llm-standalone-day-label") &&
+          (!dayLabel.nextElementSibling ||
+            dayLabel.nextElementSibling.classList.contains("llm-standalone-day-label"))
+        ) {
+          dayLabel.remove();
+        }
+
+        try {
+          // Clean up in-memory state
+          chatHistory.delete(key);
+          loadedConversationKeys.delete(key);
+          // Clean up DB: messages, attachment refs, attachment files, conversation row
+          await clearStoredConversation(key);
+          await clearOwnerAttachmentRefs("conversation", key).catch(() => {});
+          await removeConversationAttachmentFiles(key).catch(() => {});
+          if (standaloneMode === "open") {
+            await deleteGlobalConversation(key);
+            const rememberedKey = activeGlobalConversationByLibrary.get(libraryID);
+            if (rememberedKey !== undefined && Number(rememberedKey) === key) {
+              activeGlobalConversationByLibrary.delete(libraryID);
+            }
+          } else {
+            await deletePaperConversation(key);
+          }
+
+          // Switch to fallback or create new conversation
+          if (isActive) {
+            if (fallbackKey) {
+              activeConversationKey = fallbackKey;
+              if (standaloneMode === "open") {
+                activeGlobalConversationByLibrary.set(libraryID, fallbackKey);
+                const newItem = createGlobalPortalItem(libraryID, fallbackKey);
+                mountChatPanel(newItem);
+              } else if (currentBasePaperItem) {
+                const sv = fallbackSessionVersion || 0;
+                const newItem = createPaperPortalItem(currentBasePaperItem, fallbackKey, sv);
+                mountChatPanel(newItem);
+              }
+            } else {
+              // No siblings left — create a fresh conversation
+              if (standaloneMode === "open") {
+                const newKey = await createGlobalConversation(libraryID);
+                if (newKey && !cancelled) {
+                  activeConversationKey = newKey;
+                  activeGlobalConversationByLibrary.set(libraryID, newKey);
+                  const newItem = createGlobalPortalItem(libraryID, newKey);
+                  mountChatPanel(newItem);
+                }
+              } else if (currentBasePaperItem) {
+                activeConversationKey = 0;
+                mountChatPanel(currentBasePaperItem);
+              }
+            }
+          }
+
+          // Full sidebar re-render to sync state from DB
+          await renderSidebar();
+        } catch (err) {
+          ztoolkit.log("LLM: standalone delete conversation failed", err);
+          // Re-render sidebar to recover from partial state
+          await renderSidebar().catch(() => {});
+        }
+        return;
+      }
+    });
+
     // Sidebar click handler — switch conversation
     sidebarList.addEventListener("click", (e: Event) => {
       const target = (e.target as HTMLElement).closest(
         ".llm-standalone-conv-item",
       ) as HTMLElement | null;
       if (!target) return;
+      // Ignore if click was on the delete button (handled above)
+      if ((e.target as HTMLElement).closest(".llm-standalone-conv-delete")) return;
       const key = Number(target.dataset.conversationKey);
       if (!key || key === activeConversationKey) return;
 
