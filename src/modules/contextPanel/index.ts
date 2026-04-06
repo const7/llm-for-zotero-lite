@@ -71,6 +71,7 @@ import { getEditableSelectionFromDocument } from "./noteSelection";
 export { openStandaloneChat } from "./standaloneWindow";
 import {
   isStandaloneWindowActive,
+  notifyStandaloneItemChanged,
   renderStandalonePlaceholder,
 } from "./standaloneWindow";
 
@@ -120,9 +121,12 @@ export function registerReaderContextPanel() {
       setEnabled(true);
       ztoolkit.log(`LLM: panel init tabType=${tabType}`);
     },
-    onItemChange: ({ setEnabled, tabType }) => {
+    onItemChange: ({ setEnabled, tabType, item }) => {
       setEnabled(true);
-      if (isStandaloneWindowActive()) return true;
+      if (isStandaloneWindowActive()) {
+        notifyStandaloneItemChanged(item || null);
+        return true;
+      }
       ztoolkit.log(`LLM: panel itemChange tabType=${tabType}`);
       // Refresh the cached tab ID (side effect of getActiveReaderForSelectedTab)
       getActiveReaderForSelectedTab();

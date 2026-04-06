@@ -665,8 +665,8 @@
   min-width: 48px;
   padding: 10px 0;
   gap: 4px;
-  background: color-mix(in srgb, var(--material-background) 82%, black 18%);
-  border-right: 1px solid color-mix(in srgb, var(--stroke-secondary) 50%, transparent);
+  background: color-mix(in srgb, var(--material-sidepane) 90%, black 10%);
+  border-right: 1px solid var(--stroke-secondary);
 }
 
 .llm-standalone-sidebar[data-sidebar-state="collapsed"] .llm-standalone-icon-strip {
@@ -867,6 +867,13 @@
   height: auto;
   flex: 1 1 0;
   min-height: 200px;
+}
+
+/* Centered max-width for standalone chat content */
+[data-standalone="true"].llm-panel {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 5px 24px;
 }
 
 .llm-popout-btn::before {

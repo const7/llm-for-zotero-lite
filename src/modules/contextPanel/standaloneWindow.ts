@@ -72,6 +72,14 @@ export function isStandaloneWindowActive(): boolean {
   return Boolean(getStandaloneSessionWindow());
 }
 
+// Callback registered by initWindow for item-change notifications.
+let standaloneItemChangeHandler: ((item: Zotero.Item | null) => void) | null = null;
+
+/** Called by index.ts onItemChange when the user switches paper tabs. */
+export function notifyStandaloneItemChanged(item: Zotero.Item | null): void {
+  standaloneItemChangeHandler?.(item);
+}
+
 function isStandaloneTrackedBody(body: Element): boolean {
   const standaloneWin = getStandaloneSessionWindow();
   if (standaloneWin && body.ownerDocument === standaloneWin.document) {
@@ -850,6 +858,25 @@ export function openStandaloneChat(options?: {
       handleResize();
     }
 
+    // Listen for paper tab changes in the main Zotero window.
+    // When the user switches to a different paper, update the standalone chat.
+    standaloneItemChangeHandler = (rawItem: Zotero.Item | null) => {
+      if (cancelled || standaloneMode !== "paper") return;
+      const resolved = resolveInitialPanelItemState(rawItem);
+      const newBasePaper = resolved.basePaperItem ||
+        (rawItem ? resolveConversationBaseItem(rawItem) : null);
+      if (!newBasePaper) return;
+      // Skip if same paper
+      const newPaperID = Number(newBasePaper.id || 0);
+      const oldPaperID = Number(currentBasePaperItem?.id || 0);
+      if (newPaperID > 0 && newPaperID === oldPaperID) return;
+      // Switch to the new paper
+      currentBasePaperItem = newBasePaper;
+      currentPaperItem = resolved.item || newBasePaper;
+      mountChatPanel(currentPaperItem);
+      void renderSidebar();
+    };
+
     // Initial mount — preserve the source panel mode/item when available
     ztoolkit.log(
       "LLM: standalone mounting initial item",
@@ -886,6 +913,7 @@ export function openStandaloneChat(options?: {
 
   const cleanupWindow = () => {
     cancelled = true;
+    standaloneItemChangeHandler = null;
     setStandalonePending(false);
     // Remove the standalone window's content area from panel tracking
     const root = newWin.document?.getElementById(
