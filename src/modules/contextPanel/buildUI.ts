@@ -481,18 +481,8 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     t("Send multiple PDF pages"),
     t("Select pages from the open PDF"),
   );
-  const slashCollectionBtn = makeSlashItem(
-    "llm-slash-collection-option",
-    t("Select collection"),
-    t("Add a Zotero collection as context"),
-  );
-  const slashLitReviewBtn = makeSlashItem(
-    "llm-slash-lit-review-option",
-    t("Literature review"),
-    t("Launch a literature review workflow"),
-  );
   if (isStandaloneBody && isGlobalMode) {
-    slashList.append(slashUploadBtn, slashReferenceBtn, slashCollectionBtn, slashLitReviewBtn);
+    slashList.append(slashUploadBtn, slashReferenceBtn);
   } else {
     slashList.append(slashUploadBtn, slashReferenceBtn, slashPdfPageBtn, slashPdfMultiplePagesBtn);
   }

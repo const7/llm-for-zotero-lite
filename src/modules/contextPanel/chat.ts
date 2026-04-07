@@ -55,6 +55,7 @@ import {
   selectedImageCache,
   selectedFileAttachmentCache,
   selectedPaperContextCache,
+  selectedCollectionContextCache,
   paperContextModeOverrides,
   activeContextPanels,
   activeContextPanelStateSync,
@@ -2174,7 +2175,13 @@ export async function retryLatestAssistantResponse(
       signal: currentAbortController?.signal,
       setStatusSafely,
     });
-    const combinedContext = contextPlan.combinedContext;
+    let combinedContext = contextPlan.combinedContext;
+    // Append collection scope context if any collections are selected
+    const retrySelectedCollections = selectedCollectionContextCache.get(item.id) || [];
+    if (retrySelectedCollections.length > 0) {
+      const collectionNames = retrySelectedCollections.map((c) => c.name).join(", ");
+      combinedContext = `${combinedContext}\n\n[Selected Zotero collections as context scope: ${collectionNames}]`;
+    }
     retryPair.userMessage.paperContexts = contextPlan.paperContexts.length
       ? contextPlan.paperContexts
       : undefined;
@@ -3061,7 +3068,13 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
       signal: currentAbortController?.signal,
       setStatusSafely,
     });
-    const combinedContext = contextPlan.combinedContext;
+    let combinedContext = contextPlan.combinedContext;
+    // Append collection scope context if any collections are selected
+    const selectedCollections = selectedCollectionContextCache.get(item.id) || [];
+    if (selectedCollections.length > 0) {
+      const collectionNames = selectedCollections.map((c) => c.name).join(", ");
+      combinedContext = `${combinedContext}\n\n[Selected Zotero collections as context scope: ${collectionNames}]`;
+    }
     userMessage.paperContexts = contextPlan.paperContexts.length
       ? contextPlan.paperContexts
       : undefined;

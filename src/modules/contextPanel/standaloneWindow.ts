@@ -27,6 +27,7 @@ import { createElement, HTML_NS } from "../../utils/domHelpers";
 import { t } from "../../utils/i18n";
 import {
   createGlobalConversation,
+  createPaperConversation,
   ensureGlobalConversationExists,
   clearConversation as clearStoredConversation,
   deleteGlobalConversation,
@@ -150,7 +151,8 @@ function restoreEmbeddedPanelsAfterStandaloneClose(excludedBody?: Element | null
     void (async () => {
       try {
         if (resolved.item) await ensureConversationLoaded(resolved.item);
-        await renderShortcuts(body as Element, resolved.item);
+        const shortcutMode = resolveDisplayConversationKind(resolved.item) === "global" ? "library" : "paper";
+        await renderShortcuts(body as Element, resolved.item, shortcutMode);
         refreshChat(body as Element, resolved.item);
       } catch (err) {
         ztoolkit.log("LLM: side panel restore failed", err);
@@ -628,7 +630,8 @@ export function openStandaloneChat(options?: {
         refreshChat(contentArea, item);
         applyPanelFontScale(llmMain);
         applyPanelFontScale(root);
-        void renderShortcuts(contentArea, item);
+        const shortcutMode = resolveDisplayConversationKind(item) === "global" ? "library" : "paper";
+        void renderShortcuts(contentArea, item, shortcutMode);
       } catch (err) {
         ztoolkit.log("LLM: standalone mountChatPanel sync failed", err);
       }
@@ -984,6 +987,10 @@ export function openStandaloneChat(options?: {
     // Icon strip handlers — new chat
     iconNewChat.addEventListener("click", async () => {
       try {
+        // Skip if the current conversation is already empty (no user messages)
+        const currentHistory = chatHistory.get(activeConversationKey) || [];
+        if (!currentHistory.some((m) => m.role === "user")) return;
+
         if (standaloneMode === "open") {
           const newKey = await createGlobalConversation(libraryID);
           if (!newKey || cancelled) return;
@@ -993,10 +1000,20 @@ export function openStandaloneChat(options?: {
           mountChatPanel(newItem);
           await renderSidebar();
         } else {
-          // Paper chat — mount with the base paper item (creates new session)
+          // Paper chat — create a new conversation, then mount
           if (currentBasePaperItem) {
-            activeConversationKey = 0;
-            mountChatPanel(currentBasePaperItem);
+            const paperId = Number(currentBasePaperItem.id || 0);
+            const summary = await createPaperConversation(libraryID, paperId);
+            if (!summary?.conversationKey || cancelled) return;
+            const newKey = summary.conversationKey;
+            const newItem = createPaperPortalItem(
+              currentBasePaperItem,
+              newKey,
+              summary.sessionVersion,
+            );
+            activeConversationKey = newKey;
+            mountChatPanel(newItem);
+            await renderSidebar();
           }
         }
       } catch (err) {

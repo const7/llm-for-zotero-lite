@@ -4124,6 +4124,51 @@ label.llm-search-results-item:hover {
   transform: translateY(-1px);
 }
 
+/* Collection context chip */
+.llm-collection-context-chip {
+  flex: 0 0 auto;
+  max-width: 100%;
+  width: fit-content;
+}
+
+.llm-collection-chip-label {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 4px 3px 8px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fill-secondary);
+  font-size: var(--llm-fs-12);
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.llm-collection-context-chip:hover .llm-collection-chip-label {
+  color: var(--fill-primary);
+}
+
+.llm-collection-chip-header {
+  gap: 0;
+  padding-right: 4px;
+  cursor: default;
+}
+
+.llm-collection-chip-header .llm-collection-clear {
+  display: grid;
+  place-items: center;
+  align-self: center;
+  width: 14px;
+  min-width: 14px;
+  font-size: var(--llm-fs-12);
+  line-height: 1;
+  padding: 0;
+  margin-left: -2px;
+  transform: translateY(-1px);
+}
+
 /* Picker item-type icon (emoji) */
 .llm-paper-picker-item-icon {
   display: inline-flex;
@@ -4287,6 +4332,7 @@ label.llm-search-results-item:hover {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
+  position: relative;
   width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -4334,6 +4380,20 @@ label.llm-search-results-item:hover {
 .llm-paper-picker-group-row {
   grid-template-columns: minmax(0, 1fr);
   gap: 3px;
+}
+
+.llm-paper-picker-selected {
+  opacity: 0.5;
+}
+
+.llm-paper-picker-selected::after {
+  content: "\2713";
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: var(--llm-fs-12);
+  color: var(--fill-secondary);
 }
 
 .llm-paper-picker-group-row-main {

@@ -40,6 +40,7 @@ import {
   selectedFilePreviewExpandedCache,
   selectedPaperContextCache,
   selectedOtherRefContextCache,
+  selectedCollectionContextCache,
   paperContextModeOverrides,
   selectedPaperPreviewExpandedCache,
   pinnedSelectedTextKeys,
@@ -239,6 +240,7 @@ import type {
   AdvancedModelParams,
   PaperContextRef,
   OtherContextRef,
+  CollectionContextRef,
   PaperContextSendMode,
   PaperContentSourceMode,
   SelectedTextContext,
@@ -401,8 +403,6 @@ export function setupHandlers(
     slashReferenceOption,
     slashPdfPageOption,
     slashPdfMultiplePagesOption,
-    slashCollectionOption,
-    slashLitReviewOption,
     imagePreview,
     selectedContextList,
     previewStrip,
@@ -2312,6 +2312,52 @@ export function setupHandlers(
     list.appendChild(chip);
   };
 
+  const appendCollectionChip = (
+    ownerDoc: Document,
+    list: HTMLDivElement,
+    ref: CollectionContextRef,
+    removableIndex: number,
+  ) => {
+    const chip = createElement(
+      ownerDoc,
+      "div",
+      "llm-selected-context llm-collection-context-chip",
+    );
+    chip.dataset.collectionId = `${ref.collectionId}`;
+    chip.dataset.collectionIndex = `${removableIndex}`;
+    chip.classList.add("collapsed");
+
+    const chipHeader = createElement(
+      ownerDoc,
+      "div",
+      "llm-image-preview-header llm-selected-context-header llm-collection-chip-header",
+    );
+    const chipLabel = createElement(
+      ownerDoc,
+      "span",
+      "llm-collection-chip-label",
+      {
+        textContent: `\u{1F5C2}\uFE0F ${ref.name}`,
+        title: `Collection: ${ref.name}`,
+      },
+    );
+    const removeBtn = createElement(
+      ownerDoc,
+      "button",
+      "llm-remove-img-btn llm-collection-clear",
+      {
+        type: "button",
+        textContent: "\u00D7",
+        title: `Remove ${ref.name}`,
+      },
+    ) as HTMLButtonElement;
+    removeBtn.dataset.collectionIndex = `${removableIndex}`;
+    removeBtn.setAttribute("aria-label", `Remove ${ref.name}`);
+    chipHeader.append(chipLabel, removeBtn);
+    chip.appendChild(chipHeader);
+    list.appendChild(chip);
+  };
+
   const updatePaperPreview = () => {
     if (!item || !paperPreview || !paperPreviewList) return;
     closePaperChipMenu();
@@ -2320,10 +2366,12 @@ export function setupHandlers(
       selectedPaperContextCache.get(itemId) || [],
     );
     const selectedOtherRefs = selectedOtherRefContextCache.get(itemId) || [];
+    const selectedCollections = selectedCollectionContextCache.get(itemId) || [];
     const autoLoadedPaperContext = resolveAutoLoadedPaperContext();
     const hasAnyContext =
       selectedPapers.length > 0 ||
       selectedOtherRefs.length > 0 ||
+      selectedCollections.length > 0 ||
       !!autoLoadedPaperContext;
     if (!hasAnyContext) {
       paperPreview.style.display = "none";
@@ -2372,6 +2420,9 @@ export function setupHandlers(
     });
     selectedOtherRefs.forEach((ref, index) => {
       appendOtherRefChip(ownerDoc, paperPreviewList, ref, index);
+    });
+    selectedCollections.forEach((ref, index) => {
+      appendCollectionChip(ownerDoc, paperPreviewList, ref, index);
     });
   };
 
@@ -4986,6 +5037,7 @@ export function setupHandlers(
       action: reuseReason ? "reuse" : "create",
       reason: reuseReason || "new",
     });
+
     await switchPaperConversation(targetConversationKey);
     if (status) {
       setStatus(
@@ -7105,7 +7157,7 @@ export function setupHandlers(
   };
 
   type ActiveSlashToken = PaperSearchSlashToken;
-  type PaperPickerMode = "browse" | "search" | "empty";
+  type PaperPickerMode = "browse" | "search" | "empty" | "collection-browse";
   type PaperPickerRow =
     | {
         kind: "collection";
@@ -7778,6 +7830,15 @@ export function setupHandlers(
         e.stopPropagation();
         consumeActiveActionToken();
         closeSlashMenu();
+        // UI-driven actions: handle directly instead of inserting a command token
+        if (action.name === "select_collection") {
+          void openCollectionOnlyPicker();
+          return;
+        }
+        if (action.name === "literature_review") {
+          triggerLiteratureReviewPrompt();
+          return;
+        }
         void insertCommandToken(action);
       });
       list.insertBefore(btn, firstBase);
@@ -7956,6 +8017,32 @@ export function setupHandlers(
       registerCollection(collection);
     }
   };
+  /** Sets the picker to collection-only mode (no papers shown). */
+  const setPaperPickerCollectionsOnly = (
+    collections: PaperBrowseCollectionCandidate[],
+  ): void => {
+    paperPickerMode = collections.length ? "collection-browse" : "empty";
+    paperPickerEmptyMessage = t("No collections available.");
+    paperPickerGroups = [];
+    paperPickerCollections = collections;
+    paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
+    paperPickerCollectionById = new Map<
+      number,
+      PaperBrowseCollectionCandidate
+    >();
+    paperPickerExpandedPaperKeys = new Set<number>();
+    paperPickerExpandedCollectionKeys = new Set<number>();
+
+    const registerCollection = (collection: PaperBrowseCollectionCandidate) => {
+      paperPickerCollectionById.set(collection.collectionId, collection);
+      for (const child of collection.childCollections) {
+        registerCollection(child);
+      }
+    };
+    for (const collection of collections) {
+      registerCollection(collection);
+    }
+  };
   const rebuildPaperPickerRows = () => {
     const rows: PaperPickerRow[] = [];
     const appendPaperRow = (
@@ -7998,6 +8085,23 @@ export function setupHandlers(
 
     if (paperPickerMode === "browse") {
       appendCollectionRows(paperPickerCollections, 0);
+    } else if (paperPickerMode === "collection-browse") {
+      // Collection-only mode: show collections (with hierarchy) but no papers
+      const appendCollectionRowsOnly = (
+        collections: PaperBrowseCollectionCandidate[],
+        depth: number,
+      ) => {
+        for (const collection of collections) {
+          rows.push({
+            kind: "collection",
+            collectionId: collection.collectionId,
+            depth,
+          });
+          if (!isPaperPickerCollectionExpanded(collection.collectionId)) continue;
+          appendCollectionRowsOnly(collection.childCollections, depth + 1);
+        }
+      };
+      appendCollectionRowsOnly(paperPickerCollections, 0);
     } else if (paperPickerMode === "search") {
       paperPickerGroups.forEach((group) => {
         appendPaperRow(group, 0);
@@ -8225,7 +8329,8 @@ export function setupHandlers(
     if (!selectedGroup) return false;
     const selectedAttachment = selectedGroup.attachments[attachmentIndex];
     if (!selectedAttachment) return false;
-    consumeActiveSlashToken();
+    // Do NOT consume the @ token or close the picker — keep it open for multi-select.
+    // The picker closes when the user clicks outside, presses Escape, or removes the @ token.
     const contentType = selectedAttachment.contentType;
     const kind = resolvePickerItemKind(contentType);
     ztoolkit.log("LLM: Picker selection", {
@@ -8257,14 +8362,59 @@ export function setupHandlers(
         refKind: kind === "figure" ? "figure" : "other",
       });
     }
-    closePaperPicker();
+    // Re-render to show visual feedback (selected state) while keeping picker open
+    renderPaperPicker();
     inputBox.focus({ preventScroll: true });
     return true;
+  };
+  /** Selects a collection from the collection-only picker and adds it as context. */
+  const selectCollectionFromPicker = (collectionId: number): boolean => {
+    if (!item) return false;
+    const collection = getPaperPickerCollectionById(collectionId);
+    if (!collection) return false;
+    const libraryID = getCurrentLibraryID();
+    const ref: CollectionContextRef = {
+      collectionId: collection.collectionId,
+      name: collection.name,
+      libraryID,
+    };
+    const existing = selectedCollectionContextCache.get(item.id) || [];
+    if (existing.some((e) => e.collectionId === ref.collectionId)) {
+      if (status) setStatus(status, t("Collection already selected"), "warning");
+      return false;
+    }
+    selectedCollectionContextCache.set(item.id, [...existing, ref]);
+    closePaperPicker();
+    updatePaperPreviewPreservingScroll();
+    inputBox.focus({ preventScroll: true });
+    if (status) setStatus(status, t("Collection context added."), "ready");
+    return true;
+  };
+  /** Opens the paper picker in collection-only mode (no papers visible). */
+  const openCollectionOnlyPicker = async () => {
+    if (!item || !paperPicker || !paperPickerList) return;
+    const libraryID = getCurrentLibraryID();
+    if (!libraryID) return;
+    const collections = await browseAllItemCandidates(libraryID);
+    setPaperPickerCollectionsOnly(collections);
+    paperPickerActiveRowIndex = 0;
+    rebuildPaperPickerRows();
+    renderPaperPicker();
+    if (status) {
+      setStatus(
+        status,
+        t("Select a collection to add as context."),
+        "ready",
+      );
+    }
   };
   const selectPaperPickerRowAt = (index: number): boolean => {
     const row = getPaperPickerRowAt(index);
     if (!row) return false;
     if (row.kind === "collection") {
+      if (paperPickerMode === "collection-browse") {
+        return selectCollectionFromPicker(row.collectionId);
+      }
       togglePaperPickerCollectionExpanded(row.collectionId);
       renderPaperPicker();
       return true;
@@ -8428,6 +8578,25 @@ export function setupHandlers(
       option.tabIndex = -1;
       option.style.paddingLeft = `${9 + row.depth * 14}px`;
 
+      // Visual feedback: mark already-selected papers/attachments
+      if (item && (row.kind === "paper" || row.kind === "attachment")) {
+        const selectedPapers = selectedPaperContextCache.get(item.id) || [];
+        const selectedOtherRefs = selectedOtherRefContextCache.get(item.id) || [];
+        const group = getPaperPickerGroupByItemId(row.itemId);
+        if (group) {
+          const attachIdx = row.kind === "attachment" ? row.attachmentIndex : 0;
+          const att = group.attachments[attachIdx];
+          if (att) {
+            const isSelected =
+              selectedPapers.some((p) => p.contextItemId === att.contextItemId) ||
+              selectedOtherRefs.some((r) => r.contextItemId === att.contextItemId);
+            if (isSelected) {
+              option.classList.add("llm-paper-picker-selected");
+            }
+          }
+        }
+      }
+
       if (row.kind === "collection") {
         const collection = getPaperPickerCollectionById(row.collectionId);
         if (!collection) return;
@@ -8579,6 +8748,10 @@ export function setupHandlers(
         e.stopPropagation();
         paperPickerActiveRowIndex = rowIndex;
         if (row.kind === "collection") {
+          if (paperPickerMode === "collection-browse") {
+            selectCollectionFromPicker(row.collectionId);
+            return;
+          }
           togglePaperPickerCollectionExpanded(row.collectionId);
           renderPaperPicker();
           return;
@@ -9812,6 +9985,30 @@ export function setupHandlers(
     });
   }
 
+  /** Inserts a structured literature review prompt and activates agent mode. */
+  const triggerLiteratureReviewPrompt = () => {
+    if (!item) return;
+    if (getCurrentRuntimeMode() !== "agent" && getAgentModeEnabled()) {
+      setCurrentRuntimeMode("agent");
+    }
+    const prompt = t("Please conduct a literature review on the following topic:\n\n[Enter your research topic here]\n\nPlease search my library, identify relevant papers, summarize key findings, and highlight research gaps.");
+    inputBox.value = prompt;
+    persistDraftInputForCurrentConversation();
+    const placeholderStart = prompt.indexOf("[");
+    const placeholderEnd = prompt.indexOf("]") + 1;
+    if (placeholderStart >= 0 && placeholderEnd > placeholderStart) {
+      inputBox.setSelectionRange(placeholderStart, placeholderEnd);
+    }
+    inputBox.focus({ preventScroll: true });
+    if (status) {
+      setStatus(
+        status,
+        t("Edit the prompt and press Send to start your literature review."),
+        "ready",
+      );
+    }
+  };
+
   const openReferenceSlashFromMenu = () => {
     if (!item) return;
     // Paper picker is now triggered by '@'
@@ -9898,57 +10095,6 @@ export function setupHandlers(
       consumeActiveActionToken();
       closeSlashMenu();
       openReferenceSlashFromMenu();
-    });
-  }
-
-  if (slashCollectionOption) {
-    slashCollectionOption.addEventListener("click", async (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item) return;
-      consumeActiveActionToken();
-      closeSlashMenu();
-      // Reuse the reference picker in collection-browse mode
-      openReferenceSlashFromMenu();
-      if (status) {
-        setStatus(
-          status,
-          t("Browse and select a collection to add its papers as context."),
-          "ready",
-        );
-      }
-    });
-  }
-
-  if (slashLitReviewOption) {
-    slashLitReviewOption.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item) return;
-      consumeActiveActionToken();
-      closeSlashMenu();
-      // Auto-activate agent mode for literature review
-      if (getCurrentRuntimeMode() !== "agent" && getAgentModeEnabled()) {
-        setCurrentRuntimeMode("agent");
-      }
-      // Insert a structured literature review prompt
-      const prompt = t("Please conduct a literature review on the following topic:\n\n[Enter your research topic here]\n\nPlease search my library, identify relevant papers, summarize key findings, and highlight research gaps.");
-      inputBox.value = prompt;
-      persistDraftInputForCurrentConversation();
-      // Select the placeholder text so user can easily replace it
-      const placeholderStart = prompt.indexOf("[");
-      const placeholderEnd = prompt.indexOf("]") + 1;
-      if (placeholderStart >= 0 && placeholderEnd > placeholderStart) {
-        inputBox.setSelectionRange(placeholderStart, placeholderEnd);
-      }
-      inputBox.focus({ preventScroll: true });
-      if (status) {
-        setStatus(
-          status,
-          t("Edit the prompt and press Send to start your literature review."),
-          "ready",
-        );
-      }
     });
   }
 
@@ -10763,6 +10909,28 @@ export function setupHandlers(
         return;
       }
 
+      // Collection chip removal
+      const collectionClearBtn = target.closest(
+        ".llm-collection-clear",
+      ) as HTMLButtonElement | null;
+      if (collectionClearBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const index = Number.parseInt(collectionClearBtn.dataset.collectionIndex || "", 10);
+        const collections = selectedCollectionContextCache.get(item.id) || [];
+        if (Number.isFinite(index) && index >= 0 && index < collections.length) {
+          const next = collections.filter((_, i) => i !== index);
+          if (next.length) {
+            selectedCollectionContextCache.set(item.id, next);
+          } else {
+            selectedCollectionContextCache.delete(item.id);
+          }
+          updatePaperPreviewPreservingScroll();
+          if (status) setStatus(status, t("Collection context removed."), "ready");
+        }
+        return;
+      }
+
       // Paper chip removal
       const clearBtn = target.closest(
         ".llm-paper-context-clear",
@@ -11435,6 +11603,24 @@ export function setupHandlers(
   body.addEventListener("mousedown", dismissPinnedContextPanels, true);
   bodyWithPinnedDismiss.__llmPinnedContextDismissHandler =
     dismissPinnedContextPanels;
+
+  // Library shortcut action triggers (dispatched from shortcuts.ts)
+  body.addEventListener("llm-shortcut-action", ((e: CustomEvent) => {
+    const trigger = e.detail?.actionTrigger;
+    if (!trigger || !item) return;
+    if (trigger === "select_collection") {
+      void openCollectionOnlyPicker();
+    } else if (trigger === "auto_tag") {
+      try {
+        const action = getAgentApi().listActions("library").find((a) => a.name === "auto_tag");
+        if (action) void executeAgentAction(action);
+      } catch { /* agent not initialized */ }
+    } else if (trigger === "literature_review") {
+      triggerLiteratureReviewPrompt();
+    } else if (trigger === "library_statistics") {
+      if (status) setStatus(status, t("Library Statistics is coming soon."), "ready");
+    }
+  }) as EventListener);
 
   // Cancel button
   if (cancelBtn) {

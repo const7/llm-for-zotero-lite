@@ -8,6 +8,7 @@ import type {
   PaperContextRef,
   NoteContextRef,
   OtherContextRef,
+  CollectionContextRef,
   GlobalConversationSummary,
   PaperConversationSummary,
 } from "../../shared/types";
@@ -21,6 +22,7 @@ export type {
   PaperContextRef,
   NoteContextRef,
   OtherContextRef,
+  CollectionContextRef,
   GlobalConversationSummary,
   PaperConversationSummary,
 } from "../../shared/types";
