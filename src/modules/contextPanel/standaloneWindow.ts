@@ -7,6 +7,7 @@ import {
 } from "./state";
 import {
   resolveActiveLibraryID,
+  resolveActiveNoteSession,
   resolveDisplayConversationKind,
   resolveInitialPanelItemState,
   resolveConversationBaseItem,
@@ -614,6 +615,10 @@ export function openStandaloneChat(options?: {
         updateContentTitle();
 
         buildUI(contentArea, item);
+
+        // Sync left tab label: "Note editing" when in note mode, "Paper chat" otherwise
+        const noteSession = resolveActiveNoteSession(item);
+        paperTab.textContent = noteSession ? t("Note editing") : t("Paper chat");
 
         const llmMain = contentArea.querySelector("#llm-main") as HTMLElement | null;
         if (llmMain) llmMain.dataset.standalone = "true";

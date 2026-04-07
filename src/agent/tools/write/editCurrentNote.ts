@@ -163,17 +163,18 @@ export function createEditCurrentNoteTool(
       requiresConfirmation: true,
     },
     guidance: {
-      matches: (request) => Boolean(request.activeNoteContext),
+      matches: () => true,
       instruction:
-        "MANDATORY: When a note is open and the user asks to edit, rewrite, revise, polish, or update ANY text, you MUST call `edit_current_note` with mode 'edit'. NEVER output rewritten or edited text directly in chat — always use the tool so the user sees a diff review card. " +
-        "For edits, PREFER using `patches` (find-and-replace pairs) instead of `content` (full rewrite) — patches are much faster because you only send the changed parts. " +
-        "When the user asks to create a new note for a paper, call `edit_current_note` with mode 'create' with `content`. Always pass plain text or Markdown, never raw HTML.",
+        "When a note is open and the user asks to edit, rewrite, revise, polish, or update ANY text, call `edit_current_note` with mode 'edit'. NEVER output note text directly in chat. " +
+        "For edits, PREFER `patches` (find-and-replace pairs) over `content` (full rewrite). " +
+        "To create a new note, call `edit_current_note` with mode 'create' and `content`. " +
+        "Always pass plain text or Markdown, never raw HTML.",
     },
     presentation: {
       label: "Edit / Create Note",
       summaries: {
         onCall: "Preparing note changes",
-        onPending: "Waiting for confirmation on note changes",
+        onPending: "Waiting for confirmation on note edit",
         onApproved: "Applying note changes",
         onDenied: "Note changes cancelled",
         onSuccess: ({ content }) => {
@@ -184,6 +185,12 @@ export function createEditCurrentNoteTool(
           return title ? `Note saved: ${title}` : "Note saved";
         },
       },
+    },
+    shouldRequireConfirmation: async (input: EditCurrentNoteInput) => {
+      // Create mode: write directly, no confirmation needed
+      if (input.mode === "create") return false;
+      // Edit mode: always show diff preview for user review
+      return true;
     },
     acceptInheritedApproval: async (_input, approval) => {
       // Accept review-mode approvals from search_literature_online review cards
@@ -354,6 +361,17 @@ export function createEditCurrentNoteTool(
       );
 
       if (input.mode === "create") {
+        // Auto-fallback to standalone if no parent item is resolvable
+        // (e.g. library chat mode with no active paper)
+        if (input.target !== "standalone") {
+          const resolvedItem = input.targetItemId
+            ? zoteroGateway.getItem(input.targetItemId)
+            : zoteroGateway.getItem(context.request.activeItemId) || context.item;
+          if (!resolvedItem) {
+            input.target = "standalone";
+          }
+        }
+
         if (!hasLocalImages) {
           // No images — use the standard mutation service path
           const { result } = await executeAndRecordUndo(

@@ -688,7 +688,7 @@ export function setupHandlers(
       // [webchat] Don't overwrite — applyWebChatModeUI manages the chip in webchat mode
       if (!modeChipBtn.querySelector(".llm-webchat-dot")) {
         const currentLabel = noteSession
-          ? (mode === "global" ? "Open note" : "Paper note")
+          ? "Note editing"
           : (mode === "global" ? "Library chat" : "Paper chat");
         modeChipBtn.textContent = currentLabel;
         modeChipBtn.title = noteSession

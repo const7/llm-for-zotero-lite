@@ -22,6 +22,7 @@ import analyzeFiguresRaw from "./analyze-figures.md";
 import simplePaperQaRaw from "./simple-paper-qa.md";
 import evidenceBasedQaRaw from "./evidence-based-qa.md";
 import noteFromPaperRaw from "./note-from-paper.md";
+import noteEditingRaw from "./note-editing.md";
 import literatureReviewRaw from "./literature-review.md";
 
 export { matchesSkill } from "./skillLoader";
@@ -35,6 +36,7 @@ const BUILTIN_SKILLS: AgentSkill[] = [
   parseSkill(simplePaperQaRaw),
   parseSkill(evidenceBasedQaRaw),
   parseSkill(noteFromPaperRaw),
+  parseSkill(noteEditingRaw),
   parseSkill(literatureReviewRaw),
 ];
 

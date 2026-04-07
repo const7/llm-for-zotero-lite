@@ -189,9 +189,9 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
 
   // In sidepanels, the mode chip is a non-clickable indicator (always "Paper chat").
   // In the standalone window, it shows "Library chat".
-  const modeChipLabel = isStandaloneBody
-    ? (activeNoteSession ? t("Open note") : t("Library chat"))
-    : (activeNoteSession ? t("Paper note") : t("Paper chat"));
+  const modeChipLabel = activeNoteSession
+    ? t("Note editing")
+    : (isStandaloneBody ? t("Library chat") : t("Paper chat"));
   const modeChipBtn = createElement(doc, "button", "llm-mode-chip", {
     id: "llm-mode-chip",
     type: "button",
