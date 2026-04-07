@@ -322,9 +322,16 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
           selectedFiles,
         );
     const runtimeMode: ChatRuntimeMode = deps.isAgentMode() ? "agent" : "chat";
-    const displayQuestion = primarySelectedText
-      ? resolvedPromptText
-      : text || resolvedPromptText;
+    // Check for command action metadata (set by handleInlineCommand for /command display)
+    const commandAction = deps.inputBox.dataset.commandAction;
+    const commandParams = deps.inputBox.dataset.commandParams ?? "";
+    if (commandAction) {
+      delete deps.inputBox.dataset.commandAction;
+      delete deps.inputBox.dataset.commandParams;
+    }
+    const displayQuestion = commandAction
+      ? (commandParams ? `/${commandAction} ${commandParams}` : `/${commandAction}`)
+      : (primarySelectedText ? resolvedPromptText : text || resolvedPromptText);
 
     const titleSeed =
       deps.normalizeConversationTitleSeed(text) ||

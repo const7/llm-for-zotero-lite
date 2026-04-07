@@ -13,20 +13,20 @@ When the user asks to compare two or more papers, do NOT read entire paper conte
 ### Strategy
 
 **Step 1 — Batch front matter (abstracts + intros):**
-Call `inspect_pdf` with `operation:'front_matter'` and a `targets` array listing all papers to compare (up to 6). This returns ~500 tokens per paper in one call, giving you enough to understand each paper's scope, claims, and approach.
+Call `read_paper` with a `targets` array listing all papers to compare (up to 6). This returns ~500 tokens per paper in one call, giving you enough to understand each paper's scope, claims, and approach.
 
 **Step 2 — Targeted evidence retrieval:**
-Call `inspect_pdf` with `operation:'retrieve_evidence'` and a focused question about the comparison dimension the user cares about (e.g. "What methods does this paper use?", "What are the main results?"). This returns the most relevant passages across all papers, globally ranked and deduplicated (~1500 tokens total).
+Call `search_paper` with a focused question about the comparison dimension the user cares about (e.g. "What methods does this paper use?", "What are the main results?"). This returns the most relevant passages across all papers, globally ranked and deduplicated (~1500 tokens total).
 
 **Step 3 — Deeper follow-up (only if needed):**
-If the user asks about a specific aspect not covered by the retrieved evidence, make another `retrieve_evidence` call with a more specific question. Avoid `read_chunks` unless the user asks for a specific section.
+If the user asks about a specific aspect not covered by the retrieved evidence, make another `search_paper` call with a more specific question. Avoid `read_paper(chunkIndexes:[...])` unless the user asks for a specific section.
 
 ### MinerU cache optimization
-Before reading PDFs, check if papers have MinerU cache available (visible in `read_library` results as `mineruCacheDir`). When available, prefer reading `file_io(read, '{mineruCacheDir}/full.md')` — this gives high-quality structured markdown with preserved equations and figures, and is faster than `inspect_pdf`.
+Before reading PDFs, check if papers have MinerU cache available (visible in `read_library` results as `mineruCacheDir`). When available, prefer reading `file_io(read, '{mineruCacheDir}/full.md')` — this gives high-quality structured markdown with preserved equations and figures, and is faster than `read_paper`.
 
 ### Key rules
-- ALWAYS batch papers in the `targets` array — do not call `inspect_pdf` separately for each paper.
-- Use `front_matter` first (structured overview), then `retrieve_evidence` (focused detail). This two-step approach keeps context small.
-- Do NOT use `read_chunks` or read full MinerU files for all papers at once — read targeted sections only.
+- ALWAYS batch papers in the `targets` array — do not call `read_paper` separately for each paper.
+- Use `read_paper` first (structured overview), then `search_paper` (focused detail). This two-step approach keeps context small.
+- Do NOT use `read_paper(chunkIndexes:[...])` or read full MinerU files for all papers at once — read targeted sections only.
 - For 2-3 papers, the total context cost should be ~2000-3000 tokens. For 4-6 papers, ~3000-5000 tokens.
 - Synthesize comparisons from the retrieved excerpts. If something is missing, make one more targeted retrieval — don't read everything "just in case".

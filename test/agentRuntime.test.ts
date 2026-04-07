@@ -324,7 +324,7 @@ describe("AgentRuntime", function () {
       const registry = new AgentToolRegistry();
       registry.register({
         spec: {
-          name: "inspect_pdf",
+          name: "view_pdf_pages",
           description: "inspect pdf",
           inputSchema: { type: "object" },
           mutability: "read",
@@ -375,7 +375,7 @@ describe("AgentRuntime", function () {
                   calls: [
                     {
                       id: "call-1",
-                      name: "inspect_pdf",
+                      name: "view_pdf_pages",
                       arguments: {},
                     },
                   ],
@@ -385,7 +385,7 @@ describe("AgentRuntime", function () {
                     tool_calls: [
                       {
                         id: "call-1",
-                        name: "inspect_pdf",
+                        name: "view_pdf_pages",
                         arguments: {},
                       },
                     ],

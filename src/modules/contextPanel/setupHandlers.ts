@@ -7639,7 +7639,8 @@ export function setupHandlers(
     inputBox.placeholder = ""; // the badge itself serves as context
     inputBox.value = "";
     inputBox.focus({ preventScroll: true });
-    inputBox.dispatchEvent(new Event("input", { bubbles: true }));
+    const EvtCtor = (inputBox.ownerDocument?.defaultView as any)?.Event ?? Event;
+    inputBox.dispatchEvent(new EvtCtor("input", { bubbles: true }));
   };
 
   /** Returns the active command action if a badge is present, null otherwise. */
@@ -7745,6 +7746,29 @@ export function setupHandlers(
    * Called from the send flow when a command chip is active.
    */
   const handleInlineCommand = async (actionName: string, params: string): Promise<void> => {
+    // Commands that go through agent chat for full trace visibility
+    if (actionName === "library_statistics" || actionName === "literature_review") {
+      if (getCurrentRuntimeMode() !== "agent" && getAgentModeEnabled()) {
+        setCurrentRuntimeMode("agent");
+      }
+      let prompt: string;
+      if (actionName === "library_statistics") {
+        prompt = params.trim()
+          ? `Show my library statistics: ${params.trim()}`
+          : "Show my library statistics and give me a comprehensive overview.";
+      } else {
+        prompt = params.trim()
+          ? `Conduct a literature review on: ${params.trim()}`
+          : "I'd like to do a literature review.";
+      }
+      // Store command metadata for display formatting in the chat bubble
+      inputBox.dataset.commandAction = actionName;
+      inputBox.dataset.commandParams = params.trim();
+      inputBox.value = prompt;
+      await doSend();
+      return;
+    }
+
     let allActions: ActionPickerItem[] = [];
     try {
       await initAgentSubsystem();
@@ -7833,10 +7857,6 @@ export function setupHandlers(
         // UI-driven actions: handle directly instead of inserting a command token
         if (action.name === "select_collection") {
           void openCollectionOnlyPicker();
-          return;
-        }
-        if (action.name === "literature_review") {
-          triggerLiteratureReviewPrompt();
           return;
         }
         void insertCommandToken(action);
@@ -9459,7 +9479,8 @@ export function setupHandlers(
       const params = inputBox?.value?.trim() ?? "";
       clearCommandChip(); // also restores placeholder
       inputBox.value = "";
-      inputBox.dispatchEvent(new Event("input", { bubbles: true }));
+      const EvtCtor2 = (inputBox.ownerDocument?.defaultView as any)?.Event ?? Event;
+      inputBox.dispatchEvent(new EvtCtor2("input", { bubbles: true }));
       persistDraftInputForCurrentConversation();
       void handleInlineCommand(chipAction.name, params);
       return;
@@ -9984,30 +10005,6 @@ export function setupHandlers(
       }
     });
   }
-
-  /** Inserts a structured literature review prompt and activates agent mode. */
-  const triggerLiteratureReviewPrompt = () => {
-    if (!item) return;
-    if (getCurrentRuntimeMode() !== "agent" && getAgentModeEnabled()) {
-      setCurrentRuntimeMode("agent");
-    }
-    const prompt = t("Please conduct a literature review on the following topic:\n\n[Enter your research topic here]\n\nPlease search my library, identify relevant papers, summarize key findings, and highlight research gaps.");
-    inputBox.value = prompt;
-    persistDraftInputForCurrentConversation();
-    const placeholderStart = prompt.indexOf("[");
-    const placeholderEnd = prompt.indexOf("]") + 1;
-    if (placeholderStart >= 0 && placeholderEnd > placeholderStart) {
-      inputBox.setSelectionRange(placeholderStart, placeholderEnd);
-    }
-    inputBox.focus({ preventScroll: true });
-    if (status) {
-      setStatus(
-        status,
-        t("Edit the prompt and press Send to start your literature review."),
-        "ready",
-      );
-    }
-  };
 
   const openReferenceSlashFromMenu = () => {
     if (!item) return;
@@ -11604,23 +11601,6 @@ export function setupHandlers(
   bodyWithPinnedDismiss.__llmPinnedContextDismissHandler =
     dismissPinnedContextPanels;
 
-  // Library shortcut action triggers (dispatched from shortcuts.ts)
-  body.addEventListener("llm-shortcut-action", ((e: CustomEvent) => {
-    const trigger = e.detail?.actionTrigger;
-    if (!trigger || !item) return;
-    if (trigger === "select_collection") {
-      void openCollectionOnlyPicker();
-    } else if (trigger === "auto_tag") {
-      try {
-        const action = getAgentApi().listActions("library").find((a) => a.name === "auto_tag");
-        if (action) void executeAgentAction(action);
-      } catch { /* agent not initialized */ }
-    } else if (trigger === "literature_review") {
-      triggerLiteratureReviewPrompt();
-    } else if (trigger === "library_statistics") {
-      if (status) setStatus(status, t("Library Statistics is coming soon."), "ready");
-    }
-  }) as EventListener);
 
   // Cancel button
   if (cancelBtn) {

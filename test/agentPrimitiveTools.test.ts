@@ -273,7 +273,7 @@ describe("primitive agent tools", function () {
     assert.include(systemText, "search_literature_online");
     assert.include(systemText, "query_library");
     assert.include(systemText, "read_library");
-    assert.include(systemText, "inspect_pdf");
+    assert.include(systemText, "read_paper");
     assert.include(systemText, "apply_tags");
     assert.include(
       systemText,

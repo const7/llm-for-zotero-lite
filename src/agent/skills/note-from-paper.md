@@ -15,7 +15,7 @@ notes, follow this efficient two-step workflow.
 
 **Step 1 — Read the paper:**
 - If `mineruCacheDir` is available: use `file_io(read, '{mineruCacheDir}/full.md')`.
-- Otherwise: use `inspect_pdf(operation:'front_matter')` for the overview, then optionally one `retrieve_evidence` call for key results/methods if the user wants detail beyond the abstract.
+- Otherwise: use `read_paper` for the overview, then optionally one `search_paper` call for key results/methods if the user wants detail beyond the abstract.
 
 **Step 2 — Create the note:**
 Call `edit_current_note(mode:'create')` with the note content. The user will
@@ -23,7 +23,7 @@ see a diff confirmation card.
 
 ### Key rules
 - NEVER output the note text in chat. Always use `edit_current_note` so the user gets a diff review.
-- Keep the read phase minimal: 1 call (MinerU) or 1–2 calls (inspect_pdf). Do not read the entire paper section by section.
+- Keep the read phase minimal: 1 call (MinerU) or 1–2 calls (read_paper/search_paper). Do not read the entire paper section by section.
 - The user can ask for changes after seeing the confirmation card.
 
 ### Budget

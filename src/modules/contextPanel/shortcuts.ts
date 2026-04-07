@@ -1,7 +1,6 @@
 import {
   config,
   BUILTIN_SHORTCUT_FILES,
-  LIBRARY_SHORTCUT_DEFS,
   MAX_EDITABLE_SHORTCUTS,
   CUSTOM_SHORTCUT_ID_PREFIX,
 } from "./constants";
@@ -50,32 +49,12 @@ export async function renderShortcuts(
 ) {
   shortcutRenderItemState.set(body, item);
 
-  // Library chat mode: render fixed action-trigger shortcuts
+  // Library chat mode: no shortcut buttons (actions available via / menu)
   if (mode === "library") {
     const container = body.querySelector(
       "#llm-shortcuts",
     ) as HTMLDivElement | null;
-    if (!container) return;
-    container.innerHTML = "";
-    const ownerDoc = body.ownerDocument;
-    if (!ownerDoc) return;
-    for (const def of LIBRARY_SHORTCUT_DEFS) {
-      const btn = ownerDoc.createElement("button");
-      btn.type = "button";
-      btn.className = "llm-shortcut-btn llm-action-btn llm-action-btn-secondary";
-      btn.textContent = def.label;
-      btn.title = def.label;
-      btn.dataset.actionTrigger = def.actionTrigger;
-      btn.addEventListener("click", () => {
-        body.dispatchEvent(
-          new CustomEvent("llm-shortcut-action", {
-            bubbles: true,
-            detail: { actionTrigger: def.actionTrigger },
-          }),
-        );
-      });
-      container.appendChild(btn);
-    }
+    if (container) container.innerHTML = "";
     return;
   }
 

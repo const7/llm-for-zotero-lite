@@ -120,7 +120,7 @@ describe("agentTrace render", function () {
         payload: {
           type: "tool_call",
           callId: "call-1",
-          name: "inspect_pdf",
+          name: "read_paper",
           args: { operation: "front_matter" },
         },
         createdAt: 1,
@@ -132,7 +132,7 @@ describe("agentTrace render", function () {
         payload: {
           type: "tool_result",
           callId: "call-1",
-          name: "inspect_pdf",
+          name: "read_paper",
           ok: true,
           content: { operation: "front_matter", results: [{}] },
         },
@@ -145,7 +145,7 @@ describe("agentTrace render", function () {
         payload: {
           type: "tool_call",
           callId: "call-2",
-          name: "inspect_pdf",
+          name: "search_paper",
           args: { operation: "retrieve_evidence" },
         },
         createdAt: 3,

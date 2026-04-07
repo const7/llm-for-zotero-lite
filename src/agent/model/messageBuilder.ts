@@ -5,7 +5,7 @@ import type {
 } from "../types";
 import { AGENT_PERSONA_INSTRUCTIONS } from "./agentPersona";
 import { buildAgentMemoryBlock } from "../store/conversationMemory";
-import { AGENT_SKILLS, matchesSkill } from "../skills";
+import { getAllSkills, matchesSkill } from "../skills";
 
 import { isTextOnlyModel } from "../../providers";
 
@@ -188,7 +188,7 @@ function collectGuidanceInstructions(
     const instruction = guidance.instruction.trim();
     if (instruction) instructions.add(instruction);
   }
-  for (const skill of AGENT_SKILLS) {
+  for (const skill of getAllSkills()) {
     if (!matchesSkill(skill, request)) continue;
     const instruction = skill.instruction.trim();
     if (instruction) instructions.add(instruction);
@@ -213,13 +213,13 @@ function buildAutoReadInstruction(request: AgentRuntimeRequest): string {
       "TURN RULE: Because the user marked specific paper(s) for full-text use on this turn, " +
       "your very first action MUST be to read the paper content. " +
       "All marked papers have MinerU cache — use `file_io(read, '{mineruCacheDir}/full.md')` for each. " +
-      "This is faster and gives better quality than inspect_pdf. " +
+      "This is faster and gives better quality than read_paper. " +
       "Do this before answering, even if the answer seems obvious."
     );
   }
   return (
     "TURN RULE: Because the user marked specific paper(s) for full-text use on this turn, " +
-    "your very first action MUST be to call `inspect_pdf` with operation:`front_matter` and target only those full-text papers. " +
+    "your very first action MUST be to call `read_paper` targeting only those full-text papers. " +
     "Do this before answering, even if the answer seems obvious. " +
     "Do not include retrieval-only papers in that mandatory first read."
   );

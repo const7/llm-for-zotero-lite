@@ -16,7 +16,8 @@ export type QueryLibraryInclude =
   | "metadata"
   | "attachments"
   | "tags"
-  | "collections";
+  | "collections"
+  | "abstract";
 
 export type QueryLibraryFilters = {
   unfiled?: boolean;
@@ -33,6 +34,7 @@ export type QueryLibraryFilters = {
 export type QueryLibraryItemResult = LibraryItemTarget & {
   metadata?: EditableArticleMetadataSnapshot | null;
   collections?: CollectionSummary[];
+  abstract?: string;
 };
 
 
@@ -78,6 +80,10 @@ function enrichPaperTarget(
       target.collectionIds,
     );
   }
+  if (includeField(include, "abstract") && !includeField(include, "metadata")) {
+    const item = zoteroGateway.getItem(target.itemId);
+    result.abstract = (item?.getField?.("abstractNote") as string) || "";
+  }
   return result;
 }
 
@@ -104,6 +110,10 @@ function enrichItemTarget(
   }
   if (includeField(include, "collections")) {
     result.collections = buildCollectionSummaries(zoteroGateway, target.collectionIds);
+  }
+  if (includeField(include, "abstract") && !includeField(include, "metadata")) {
+    const item = zoteroGateway.getItem(target.itemId);
+    result.abstract = (item?.getField?.("abstractNote") as string) || "";
   }
   return result;
 }
