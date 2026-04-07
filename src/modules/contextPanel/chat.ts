@@ -418,6 +418,30 @@ function getMessageSelectedTexts(message: Message): string[] {
   return normalizeSelectedTexts(message.selectedTexts, message.selectedText);
 }
 
+/**
+ * Renders user bubble content, detecting `/command` prefixes and showing them
+ * as inline badges for visual consistency with the input compose area.
+ */
+function renderUserBubbleContent(
+  bubble: HTMLElement,
+  text: string,
+  doc: Document,
+): void {
+  const match = text.match(/^\/(\S+)(\s[\s\S]*)?$/);
+  if (match) {
+    const badge = doc.createElement("span");
+    badge.className = "llm-command-badge";
+    badge.textContent = `/${match[1]}`;
+    bubble.appendChild(badge);
+    const rest = (match[2] || "").trim();
+    if (rest) {
+      bubble.appendChild(doc.createTextNode(` ${rest}`));
+    }
+  } else {
+    bubble.textContent = text;
+  }
+}
+
 function getMessageSelectedTextExpandedIndex(
   message: Message,
   count: number,
@@ -3974,7 +3998,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           conversationKey,
         );
       } else {
-        bubble.textContent = sanitizeText(msg.text || "");
+        renderUserBubbleContent(bubble, sanitizeText(msg.text || ""), doc);
         if (canEditUserPrompt) {
           bubble.classList.add("llm-bubble-editable");
           bubble.addEventListener("click", (e: Event) => {

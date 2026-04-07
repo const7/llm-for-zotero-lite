@@ -17,10 +17,10 @@ tool call, then answer.
 
 **Step 1 — Read the paper once:**
 - If `mineruCacheDir` is available: use `file_io(read, '{mineruCacheDir}/full.md')`. This gives you the entire parsed paper including abstract, introduction, and conclusions.
-- If no MinerU cache: use `inspect_pdf(operation:'front_matter')` for the paper. This returns the abstract, authors, and introduction — enough for most general questions.
+- If no MinerU cache: use `read_paper` for the paper. This returns the abstract, authors, and introduction — enough for most general questions.
 
 **Step 2 — Answer immediately.**
-Do NOT call `retrieve_evidence`, `read_chunks`, or any other tool unless the
+Do NOT call `search_paper`, `read_paper(chunkIndexes:[...])`, or any other tool unless the
 front matter genuinely does not contain the answer. For questions like "what is
 this about?", "who are the authors?", "summarize this paper", the front matter
 or MinerU markdown is sufficient.
@@ -28,5 +28,5 @@ or MinerU markdown is sufficient.
 ### When to escalate
 If (and only if) the user asks about something specific that the front matter
 does not cover (a particular experiment, a specific table, a named method, a
-result in a specific section), then make ONE targeted `retrieve_evidence` call
+result in a specific section), then make ONE targeted `search_paper` call
 and answer from that. Do not read the whole paper.

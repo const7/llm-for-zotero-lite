@@ -81,12 +81,6 @@ export const BUILTIN_SHORTCUT_FILES = [
   { id: "limitations", label: "Limitations", file: "limitations.txt" },
 ] as const;
 
-export const LIBRARY_SHORTCUT_DEFS = [
-  { id: "lib-stats", label: "Library Statistics", actionTrigger: "library_statistics" },
-  { id: "lib-add-collection", label: "Add Collection", actionTrigger: "select_collection" },
-  { id: "lib-auto-tag", label: "Auto Tag", actionTrigger: "auto_tag" },
-  { id: "lib-lit-review", label: "Literature Review", actionTrigger: "literature_review" },
-] as const;
 
 export const STOPWORDS = new Set([
   "the",

@@ -2,10 +2,90 @@ import { assert } from "chai";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createInspectPdfTool } from "../src/agent/tools/read/inspectPdf";
+import { createSearchPaperTool } from "../src/agent/tools/read/searchPaper";
+import { createReadAttachmentTool } from "../src/agent/tools/read/readAttachment";
+import { createViewPdfPagesTool } from "../src/agent/tools/read/viewPdfPages";
 import type { AgentToolContext, AgentToolResult } from "../src/agent/types";
 
-describe("inspect_pdf tool", function () {
+describe("search_paper tool", function () {
+  const baseContext: AgentToolContext = {
+    request: {
+      conversationKey: 5,
+      mode: "agent",
+      userText: "Explain what I'm looking at",
+      selectedPaperContexts: [
+        { itemId: 1, contextItemId: 101, title: "Paper One" },
+        { itemId: 2, contextItemId: 202, title: "Paper Two" },
+      ],
+    },
+    item: null,
+    currentAnswerText: "",
+    modelName: "gpt-5.4",
+  };
+
+  it("retrieves evidence across multiple paper contexts", async function () {
+    const tool = createSearchPaperTool(
+      {
+        retrieveEvidence: async ({ papers }: { papers: Array<{ itemId: number }> }) =>
+          papers.map((paper, index) => ({
+            paperContext: {
+              itemId: paper.itemId,
+              contextItemId: paper.itemId * 100,
+              title: `Paper ${paper.itemId}`,
+            },
+            chunkIndex: index,
+            text: `Evidence ${paper.itemId}`,
+            score: 0.9 - index * 0.1,
+            sourceLabel: `Paper ${paper.itemId}`,
+          })),
+      } as never,
+      {
+        ensurePaperContext: async () => {},
+      } as never,
+      {
+        listPaperContexts: (request: AgentToolContext["request"]) =>
+          request.selectedPaperContexts || [],
+      } as never,
+    );
+
+    const validated = tool.validate({
+      question: "What is the method?",
+      targets: [
+        { paperContext: { itemId: 1, contextItemId: 101, title: "Paper One" } },
+        { paperContext: { itemId: 2, contextItemId: 202, title: "Paper Two" } },
+      ],
+    });
+    assert.isTrue(validated.ok);
+    if (!validated.ok) return;
+
+    const result = await tool.execute(validated.value, baseContext);
+    assert.lengthOf((result as { results: unknown[] }).results, 2);
+  });
+
+  it("uses presentation summaries for evidence retrieval", function () {
+    const tool = createSearchPaperTool(
+      {} as never,
+      {} as never,
+      {
+        listPaperContexts: () => [],
+      } as never,
+    );
+
+    const onSuccess = tool.presentation?.summaries?.onSuccess;
+    assert.equal(
+      typeof onSuccess === "function"
+        ? onSuccess({
+            content: {
+              results: [{}, {}],
+            },
+          } as never)
+        : "",
+      "Retrieved 2 evidence passages",
+    );
+  });
+});
+
+describe("read_attachment tool", function () {
   const baseContext: AgentToolContext = {
     request: {
       conversationKey: 5,
@@ -31,91 +111,14 @@ describe("inspect_pdf tool", function () {
     modelName: "gpt-5.4",
   };
 
-  it("retrieves evidence across multiple paper contexts", async function () {
-    const tool = createInspectPdfTool(
-      {
-        getFrontMatterExcerpt: async () => {
-          throw new Error("not used");
-        },
-        getChunkExcerpt: async () => {
-          throw new Error("not used");
-        },
-      } as never,
-      {
-        searchPages: async () => {
-          throw new Error("not used");
-        },
-      } as never,
-      {
-        retrieveEvidence: async ({ papers }: { papers: Array<{ itemId: number }> }) =>
-          papers.map((paper, index) => ({
-            paperContext: {
-              itemId: paper.itemId,
-              contextItemId: paper.itemId * 100,
-              title: `Paper ${paper.itemId}`,
-            },
-            chunkIndex: index,
-            text: `Evidence ${paper.itemId}`,
-            score: 0.9 - index * 0.1,
-            sourceLabel: `Paper ${paper.itemId}`,
-          })),
-      } as never,
-      {
-        listPaperContexts: (request: AgentToolContext["request"]) =>
-          request.selectedPaperContexts || [],
-      } as never,
-    );
-
-    const validated = tool.validate({
-      operation: "retrieve_evidence",
-      question: "What is the method?",
-      targets: [
-        { paperContext: { itemId: 1, contextItemId: 101, title: "Paper One" } },
-        { paperContext: { itemId: 2, contextItemId: 202, title: "Paper Two" } },
-      ],
-    });
-    assert.isTrue(validated.ok);
-    if (!validated.ok) return;
-
-    const result = await tool.execute(validated.value, baseContext);
-    assert.equal((result as { operation: string }).operation, "retrieve_evidence");
-    assert.lengthOf((result as { results: unknown[] }).results, 2);
-  });
-
-  it("attaches uploaded text files without requiring PDF-specific services", async function () {
-    const tool = createInspectPdfTool(
-      {} as never,
-      {} as never,
-      {} as never,
-      {
-        listPaperContexts: () => [],
-      } as never,
-    );
-
-    const validated = tool.validate({
-      operation: "attach_file",
-    });
-    assert.isTrue(validated.ok);
-    if (!validated.ok) return;
-
-    const result = await tool.execute(validated.value, baseContext);
-    const first = (result as { results: Array<Record<string, unknown>> }).results[0];
-    assert.equal(first.name, "notes.txt");
-    assert.equal(first.textContent, "Attached notes");
-  });
-
   it("requires confirmation before sending an attached file to the model", async function () {
-    const tool = createInspectPdfTool(
+    const tool = createReadAttachmentTool(
       {} as never,
       {} as never,
-      {} as never,
-      {
-        listPaperContexts: () => [],
-      } as never,
     );
 
     const validated = tool.validate({
-      operation: "attach_file",
+      attachFile: true,
     });
     assert.isTrue(validated.ok);
     if (!validated.ok) return;
@@ -127,12 +130,29 @@ describe("inspect_pdf tool", function () {
     assert.isTrue(shouldConfirm);
     const pending = await tool.createPendingAction?.(validated.value, baseContext);
     assert.exists(pending);
-    assert.equal(pending?.toolName, "inspect_pdf");
+    assert.equal(pending?.toolName, "read_attachment");
     assert.equal(pending?.confirmLabel, "Send to model");
   });
+});
 
-  it("builds a multimodal follow-up message for capture_active_view", async function () {
-    const tempDir = mkdtempSync(join(tmpdir(), "llm-zotero-inspect-pdf-"));
+describe("view_pdf_pages tool", function () {
+  const baseContext: AgentToolContext = {
+    request: {
+      conversationKey: 5,
+      mode: "agent",
+      userText: "Explain what I'm looking at",
+      selectedPaperContexts: [
+        { itemId: 1, contextItemId: 101, title: "Paper One" },
+        { itemId: 2, contextItemId: 202, title: "Paper Two" },
+      ],
+    },
+    item: null,
+    currentAnswerText: "",
+    modelName: "gpt-5.4",
+  };
+
+  it("builds a multimodal follow-up message for capture", async function () {
+    const tempDir = mkdtempSync(join(tmpdir(), "llm-zotero-view-pdf-pages-"));
     const imagePath = join(tempDir, "capture.png");
     const restoreIOUtils = (
       globalThis as typeof globalThis & {
@@ -155,8 +175,7 @@ describe("inspect_pdf tool", function () {
         globalThis as typeof globalThis & { btoa?: (value: string) => string }
       ).btoa = (value: string) => Buffer.from(value, "binary").toString("base64");
 
-      const tool = createInspectPdfTool(
-        {} as never,
+      const tool = createViewPdfPagesTool(
         {
           getActivePageIndex: () => 3,
           captureActiveView: async () => ({
@@ -185,13 +204,12 @@ describe("inspect_pdf tool", function () {
             pageText: "Visible equation text",
           }),
         } as never,
-        {} as never,
         {
           listPaperContexts: () => [],
         } as never,
       );
 
-      const validated = tool.validate({ operation: "capture_active_view" });
+      const validated = tool.validate({ capture: true });
       assert.isTrue(validated.ok);
       if (!validated.ok) return;
       const execution = (await tool.execute(validated.value, baseContext)) as {
@@ -201,7 +219,7 @@ describe("inspect_pdf tool", function () {
       const followup = await tool.buildFollowupMessage?.(
         {
           callId: "call-1",
-          name: "inspect_pdf",
+          name: "view_pdf_pages",
           ok: true,
           content: execution.content,
           artifacts: execution.artifacts,
@@ -228,43 +246,24 @@ describe("inspect_pdf tool", function () {
     }
   });
 
-  it("uses operation-specific presentation summaries", function () {
-    const tool = createInspectPdfTool(
-      {} as never,
-      {} as never,
+  it("uses presentation summaries for page results", function () {
+    const tool = createViewPdfPagesTool(
       {} as never,
       {
         listPaperContexts: () => [],
       } as never,
     );
 
-    const onCall = tool.presentation?.summaries?.onCall;
     const onSuccess = tool.presentation?.summaries?.onSuccess;
     assert.equal(
-      typeof onCall === "function" ? onCall({ args: { operation: "retrieve_evidence" } as never }) : "",
-      "Inspecting PDF (retrieve evidence)",
-    );
-    assert.equal(
       typeof onSuccess === "function"
         ? onSuccess({
             content: {
-              operation: "retrieve_evidence",
-              results: [{}, {}],
+              pageCount: 1,
             },
           } as never)
         : "",
-      "Retrieved 2 evidence passages",
-    );
-    assert.equal(
-      typeof onSuccess === "function"
-        ? onSuccess({
-            content: {
-              operation: "search_pages",
-              results: [{}],
-            },
-          } as never)
-        : "",
-      "Found 1 relevant PDF page",
+      "Prepared 1 PDF page image",
     );
   });
 });

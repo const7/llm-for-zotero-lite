@@ -103,7 +103,7 @@ export class AttachmentReadService {
     if (category === "pdf") {
       return {
         ...baseResult,
-        note: "Use inspect_pdf operations (front_matter, retrieve_evidence, render_pages, etc.) to read PDF content.",
+        note: "Use read_paper, search_paper, or view_pdf_pages to read PDF content.",
       };
     }
 

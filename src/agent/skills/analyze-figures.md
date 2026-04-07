@@ -21,17 +21,16 @@ Use `file_io(read, '{mineruCacheDir}/full.md')` to get the full parsed content. 
 In the markdown, figure images appear as `![](images/hashname.png)` or `![](images/hashname.jpg)`. The absolute path is `{mineruCacheDir}/images/hashname.png`.
 
 **Step 3 — Read the image directly:**
-Use `inspect_pdf(operation:'read_attachment', target:{contextItemId:<id>})` with the image attachment, OR use `file_io(read, '{mineruCacheDir}/images/hashname.png')` to access the image. Visual models (GPT-4o, Codex, Claude, Gemini) can see images natively — let the model analyze the figure visually.
+Use `read_attachment(target:{contextItemId:<id>})` with the image attachment, OR use `file_io(read, '{mineruCacheDir}/images/hashname.png')` to access the image. Visual models (GPT-4o, Codex, Claude, Gemini) can see images natively — let the model analyze the figure visually.
 
 **Step 4 — Combine with caption text:**
 The markdown around the image reference contains the figure caption and surrounding discussion. Use both the image and the text to give a complete answer.
 
 ### When MinerU cache is NOT available
 
-Fall back to `inspect_pdf`:
-1. `search_pages` with the figure label to find which page(s) contain it
-2. `render_pages` to get the page image for visual analysis
-3. `retrieve_evidence` for surrounding discussion text
+Fall back to PDF tools:
+1. `view_pdf_pages` with the figure label to find which page(s) contain it and get the page image for visual analysis
+2. `search_paper` for surrounding discussion text
 
 ### Key rules
 - **NEVER** use OCR tools, Python scripts, Swift, Tesseract, or shell commands to analyze images. Visual models see images directly.

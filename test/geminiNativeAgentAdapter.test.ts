@@ -390,7 +390,7 @@ describe("GeminiNativeAgentAdapter", function () {
                       parts: [
                         {
                           functionCall: {
-                            name: "inspect_pdf",
+                            name: "read_paper",
                             args: { itemId: 1 },
                             thoughtSignature: "sig-123",
                           },
@@ -432,7 +432,7 @@ describe("GeminiNativeAgentAdapter", function () {
       messages: [{ role: "user", content: "Inspect this paper" }],
       tools: [
         {
-          name: "inspect_pdf",
+          name: "read_paper",
           description: "read",
           inputSchema: { type: "object" },
           mutability: "read",
@@ -458,7 +458,7 @@ describe("GeminiNativeAgentAdapter", function () {
       ],
       tools: [
         {
-          name: "inspect_pdf",
+          name: "read_paper",
           description: "read",
           inputSchema: { type: "object" },
           mutability: "read",

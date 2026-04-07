@@ -4,10 +4,11 @@ import { RetrievalService } from "../services/retrievalService";
 import { ZoteroGateway } from "../services/zoteroGateway";
 import { createQueryLibraryTool } from "./read/queryLibrary";
 import { createReadLibraryTool } from "./read/readLibrary";
-import {
-  clearInspectPdfCache,
-  createInspectPdfTool,
-} from "./read/inspectPdf";
+import { createReadPaperTool } from "./read/readPaper";
+import { createSearchPaperTool } from "./read/searchPaper";
+import { createViewPdfPagesTool } from "./read/viewPdfPages";
+import { createReadAttachmentTool } from "./read/readAttachment";
+import { clearPdfToolCaches } from "./read/pdfToolUtils";
 import { createSearchLiteratureOnlineTool } from "./read/searchLiteratureOnline";
 
 import { createEditCurrentNoteTool } from "./write/editCurrentNote";
@@ -39,13 +40,19 @@ export function createBuiltInToolRegistry(
   const registry = new AgentToolRegistry();
   registry.register(createQueryLibraryTool(deps.zoteroGateway));
   registry.register(createReadLibraryTool(deps.zoteroGateway));
+  registry.register(createReadPaperTool(deps.pdfService, deps.zoteroGateway));
   registry.register(
-    createInspectPdfTool(
-      deps.pdfService,
-      deps.pdfPageService,
+    createSearchPaperTool(
       deps.retrievalService,
+      deps.pdfService,
       deps.zoteroGateway,
     ),
+  );
+  registry.register(
+    createViewPdfPagesTool(deps.pdfPageService, deps.zoteroGateway),
+  );
+  registry.register(
+    createReadAttachmentTool(deps.zoteroGateway, deps.pdfPageService),
   );
   registry.register(createSearchLiteratureOnlineTool(deps.zoteroGateway));
   registry.register(createApplyTagsTool(deps.zoteroGateway));
@@ -66,5 +73,5 @@ export function createBuiltInToolRegistry(
 }
 
 export function clearAllAgentToolCaches(conversationKey: number): void {
-  clearInspectPdfCache(conversationKey);
+  clearPdfToolCaches(conversationKey);
 }

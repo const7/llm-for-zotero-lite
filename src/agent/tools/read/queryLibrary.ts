@@ -31,6 +31,7 @@ const VALID_INCLUDE = new Set<QueryLibraryInclude>([
   "attachments",
   "tags",
   "collections",
+  "abstract",
 ]);
 
 function normalizeInclude(value: unknown): QueryLibraryInclude[] | undefined {
@@ -219,7 +220,7 @@ export function createQueryLibraryTool(
             type: "array",
             items: {
               type: "string",
-              enum: ["metadata", "attachments", "tags", "collections"],
+              enum: ["metadata", "attachments", "tags", "collections", "abstract"],
             },
           },
         },
