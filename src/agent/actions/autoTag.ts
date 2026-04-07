@@ -22,6 +22,7 @@ type AutoTagOutput = {
  */
 export const autoTagAction: AgentAction<AutoTagInput, AutoTagOutput> = {
   name: "auto_tag",
+  modes: ["paper", "library"],
   description:
     "Find all Zotero papers without any tags and open a batch tag-assignment dialog. " +
     "The user reviews each paper and assigns tags before they are applied to the library.",

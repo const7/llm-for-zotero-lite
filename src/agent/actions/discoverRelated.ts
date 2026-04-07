@@ -21,6 +21,7 @@ type DiscoverRelatedOutput = {
  */
 export const discoverRelatedAction: AgentAction<DiscoverRelatedInput, DiscoverRelatedOutput> = {
   name: "discover_related",
+  modes: ["paper"],
   description:
     "Find papers related to a specific Zotero item using OpenAlex recommendations, " +
     "references, or citations. Presents results for review and imports the selected papers.",

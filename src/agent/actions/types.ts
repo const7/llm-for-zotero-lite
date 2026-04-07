@@ -58,6 +58,8 @@ export type ActionResult<TOutput = unknown> =
 export interface AgentAction<TInput = unknown, TOutput = unknown> {
   name: string;
   description: string;
+  /** Chat modes this action is available in. If omitted, available in all modes. */
+  modes?: Array<"paper" | "library">;
   inputSchema: object;
   execute(input: TInput, ctx: ActionExecutionContext): Promise<ActionResult<TOutput>>;
 }

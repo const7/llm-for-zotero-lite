@@ -453,14 +453,12 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     const btn = createElement(doc, "button", "llm-action-picker-item", {
       id,
       type: "button",
+      title: desc,
     });
     const titleEl = createElement(doc, "span", "llm-action-picker-title", {
       textContent: title,
     });
-    const descEl = createElement(doc, "span", "llm-action-picker-description", {
-      textContent: desc,
-    });
-    btn.append(titleEl, descEl);
+    btn.append(titleEl);
     return btn;
   };
   const slashUploadBtn = makeSlashItem(
@@ -680,6 +678,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   filePreviewExpanded.append(filePreviewList);
   filePreview.append(filePreviewHeader, filePreviewExpanded);
   contextPreviews.appendChild(filePreview);
+
   inputSection.appendChild(contextPreviews);
 
   const composeArea = createElement(doc, "div", "llm-compose-area", {

@@ -257,7 +257,7 @@ import {
   type PaperSearchGroupCandidate,
   type PaperSearchSlashToken,
 } from "./paperSearch";
-import { getAgentApi } from "../../agent/index";
+import { getAgentApi, initAgentSubsystem } from "../../agent/index";
 import { renderPendingActionCard } from "./agentTrace/render";
 import type {
   AgentPendingAction,
@@ -7461,18 +7461,37 @@ export function setupHandlers(
   };
 
   /** Core action execution — shared between action picker and slash menu. */
-  const executeAgentAction = async (action: ActionPickerItem): Promise<void> => {
+  const executeAgentAction = async (action: ActionPickerItem, parsedInput?: Record<string, unknown>): Promise<void> => {
     inputBox.focus({ preventScroll: true });
-    const needsInput = getNeedsUserInputFields(action.name, action.inputSchema);
-    let extraFields: Record<string, string> = {};
-    if (needsInput.length) {
-      const filled = await showActionLaunchForm(action.name, needsInput, action.inputSchema);
-      if (!filled) return;
-      extraFields = Object.fromEntries(
-        Object.entries(filled).map(([k, v]) => [k, String(v)]),
-      );
+    // Ensure agent subsystem is initialized before running any action
+    try {
+      await initAgentSubsystem();
+    } catch (err) {
+      ztoolkit.log("LLM: failed to init agent subsystem", err);
+      if (status) setStatus(status, `Error: Agent system unavailable`, "error");
+      return;
     }
-    const input = buildActionInput(action.name, action.inputSchema, extraFields);
+    let input: Record<string, unknown>;
+    if (parsedInput) {
+      // Input already parsed from inline command
+      input = parsedInput;
+      // Auto-fill itemId from context if needed
+      const s = action.inputSchema as { required?: string[] };
+      if (s.required?.includes("itemId") && item && !input.itemId) {
+        input.itemId = item.id;
+      }
+    } else {
+      const needsInput = getNeedsUserInputFields(action.name, action.inputSchema);
+      let extraFields: Record<string, string> = {};
+      if (needsInput.length) {
+        const filled = await showActionLaunchForm(action.name, needsInput, action.inputSchema);
+        if (!filled) return;
+        extraFields = Object.fromEntries(
+          Object.entries(filled).map(([k, v]) => [k, String(v)]),
+        );
+      }
+      input = buildActionInput(action.name, action.inputSchema, extraFields);
+    }
     if (status) setStatus(status, `Running: ${formatActionLabel(action.name)}…`, "ready");
     try {
       const agentApi = getAgentApi();
@@ -7503,13 +7522,224 @@ export function setupHandlers(
     }
   };
 
+  // ── Inline command badge state ──────────────────────────────────────────
+  /** The currently active command action, or null if no badge is shown. */
+  let activeCommandAction: ActionPickerItem | null = null;
+  /** The DOM element for the inline badge, if currently rendered. */
+  let activeCommandBadge: HTMLElement | null = null;
+
+  /** Removes the inline command badge from the textarea and restores state. */
+  const clearCommandChip = (): void => {
+    activeCommandAction = null;
+    if (activeCommandBadge) {
+      activeCommandBadge.remove();
+      activeCommandBadge = null;
+    }
+    // Reset the text-indent we added to make room for the badge
+    inputBox.style.textIndent = "";
+    // Restore original placeholder
+    if (inputBox.dataset.originalPlaceholder !== undefined) {
+      inputBox.placeholder = inputBox.dataset.originalPlaceholder;
+      delete inputBox.dataset.originalPlaceholder;
+    }
+  };
+
+  /**
+   * Creates an inline command badge inside the textarea area.
+   * The badge is positioned at the textarea's first-line text start position,
+   * and the textarea's text-indent is increased to flow around it.
+   * The badge is atomic — removed entirely via its x button or Backspace.
+   */
+  const insertCommandToken = (action: ActionPickerItem): void => {
+    clearCommandChip();
+    activeCommandAction = action;
+    const ownerDoc = body.ownerDocument;
+    // The compose area wraps the textarea and has position: relative
+    const composeArea = inputBox.closest(".llm-compose-area") || inputBox.parentElement;
+    if (!ownerDoc || !composeArea) return;
+
+    // Create the inline badge element
+    const badge = ownerDoc.createElement("div");
+    badge.className = "llm-command-inline";
+    badge.title = action.description;
+    badge.textContent = `/${action.name}`;
+
+    // Position the badge at the textarea's text start position.
+    // Use computed style to get exact padding/border values.
+    const cs = ownerDoc.defaultView?.getComputedStyle(inputBox);
+    const padTop = cs ? parseFloat(cs.paddingTop) : 12;
+    const padLeft = cs ? parseFloat(cs.paddingLeft) : 14;
+    const borderTop = cs ? parseFloat(cs.borderTopWidth) : 1;
+    const borderLeft = cs ? parseFloat(cs.borderLeftWidth) : 1;
+    badge.style.top = `${inputBox.offsetTop + borderTop + padTop}px`;
+    badge.style.left = `${inputBox.offsetLeft + borderLeft + padLeft}px`;
+    composeArea.appendChild(badge);
+    activeCommandBadge = badge;
+
+    // Measure the badge width and set text-indent to push textarea text past it
+    const badgeWidth = badge.offsetWidth;
+    inputBox.style.textIndent = `${badgeWidth + 6}px`; // badge width + gap
+
+    // Save original placeholder and update hint
+    if (inputBox.dataset.originalPlaceholder === undefined) {
+      inputBox.dataset.originalPlaceholder = inputBox.placeholder;
+    }
+    inputBox.placeholder = ""; // the badge itself serves as context
+    inputBox.value = "";
+    inputBox.focus({ preventScroll: true });
+    inputBox.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  /** Returns the active command action if a badge is present, null otherwise. */
+  const getActiveCommandAction = (): ActionPickerItem | null => activeCommandAction;
+
+  /**
+   * Parses natural-language parameters for an action command.
+   * Returns a structured input object for the action.
+   */
+  const parseCommandParams = (actionName: string, params: string): Record<string, unknown> => {
+    const input: Record<string, unknown> = {};
+    if (!params) return input;
+    const lower = params.toLowerCase();
+
+    // Parse "for first N items" or "first N items"
+    const firstNMatch = /(?:for\s+)?(?:first|top)\s+(\d+)\s*items?/i.exec(params);
+    if (firstNMatch) {
+      input.limit = parseInt(firstNMatch[1], 10);
+      return input;
+    }
+
+    // Parse "last N items"
+    const lastNMatch = /(?:for\s+)?last\s+(\d+)\s*items?/i.exec(params);
+    if (lastNMatch) {
+      input.limit = parseInt(lastNMatch[1], 10);
+      return input;
+    }
+
+    // Parse "for collection XXX"
+    const collectionMatch = /(?:for\s+)?collection\s+(.+)/i.exec(params);
+    if (collectionMatch) {
+      input.scope = "collection";
+      input.collectionName = collectionMatch[1].trim();
+      return input;
+    }
+
+    // Parse "for whole library" or "for all"
+    if (lower.includes("whole library") || lower.includes("for all") || lower === "all") {
+      input.scope = "all";
+      return input;
+    }
+
+    // Parse bare number as limit
+    const bareNumber = /^(\d+)$/.exec(params.trim());
+    if (bareNumber) {
+      input.limit = parseInt(bareNumber[1], 10);
+      return input;
+    }
+
+    return input;
+  };
+
+  /**
+   * Shows a HITL scope confirmation card when an action command is sent
+   * with no parameters. Returns the user's chosen scope as input.
+   */
+  const showScopeConfirmation = (actionName: string): Promise<Record<string, unknown> | null> => {
+    return new Promise((resolve) => {
+      const requestId = `scope-confirm-${actionName}-${Date.now()}`;
+      const card = {
+        toolName: actionName,
+        mode: "review" as const,
+        title: `${formatActionLabel(actionName)}`,
+        description: "What scope should this action run on?",
+        confirmLabel: "Run",
+        cancelLabel: "Cancel",
+        actions: [
+          { id: "first20", label: "First 20 items", style: "primary" as const },
+          { id: "all", label: "Whole library", style: "secondary" as const },
+          { id: "cancel", label: "Cancel", style: "secondary" as const },
+        ],
+        defaultActionId: "first20",
+        cancelActionId: "cancel",
+        fields: [],
+      };
+      getAgentApi().registerPendingConfirmation(requestId, (resolution) => {
+        closeActionHitlPanel();
+        if (!resolution.approved || resolution.actionId === "cancel") {
+          resolve(null);
+          return;
+        }
+        if (resolution.actionId === "all") {
+          resolve({ scope: "all" });
+        } else {
+          resolve({ limit: 20 });
+        }
+      });
+      const ownerDoc = body.ownerDocument;
+      if (ownerDoc && chatBox) {
+        chatBox.querySelector(".llm-action-inline-card")?.remove();
+        const wrapper = ownerDoc.createElement("div");
+        wrapper.className = "llm-action-inline-card";
+        const cardEl = renderPendingActionCard(ownerDoc, { requestId, action: card });
+        wrapper.appendChild(cardEl);
+        chatBox.appendChild(wrapper);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
+    });
+  };
+
+  /**
+   * Handles execution of a command chip action with optional text params.
+   * Called from the send flow when a command chip is active.
+   */
+  const handleInlineCommand = async (actionName: string, params: string): Promise<void> => {
+    let allActions: ActionPickerItem[] = [];
+    try {
+      await initAgentSubsystem();
+      allActions = getAgentApi().listActions();
+    } catch {
+      if (status) setStatus(status, "Agent system unavailable", "error");
+      return;
+    }
+
+    const action = allActions.find((a) => a.name === actionName);
+    if (!action) {
+      if (status) setStatus(status, `Unknown action: ${actionName}`, "error");
+      return;
+    }
+
+    let input = parseCommandParams(actionName, params);
+
+    // For organize_unfiled, no scope confirmation needed (always unfiled items)
+    const needsScopeConfirm = actionName !== "organize_unfiled" &&
+      actionName !== "discover_related" &&
+      actionName !== "complete_metadata";
+
+    // If no meaningful params and action needs scope, show HITL confirmation
+    if (needsScopeConfirm && !params.trim()) {
+      const scopeInput = await showScopeConfirmation(actionName);
+      if (!scopeInput) return; // user cancelled
+      input = { ...input, ...scopeInput };
+    }
+
+    void executeAgentAction(action, input);
+  };
+
   /** Prepends filtered agent actions into the slash menu (agent mode only). */
   const renderAgentActionsInSlashMenu = (query: string = "") => {
     clearAgentSlashItems();
+    const chatMode: "paper" | "library" = isGlobalMode() ? "library" : "paper";
     let allActions: ActionPickerItem[] = [];
     try {
-      allActions = getAgentApi().listActions();
+      // initAgentSubsystem is async but listActions only needs the registry
+      // which is set synchronously during init. If not yet initialized,
+      // trigger init (fire-and-forget) and skip this render pass.
+      allActions = getAgentApi().listActions(chatMode);
     } catch {
+      void initAgentSubsystem().then(() => {
+        // Re-render after init completes
+        renderAgentActionsInSlashMenu(query);
+      }).catch(() => {});
       return;
     }
     const filtered = query
@@ -7538,19 +7768,17 @@ export function setupHandlers(
     filtered.forEach((action) => {
       const btn = mkAgentEl("button", "llm-action-picker-item") as HTMLButtonElement;
       btn.type = "button";
+      btn.title = action.description;
       const titleEl = ownerDoc.createElement("span");
       titleEl.className = "llm-action-picker-title";
       titleEl.textContent = formatActionLabel(action.name);
-      const descEl = ownerDoc.createElement("span");
-      descEl.className = "llm-action-picker-description";
-      descEl.textContent = action.description;
-      btn.append(titleEl, descEl);
-      btn.addEventListener("mousedown", (e: Event) => {
+      btn.append(titleEl);
+      btn.addEventListener("click", (e: Event) => {
         e.preventDefault();
         e.stopPropagation();
         consumeActiveActionToken();
         closeSlashMenu();
-        void executeAgentAction(action);
+        void insertCommandToken(action);
       });
       list.insertBefore(btn, firstBase);
     });
@@ -9052,6 +9280,17 @@ export function setupHandlers(
       return;
     }
     closeActionPicker();
+    // Intercept command chip: if a command chip is active, route to action execution
+    const chipAction = getActiveCommandAction();
+    if (chipAction) {
+      const params = inputBox?.value?.trim() ?? "";
+      clearCommandChip(); // also restores placeholder
+      inputBox.value = "";
+      inputBox.dispatchEvent(new Event("input", { bubbles: true }));
+      persistDraftInputForCurrentConversation();
+      void handleInlineCommand(chipAction.name, params);
+      return;
+    }
     await doSend();
     persistDraftInputForCurrentConversation();
   };
@@ -9200,6 +9439,22 @@ export function setupHandlers(
         selectPaperPickerRowAt(paperPickerActiveRowIndex);
         return;
       }
+    }
+    // Backspace at position 0 with active command badge: remove the badge
+    if (ke.key === "Backspace" && activeCommandAction) {
+      if (inputBox.selectionStart === 0 && inputBox.selectionEnd === 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        clearCommandChip();
+        return;
+      }
+    }
+    // Escape with active command badge: remove the badge
+    if (ke.key === "Escape" && activeCommandAction) {
+      e.preventDefault();
+      e.stopPropagation();
+      clearCommandChip();
+      return;
     }
     // Up-arrow prompt recall: when input is empty or cursor is at position 0,
     // recall the last user message from the current conversation.

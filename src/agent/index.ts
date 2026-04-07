@@ -173,9 +173,9 @@ export function getAgentApi() {
     /**
      * List all registered actions (name, description, inputSchema).
      */
-    listActions: () => {
+    listActions: (mode?: "paper" | "library") => {
       if (!_actionRegistry) throw new Error("Agent subsystem is not initialized");
-      return _actionRegistry.listActions();
+      return _actionRegistry.listActions(mode);
     },
 
     /**

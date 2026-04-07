@@ -21,6 +21,7 @@ type OrganizeUnfiledOutput = {
  */
 export const organizeUnfiledAction: AgentAction<OrganizeUnfiledInput, OrganizeUnfiledOutput> = {
   name: "organize_unfiled",
+  modes: ["library"],
   description:
     "Find all unfiled Zotero papers and open a batch-assignment dialog to move them into collections. " +
     "Shows each unfiled paper alongside a collection picker for the user to assign destinations.",

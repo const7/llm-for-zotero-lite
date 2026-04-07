@@ -1,8 +1,14 @@
 import type { AgentAction, ActionExecutionContext, ActionResult } from "./types";
+import type {
+  EditableArticleMetadataPatch,
+  EditableArticleMetadataField,
+} from "../services/zoteroGateway";
+import { EDITABLE_ARTICLE_METADATA_FIELDS } from "../services/zoteroGateway";
 import { callTool } from "./executor";
 import {
   getMetadataField,
   getMetadataTitle,
+  hasMetadataCreators,
 } from "./metadataSnapshot";
 
 type AuditScope = "all" | "collection";
@@ -10,7 +16,9 @@ type AuditScope = "all" | "collection";
 type AuditLibraryInput = {
   scope?: AuditScope;
   collectionId?: number;
-  /** If true, saves an audit report note to the library (or collection's root note). */
+  /** Max number of items to process. */
+  limit?: number;
+  /** If true, saves an audit report note to the library. */
   saveNote?: boolean;
 };
 
@@ -24,15 +32,20 @@ type AuditLibraryOutput = {
   total: number;
   itemsWithIssues: number;
   issues: AuditIssue[];
+  metadataFixed: number;
   noteId?: number;
 };
 
+/**
+ * Combined audit + sync action: scans the library for incomplete metadata,
+ * fetches canonical metadata for items with issues, and applies fixes.
+ */
 export const auditLibraryAction: AgentAction<AuditLibraryInput, AuditLibraryOutput> = {
   name: "audit_library",
+  modes: ["library"],
   description:
-    "Scan the Zotero library (or a specific collection) for items with incomplete metadata: " +
-    "missing abstract, DOI, tags, or PDF attachment. Returns a structured report and optionally " +
-    "saves it as a Zotero note.",
+    "Scan the library for items with incomplete metadata, then fetch and fill missing fields " +
+    "(abstract, DOI, tags) from external sources after user review.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -46,6 +59,10 @@ export const auditLibraryAction: AgentAction<AuditLibraryInput, AuditLibraryOutp
         type: "number",
         description: "Required when scope is 'collection'.",
       },
+      limit: {
+        type: "number",
+        description: "Max number of items to process.",
+      },
       saveNote: {
         type: "boolean",
         description: "If true, saves the audit report as a Zotero note. Default: false.",
@@ -57,7 +74,7 @@ export const auditLibraryAction: AgentAction<AuditLibraryInput, AuditLibraryOutp
     input: AuditLibraryInput,
     ctx: ActionExecutionContext,
   ): Promise<ActionResult<AuditLibraryOutput>> {
-    const STEPS = 2 + (input.saveNote ? 1 : 0);
+    const STEPS = 4 + (input.saveNote ? 1 : 0);
     let step = 0;
 
     // Step 1: query items
@@ -70,6 +87,7 @@ export const auditLibraryAction: AgentAction<AuditLibraryInput, AuditLibraryOutp
     if (input.scope === "collection" && input.collectionId) {
       (queryArgs as { filters?: unknown }).filters = { collectionId: input.collectionId };
     }
+    if (input.limit) queryArgs.limit = input.limit;
 
     const queryResult = await callTool("query_library", queryArgs, ctx, "Querying library items");
     if (!queryResult.ok) {
@@ -126,8 +144,137 @@ export const auditLibraryAction: AgentAction<AuditLibraryInput, AuditLibraryOutp
       summary: `${issues.length} item${issues.length === 1 ? "" : "s"} with issues`,
     });
 
-    let noteId: number | undefined;
+    // Step 3: fetch canonical metadata for items with fixable issues
+    ctx.onProgress({
+      type: "step_start",
+      step: "Fetching canonical metadata",
+      index: ++step,
+      total: STEPS,
+    });
 
+    // Build candidates from items that have issues and have a DOI or title
+    type UpdateCandidate = {
+      itemId: number;
+      patch: EditableArticleMetadataPatch;
+    };
+    const updateCandidates: UpdateCandidate[] = [];
+
+    for (const issue of issues) {
+      const record = items.find((i) => {
+        if (!i || typeof i !== "object") return false;
+        return (i as Record<string, unknown>).itemId === issue.itemId;
+      }) as Record<string, unknown> | undefined;
+      if (!record) continue;
+
+      const meta = record.metadata;
+      const doi = getMetadataField(meta, "DOI")?.replace(/^https?:\/\/doi\.org\//i, "") || undefined;
+      const title = getMetadataTitle(meta) || undefined;
+      if (!doi && !title) continue;
+
+      const label = doi ? `DOI: ${doi}` : `title: ${(title || "").slice(0, 50)}`;
+      ctx.onProgress({
+        type: "status",
+        message: `Fetching metadata for ${label}`,
+      });
+
+      const searchArgs: Record<string, unknown> = {
+        mode: "metadata",
+        libraryID: ctx.libraryID,
+      };
+      if (doi) searchArgs.doi = doi;
+      else if (title) searchArgs.title = title;
+
+      const metaResult = await callTool(
+        "search_literature_online",
+        searchArgs,
+        ctx,
+        `Fetching metadata for ${label}`,
+      );
+      if (!metaResult.ok) continue;
+
+      const metaContent = metaResult.content as Record<string, unknown>;
+      const results = Array.isArray(metaContent.results) ? metaContent.results : [];
+      const externalMeta = results[0] as Record<string, unknown> | undefined;
+      if (!externalMeta) continue;
+
+      const sourcePatch = externalMeta.patch as EditableArticleMetadataPatch | undefined;
+      if (!sourcePatch || Object.keys(sourcePatch).length === 0) continue;
+
+      // Only fill in fields that are currently empty
+      const patch: EditableArticleMetadataPatch = {};
+      for (const fieldName of EDITABLE_ARTICLE_METADATA_FIELDS) {
+        const currentValue = getMetadataField(meta, fieldName);
+        const newValue = sourcePatch[fieldName as EditableArticleMetadataField];
+        if (!currentValue && newValue) {
+          patch[fieldName as EditableArticleMetadataField] = newValue;
+        }
+      }
+      if (!hasMetadataCreators(meta) && sourcePatch.creators?.length) {
+        patch.creators = sourcePatch.creators;
+      }
+
+      if (Object.keys(patch).length > 0) {
+        updateCandidates.push({ itemId: issue.itemId, patch });
+      }
+    }
+
+    ctx.onProgress({
+      type: "step_done",
+      step: "Fetching canonical metadata",
+      summary: `${updateCandidates.length} item${updateCandidates.length === 1 ? "" : "s"} can be fixed`,
+    });
+
+    // Step 4: apply updates with HITL review
+    let metadataFixed = 0;
+    if (updateCandidates.length > 0) {
+      ctx.onProgress({
+        type: "step_start",
+        step: "Applying metadata updates",
+        index: ++step,
+        total: STEPS,
+      });
+
+      const operations = updateCandidates.map(({ itemId, patch }) => ({
+        type: "update_metadata" as const,
+        itemId,
+        metadata: patch,
+      }));
+
+      const mutateResult = await callTool(
+        "update_metadata",
+        { operations },
+        ctx,
+        "Updating metadata",
+      );
+
+      const mutateContent = mutateResult.content as Record<string, unknown>;
+      metadataFixed = mutateResult.ok
+        ? Number(mutateContent.appliedCount || (Array.isArray(mutateContent.results) ? mutateContent.results.length : updateCandidates.length))
+        : 0;
+
+      ctx.onProgress({
+        type: "step_done",
+        step: "Applying metadata updates",
+        summary: mutateResult.ok
+          ? `Fixed ${metadataFixed} item${metadataFixed === 1 ? "" : "s"}`
+          : "Update was denied or failed",
+      });
+    } else {
+      ctx.onProgress({
+        type: "step_start",
+        step: "Applying metadata updates",
+        index: ++step,
+        total: STEPS,
+      });
+      ctx.onProgress({
+        type: "step_done",
+        step: "Applying metadata updates",
+        summary: "No fixable items found",
+      });
+    }
+
+    // Optional: save audit note
+    let noteId: number | undefined;
     if (input.saveNote) {
       ctx.onProgress({ type: "step_start", step: "Saving audit note", index: ++step, total: STEPS });
       const reportLines = [
@@ -135,6 +282,7 @@ export const auditLibraryAction: AgentAction<AuditLibraryInput, AuditLibraryOutp
         ``,
         `Total items scanned: ${items.length}`,
         `Items with issues: ${issues.length}`,
+        `Metadata fixed: ${metadataFixed}`,
         ``,
         `### Issues`,
         ...issues.map((issue) =>
@@ -167,6 +315,7 @@ export const auditLibraryAction: AgentAction<AuditLibraryInput, AuditLibraryOutp
         total: items.length,
         itemsWithIssues: issues.length,
         issues,
+        metadataFixed,
         noteId,
       },
     };

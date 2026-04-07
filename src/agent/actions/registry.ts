@@ -15,12 +15,14 @@ export class ActionRegistry {
     return this.actions.get(name);
   }
 
-  listActions(): Array<{ name: string; description: string; inputSchema: object }> {
-    return Array.from(this.actions.values()).map(({ name, description, inputSchema }) => ({
-      name,
-      description,
-      inputSchema,
-    }));
+  listActions(mode?: "paper" | "library"): Array<{ name: string; description: string; inputSchema: object }> {
+    return Array.from(this.actions.values())
+      .filter((a) => !mode || !a.modes || a.modes.includes(mode))
+      .map(({ name, description, inputSchema }) => ({
+        name,
+        description,
+        inputSchema,
+      }));
   }
 
   async run(
