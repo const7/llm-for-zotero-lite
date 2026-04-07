@@ -205,6 +205,18 @@ function collectGuidanceInstructions(
 function buildAutoReadInstruction(request: AgentRuntimeRequest): string {
   const fullTextPapers = request.fullTextPaperContexts || [];
   if (!fullTextPapers.length) return "";
+  const allHaveMineruCache = fullTextPapers.every(
+    (entry) => Boolean(entry.mineruCacheDir),
+  );
+  if (allHaveMineruCache) {
+    return (
+      "TURN RULE: Because the user marked specific paper(s) for full-text use on this turn, " +
+      "your very first action MUST be to read the paper content. " +
+      "All marked papers have MinerU cache — use `file_io(read, '{mineruCacheDir}/full.md')` for each. " +
+      "This is faster and gives better quality than inspect_pdf. " +
+      "Do this before answering, even if the answer seems obvious."
+    );
+  }
   return (
     "TURN RULE: Because the user marked specific paper(s) for full-text use on this turn, " +
     "your very first action MUST be to call `inspect_pdf` with operation:`front_matter` and target only those full-text papers. " +

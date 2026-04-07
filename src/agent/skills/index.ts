@@ -14,6 +14,9 @@ import { parseSkill, matchesSkill } from "./skillLoader";
 import libraryAnalysisRaw from "./library-analysis.md";
 import comparePapersRaw from "./compare-papers.md";
 import analyzeFiguresRaw from "./analyze-figures.md";
+import simplePaperQaRaw from "./simple-paper-qa.md";
+import evidenceBasedQaRaw from "./evidence-based-qa.md";
+import noteFromPaperRaw from "./note-from-paper.md";
 
 export { matchesSkill } from "./skillLoader";
 export type { AgentSkill } from "./skillLoader";
@@ -22,6 +25,9 @@ export const AGENT_SKILLS = [
   parseSkill(libraryAnalysisRaw),
   parseSkill(comparePapersRaw),
   parseSkill(analyzeFiguresRaw),
+  parseSkill(simplePaperQaRaw),
+  parseSkill(evidenceBasedQaRaw),
+  parseSkill(noteFromPaperRaw),
 ];
 
 /**
