@@ -67,7 +67,7 @@ function getBaseDir(): string {
 
 /** Returns the directory path where user skill files are stored. */
 export function getUserSkillsDir(): string {
-  return joinPath(getBaseDir(), USER_SKILLS_DIR_NAME);
+  return joinPath(getBaseDir(), "llm-for-zotero", "skills");
 }
 
 // ---------------------------------------------------------------------------
