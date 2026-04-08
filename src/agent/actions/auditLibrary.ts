@@ -158,8 +158,11 @@ export const auditLibraryAction: AgentAction<AuditLibraryInput, AuditLibraryOutp
       patch: EditableArticleMetadataPatch;
     };
     const updateCandidates: UpdateCandidate[] = [];
+    const MAX_METADATA_FETCHES = 20;
+    let fetchCount = 0;
 
     for (const issue of issues) {
+      if (fetchCount >= MAX_METADATA_FETCHES) break;
       const record = items.find((i) => {
         if (!i || typeof i !== "object") return false;
         return (i as Record<string, unknown>).itemId === issue.itemId;
@@ -190,6 +193,7 @@ export const auditLibraryAction: AgentAction<AuditLibraryInput, AuditLibraryOutp
         ctx,
         `Fetching metadata for ${label}`,
       );
+      fetchCount++;
       if (!metaResult.ok) continue;
 
       const metaContent = metaResult.content as Record<string, unknown>;

@@ -222,7 +222,7 @@ export const libraryStatisticsAction: AgentAction<
     try {
       const rawItems: Zotero.Item[] = await Zotero.Items.getAll(
         ctx.libraryID,
-        true,
+        false,
         false,
         false,
       );

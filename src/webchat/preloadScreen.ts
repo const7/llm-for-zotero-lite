@@ -41,14 +41,27 @@ const STEPS: PreloadStep[] = [
     maxAttempts: 20, // 10 seconds
     failHint: "Install the Sync for Zotero Chrome extension and reload the page.",
   },
-  {
+];
+
+/** Build the chatsite step dynamically so it can filter by the target hostname. */
+function makeChatSiteStep(targetHost?: string): PreloadStep {
+  return {
     key: "chatsite",
     label: "Chat site tab",
-    check: () => relayGetExtensionStatus()?.chatTabAlive === true,
-    maxAttempts: 30, // 15 seconds — needs to wait for extension's next heartbeat (every 10s) to POST status
-    failHint: `Open the corresponding chat site (${WEBCHAT_TARGETS.map((wt) => wt.modelName).join(", ")}) in your Chrome browser.`,
-  },
-];
+    check: () => {
+      const status = relayGetExtensionStatus();
+      if (!status?.chatTabAlive) return false;
+      if (targetHost && status.chatUrl) {
+        try { return new URL(status.chatUrl).hostname.includes(targetHost); } catch { /* fall through */ }
+      }
+      return !targetHost; // pass only when no specific target is required
+    },
+    maxAttempts: 30,
+    failHint: targetHost
+      ? `Open ${targetHost} in your Chrome browser.`
+      : `Open the corresponding chat site (${WEBCHAT_TARGETS.map((wt) => wt.modelName).join(", ")}) in your Chrome browser.`,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // DOM helpers
@@ -79,6 +92,7 @@ export async function showWebChatPreloadScreen(
   chatShell: HTMLElement,
   signal?: { aborted: boolean },
   targetLabel?: string,
+  targetHost?: string,
 ): Promise<void> {
   const doc = chatShell.ownerDocument!;
   const siteName = targetLabel || "ChatGPT";
@@ -99,7 +113,8 @@ export async function showWebChatPreloadScreen(
   const stepsContainer = el(doc, "div", "llm-webchat-preload-steps");
   const stepEls: { row: HTMLElement; icon: HTMLElement; label: HTMLElement }[] = [];
 
-  for (const step of STEPS) {
+  const allSteps = [...STEPS, makeChatSiteStep(targetHost)];
+  for (const step of allSteps) {
     const row = el(doc, "div", "llm-webchat-preload-step");
     row.dataset.step = step.key;
     row.style.opacity = "0";
@@ -143,10 +158,10 @@ export async function showWebChatPreloadScreen(
       s.icon.textContent = "\u25CF";
     }
 
-    for (let i = 0; i < STEPS.length; i++) {
+    for (let i = 0; i < allSteps.length; i++) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-      const step = STEPS[i];
+      const step = allSteps[i];
       const ui = stepEls[i];
 
       // Show step with fade-in

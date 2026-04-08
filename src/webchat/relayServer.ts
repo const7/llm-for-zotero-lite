@@ -1458,8 +1458,9 @@ export function relayPollResponse(): {
 
 /** Send new chat command directly (no HTTP). */
 export function relayNewChat(target?: string): void {
+  const prevTarget = S().active_target;
   resetState();
-  if (target) S().active_target = target;
+  S().active_target = target || prevTarget;
   S().turn_status = "navigating";
   S().pendingCommand = { type: "NEW_CHAT" };
 }

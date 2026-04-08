@@ -48,6 +48,7 @@ import {
   pinnedFileKeys,
   setCancelledRequestId,
   setPendingRequestId,
+  getPendingRequestId,
   getAbortController,
   isRequestPending,
   panelFontScalePercent,
@@ -5898,7 +5899,7 @@ export function setupHandlers(
                   const webchatTargetEntry = getWebChatTargetByModelName(webchatProfile?.model || "");
                   // Tell the relay (and thereby the extension) which site to use
                   if (webchatTargetEntry?.id) relaySetActiveTarget(webchatTargetEntry.id);
-                  await showWebChatPreloadScreen(chatShellEl, token, webchatTargetEntry?.label);
+                  await showWebChatPreloadScreen(chatShellEl, token, webchatTargetEntry?.label, webchatTargetEntry?.modelName);
                 } catch {
                   // Preload failed or was aborted — still apply UI (dot will show status)
                 } finally {
@@ -6736,7 +6737,7 @@ export function setupHandlers(
             const { currentModel: coldModel } = getSelectedModelInfo();
             const coldTargetEntry = getWebChatTargetByModelName(coldModel || "");
             if (coldTargetEntry?.id) relaySetTarget2(coldTargetEntry.id);
-            await showWebChatPreloadScreen(chatShellEl, token, coldTargetEntry?.label);
+            await showWebChatPreloadScreen(chatShellEl, token, coldTargetEntry?.label, coldTargetEntry?.modelName);
           } catch {
             // Preload failed or was aborted — dot will show connection status
           } finally {
@@ -11375,7 +11376,7 @@ export function setupHandlers(
         } catch { /* relay may not be loaded */ }
       }
       if (cancelConvKey !== null) {
-        setCancelledRequestId(cancelConvKey, currentRequestId);
+        setCancelledRequestId(cancelConvKey, getPendingRequestId(cancelConvKey));
         setPendingRequestId(cancelConvKey, 0);
       }
       if (status) setStatus(status, t("Cancelled"), "ready");
