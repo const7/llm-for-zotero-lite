@@ -121,7 +121,6 @@ export type AgentEngineDeps = {
     conversationKey: number,
     requestId: number,
   ) => void;
-  setHistoryControlsDisabled: (body: Element, disabled: boolean) => void;
   createPanelUpdateHelpers: (
     body: Element,
     item: Zotero.Item,
@@ -528,7 +527,6 @@ export async function sendAgentTurn(
     await persistAssistantOnce();
     setStatusSafely(`Error: ${errMsg.slice(0, 40)}`, "error");
   } finally {
-    deps.setHistoryControlsDisabled(body, false);
     deps.restoreRequestUIIdle(body, conversationKey, thisRequestId);
     deps.setCurrentAbortController(conversationKey, null);
     deps.setPendingRequestId(conversationKey, 0);
@@ -602,7 +600,6 @@ export async function retryAgentTurn(
   if (!question.trim()) {
     setStatusSafely("Nothing to retry for latest turn", "error");
     deps.restoreRequestUIIdle(body, conversationKey, thisRequestId);
-    deps.setHistoryControlsDisabled(body, false);
     return;
   }
 
@@ -777,7 +774,6 @@ export async function retryAgentTurn(
     await persistAssistantOnce();
     setStatusSafely(`Error: ${errMsg.slice(0, 40)}`, "error");
   } finally {
-    deps.setHistoryControlsDisabled(body, false);
     deps.restoreRequestUIIdle(body, conversationKey, thisRequestId);
     deps.setCurrentAbortController(conversationKey, null);
     deps.setPendingRequestId(conversationKey, 0);

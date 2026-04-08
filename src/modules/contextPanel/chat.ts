@@ -1121,7 +1121,8 @@ function setRequestUIBusy(
     if (ui.inputBox) ui.inputBox.disabled = true;
     if (ui.status) setStatus(ui.status, statusText, "sending");
   });
-  setHistoryControlsDisabled(body, true);
+  // History controls are intentionally left enabled so the user can
+  // switch conversations or create new ones while a request is in flight.
 }
 
 function restoreRequestUIIdle(
@@ -1154,7 +1155,6 @@ function restoreRequestUIIdle(
     }
     if (freshUi.cancelBtn) freshUi.cancelBtn.style.display = "none";
   });
-  setHistoryControlsDisabled(body, false);
 }
 
 function createPanelUpdateHelpers(
@@ -2153,7 +2153,6 @@ export async function retryLatestAssistantResponse(
   if (!question.trim()) {
     setStatusSafely("Nothing to retry for latest turn", "error");
     restoreRequestUIIdle(body, conversationKey, thisRequestId);
-    setHistoryControlsDisabled(body, false);
     return;
   }
 
@@ -2394,7 +2393,6 @@ export async function retryLatestAssistantResponse(
       "error",
     );
   } finally {
-    setHistoryControlsDisabled(body, false);
     restoreRequestUIIdle(body, conversationKey, thisRequestId);
     setAbortController(conversationKey, null);
     setPendingRequestId(conversationKey, 0);
@@ -2722,7 +2720,6 @@ function buildAgentEngineDeps(): AgentEngineDeps {
     getPanelRequestUI,
     setRequestUIBusy,
     restoreRequestUIIdle,
-    setHistoryControlsDisabled,
     createPanelUpdateHelpers,
     ensureConversationLoaded,
     getConversationKey,
@@ -3274,7 +3271,6 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
 
     setStatusSafely(`Error: ${`${errMsg}${retryHint}`.slice(0, 40)}`, "error");
   } finally {
-    setHistoryControlsDisabled(body, false);
     restoreRequestUIIdle(body, conversationKey, thisRequestId);
     setAbortController(conversationKey, null);
     setPendingRequestId(conversationKey, 0);

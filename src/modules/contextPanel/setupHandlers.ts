@@ -484,22 +484,8 @@ export function setupHandlers(
     if (sendBtn) sendBtn.style.display = "none";
     if (cancelBtn) cancelBtn.style.display = "";
     if (inputBox) inputBox.disabled = true;
-    if (historyToggleBtn) {
-      historyToggleBtn.disabled = true;
-      historyToggleBtn.setAttribute("aria-disabled", "true");
-    }
-    if (historyNewBtn) {
-      historyNewBtn.disabled = true;
-      historyNewBtn.setAttribute("aria-disabled", "true");
-    }
-    const historyMenuEl = body.querySelector(
-      "#llm-history-menu",
-    ) as HTMLDivElement | null;
-    if (historyMenuEl) historyMenuEl.style.display = "none";
-    const historyNewMenuEl = body.querySelector(
-      "#llm-history-new-menu",
-    ) as HTMLDivElement | null;
-    if (historyNewMenuEl) historyNewMenuEl.style.display = "none";
+    // History controls are intentionally left enabled so the user can
+    // switch conversations or create new ones while a request is in flight.
   }
 
   const panelDoc = body.ownerDocument;
@@ -11409,21 +11395,13 @@ export function setupHandlers(
         }
       }
       body.querySelectorAll(".llm-typing").forEach((el: Element) => el.remove());
-      // Re-enable UI
+      // Re-enable UI for the cancelled conversation
       if (inputBox) inputBox.disabled = false;
       if (sendBtn) {
         sendBtn.style.display = "";
         sendBtn.disabled = false;
       }
       cancelBtn.style.display = "none";
-      if (historyNewBtn) {
-        historyNewBtn.disabled = false;
-        historyNewBtn.setAttribute("aria-disabled", "false");
-      }
-      if (historyToggleBtn) {
-        historyToggleBtn.disabled = false;
-        historyToggleBtn.setAttribute("aria-disabled", "false");
-      }
     });
   }
 
