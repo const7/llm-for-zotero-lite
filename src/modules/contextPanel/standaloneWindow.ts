@@ -17,7 +17,7 @@ import {
 import { getLockedGlobalConversationKey } from "./prefHelpers";
 import { applyPanelFontScale } from "./prefHelpers";
 import { buildUI } from "./buildUI";
-import { setupHandlers } from "./setupHandlers";
+import { setupHandlers, type SetupHandlersHooks } from "./setupHandlers";
 import {
   ensureConversationLoaded,
   getConversationKey,
@@ -39,8 +39,10 @@ import { clearOwnerAttachmentRefs } from "../../utils/attachmentRefStore";
 import { chatHistory, loadedConversationKeys } from "./state";
 import {
   loadConversationHistoryScope,
+  loadAllConversationHistory,
   type ConversationHistoryScopeEntry,
 } from "./historyLoader";
+import { loadConversation } from "../../utils/chatStore";
 
 type StandaloneSessionState = {
   pending: boolean;
@@ -348,6 +350,7 @@ export function openStandaloneChat(options?: {
   let currentPaperItem: Zotero.Item | null = initialPaperItem;
   let currentBasePaperItem: Zotero.Item | null = initialBasePaperItem;
   let isInWebChatMode = false;
+  let currentChatHooks: SetupHandlersHooks | null = null;
 
   const initWindow = () => {
     // Now the window is loaded — safe to clear the pending flag.
@@ -474,6 +477,11 @@ export function openStandaloneChat(options?: {
     iconHistory.type = "button";
     iconHistory.title = t("History");
 
+    const iconSearch = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+    iconSearch.className = "llm-standalone-icon-btn llm-standalone-icon-search";
+    iconSearch.type = "button";
+    iconSearch.title = t("Search history");
+
     const iconStripSpacer = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
     iconStripSpacer.style.flex = "1";
 
@@ -492,7 +500,7 @@ export function openStandaloneChat(options?: {
     iconClear.type = "button";
     iconClear.title = t("Clear");
 
-    iconStrip.append(iconSidebarToggle, iconNewChat, iconHistory, iconStripSpacer, iconSettings, iconExport, iconClear);
+    iconStrip.append(iconSidebarToggle, iconNewChat, iconHistory, iconSearch, iconStripSpacer, iconSettings, iconExport, iconClear);
 
     // History popup — floating panel for collapsed icon strip
     const historyPopup = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
@@ -549,7 +557,38 @@ export function openStandaloneChat(options?: {
     contentWrapper.append(tabRow, contentTitleBar, contentArea);
     lowerArea.append(sidebar, contentWrapper);
 
-    root.append(lowerArea, historyPopup, exportPopup);
+    // -- Search overlay (Claude.ai-style centered popup) --
+    const searchOverlay = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
+    searchOverlay.className = "llm-standalone-search-overlay";
+    searchOverlay.style.display = "none";
+
+    const searchPopup = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
+    searchPopup.className = "llm-standalone-search-popup";
+
+    const searchHeader = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
+    searchHeader.className = "llm-standalone-search-header";
+
+    const searchInput = doc.createElementNS(HTML_NS, "input") as HTMLInputElement;
+    searchInput.className = "llm-standalone-search-input";
+    searchInput.type = "text";
+    searchInput.placeholder = t("Search history");
+    searchInput.setAttribute("autocomplete", "off");
+    searchInput.setAttribute("spellcheck", "false");
+
+    const searchCloseBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+    searchCloseBtn.className = "llm-standalone-search-close";
+    searchCloseBtn.type = "button";
+    searchCloseBtn.textContent = "\u00D7";
+
+    searchHeader.append(searchInput, searchCloseBtn);
+
+    const searchResults = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
+    searchResults.className = "llm-standalone-search-results";
+
+    searchPopup.append(searchHeader, searchResults);
+    searchOverlay.appendChild(searchPopup);
+
+    root.append(lowerArea, historyPopup, exportPopup, searchOverlay);
 
     // -- Sidebar state management --
     let userManualSidebarState: "expanded" | "collapsed" | null = null;
@@ -636,6 +675,18 @@ export function openStandaloneChat(options?: {
       }
     };
 
+    const resolveActiveWebChatHostname = async (): Promise<string | null> => {
+      const [{ relayGetStateSnapshot }, { WEBCHAT_TARGETS }] = await Promise.all([
+        import("../../webchat/relayServer"),
+        import("../../webchat/types"),
+      ]);
+      const activeTarget = relayGetStateSnapshot().active_target || null;
+      return (
+        WEBCHAT_TARGETS.find((target) => target.id === activeTarget)?.modelName ||
+        null
+      );
+    };
+
     // Render webchat sessions in the standalone history popup
     const renderWebChatHistoryPopup = async () => {
       if (cancelled) return;
@@ -653,22 +704,30 @@ export function openStandaloneChat(options?: {
       historyPopup.appendChild(loadingEl);
 
       try {
-        const [{ relaySetCommand }, { fetchChatHistory }] = await Promise.all([
+        const requestedAt = Date.now();
+        const [{ relaySetCommand }, {
+          filterWebChatHistorySessionsForHostname,
+          waitForFreshChatHistorySnapshot,
+        }] = await Promise.all([
           import("../../webchat/relayServer"),
           import("../../webchat/client"),
         ]);
+        const targetHostname = await resolveActiveWebChatHostname();
 
         relaySetCommand({ type: "SCRAPE_HISTORY" });
 
         let sessions: Array<{ id: string; title: string; chatUrl: string | null }> = [];
-        for (let i = 0; i < 10; i++) {
-          if (cancelled || !isInWebChatMode) return;
-          try {
-            sessions = await fetchChatHistory("");
-          } catch { /* relay not reachable */ }
-          if (sessions.length > 0) break;
-          await new Promise((r) => setTimeout(r, 1000));
-        }
+        try {
+          const snapshot = await waitForFreshChatHistorySnapshot(
+            "",
+            targetHostname,
+            requestedAt,
+          );
+          sessions = filterWebChatHistorySessionsForHostname(
+            snapshot.sessions,
+            targetHostname,
+          );
+        } catch { /* relay not reachable */ }
 
         if (cancelled || !isInWebChatMode) return;
 
@@ -721,6 +780,10 @@ export function openStandaloneChat(options?: {
                   streaming: true,
                 }]);
                 refreshChat(contentArea, activeItem);
+
+                // Clear force-new-chat intent so follow-up sends
+                // continue in the loaded conversation, not start fresh.
+                currentChatHooks?.clearWebChatNewChatIntent?.();
 
                 const { loadChatSession } = await import("../../webchat/client");
                 const result = await loadChatSession("", session.id);
@@ -779,22 +842,30 @@ export function openStandaloneChat(options?: {
       sidebarList.appendChild(loadingEl);
 
       try {
-        const [{ relaySetCommand }, { fetchChatHistory }] = await Promise.all([
+        const requestedAt = Date.now();
+        const [{ relaySetCommand }, {
+          filterWebChatHistorySessionsForHostname,
+          waitForFreshChatHistorySnapshot,
+        }] = await Promise.all([
           import("../../webchat/relayServer"),
           import("../../webchat/client"),
         ]);
+        const targetHostname = await resolveActiveWebChatHostname();
 
         relaySetCommand({ type: "SCRAPE_HISTORY" });
 
         let sessions: Array<{ id: string; title: string; chatUrl: string | null }> = [];
-        for (let i = 0; i < 10; i++) {
-          if (cancelled || !isInWebChatMode || mySeq !== webChatSidebarRenderSeq) return;
-          try {
-            sessions = await fetchChatHistory("");
-          } catch { /* relay not reachable */ }
-          if (sessions.length > 0) break;
-          await new Promise((r) => setTimeout(r, 1000));
-        }
+        try {
+          const snapshot = await waitForFreshChatHistorySnapshot(
+            "",
+            targetHostname,
+            requestedAt,
+          );
+          sessions = filterWebChatHistorySessionsForHostname(
+            snapshot.sessions,
+            targetHostname,
+          );
+        } catch { /* relay not reachable */ }
 
         if (cancelled || !isInWebChatMode || mySeq !== webChatSidebarRenderSeq) return;
         loadingEl.remove();
@@ -845,6 +916,10 @@ export function openStandaloneChat(options?: {
                   streaming: true,
                 }]);
                 refreshChat(contentArea, activeItem);
+
+                // Clear force-new-chat intent so follow-up sends
+                // continue in the loaded conversation, not start fresh.
+                currentChatHooks?.clearWebChatNewChatIntent?.();
 
                 const { loadChatSession } = await import("../../webchat/client");
                 const result = await loadChatSession("", session.id);
@@ -921,7 +996,7 @@ export function openStandaloneChat(options?: {
 
         activeContextPanels.set(contentArea, () => activeItem);
         activeContextPanelRawItems.set(contentArea, null);
-        setupHandlers(contentArea, item as any, {
+        const chatHooks: SetupHandlersHooks = {
           onConversationHistoryChanged: () => {
             if (cancelled) return;
             void renderSidebar();
@@ -930,7 +1005,10 @@ export function openStandaloneChat(options?: {
             if (cancelled) return;
             updateStandaloneWebChatUI(isWebChat);
           },
-        });
+        };
+        setupHandlers(contentArea, item as any, chatHooks);
+        // Store hooks reference so webchat load handlers can call clearWebChatNewChatIntent
+        currentChatHooks = chatHooks;
 
         refreshChat(contentArea, item);
         applyPanelFontScale(llmMain);
@@ -1063,6 +1141,250 @@ export function openStandaloneChat(options?: {
         ztoolkit.log("LLM: standalone sidebar render failed", err);
       }
     };
+
+    // -----------------------------------------------------------------------
+    // Search popup logic
+    // -----------------------------------------------------------------------
+    let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let searchSeq = 0;
+    const searchDocCache = new Map<number, { title: string; messages: string }>();
+
+    const openSearchPopup = () => {
+      searchOverlay.style.display = "flex";
+      searchInput.value = "";
+      searchResults.textContent = "";
+      searchInput.focus();
+      void runSearch("");
+    };
+
+    const closeSearchPopup = () => {
+      searchOverlay.style.display = "none";
+      searchInput.value = "";
+      searchResults.textContent = "";
+      if (searchDebounceTimer !== null) {
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = null;
+      }
+    };
+
+    const resolvePaperLabel = (paperItemID: number | undefined): string => {
+      if (!paperItemID) return t("Library chat");
+      try {
+        const paperItem = Zotero.Items.get(paperItemID);
+        if (!paperItem) return t("Paper chat");
+        let firstCreator = "";
+        let year = "";
+        try { firstCreator = (paperItem as any).getField("firstCreator") || ""; } catch { /* */ }
+        try { year = (paperItem as any).getField("year") || ""; } catch { /* */ }
+        if (firstCreator && year) return `${firstCreator}, ${year}`;
+        if (firstCreator) return firstCreator;
+        if (year) return year;
+        return t("Paper chat");
+      } catch {
+        return t("Paper chat");
+      }
+    };
+
+    const renderSearchResults = (
+      entries: ConversationHistoryScopeEntry[],
+      query: string,
+    ) => {
+      searchResults.textContent = "";
+
+      if (!entries.length) {
+        const empty = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
+        empty.className = "llm-standalone-search-empty";
+        empty.textContent = query ? t("No matching history") : t("No conversations yet");
+        searchResults.appendChild(empty);
+        return;
+      }
+
+      const groups = groupByDay(entries.map((e) => ({
+        conversationKey: e.conversationKey,
+        lastActivityAt: e.lastActivityAt,
+        title: e.title,
+        sessionVersion: e.sessionVersion,
+      })));
+
+      // Build a map for quick lookup by conversationKey
+      const entryMap = new Map<number, ConversationHistoryScopeEntry>();
+      for (const e of entries) entryMap.set(e.conversationKey, e);
+
+      for (const group of groups) {
+        const dayLabel = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
+        dayLabel.className = "llm-standalone-search-day-label";
+        dayLabel.textContent = group.label;
+        searchResults.appendChild(dayLabel);
+
+        for (const conv of group.items) {
+          const entry = entryMap.get(conv.conversationKey);
+          if (!entry) continue;
+
+          const btn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+          btn.className = "llm-standalone-search-item";
+          btn.type = "button";
+          btn.dataset.conversationKey = String(entry.conversationKey);
+          btn.dataset.mode = entry.mode;
+          if (entry.paperItemID) {
+            btn.dataset.paperItemId = String(entry.paperItemID);
+          }
+          if (entry.sessionVersion !== undefined) {
+            btn.dataset.sessionVersion = String(entry.sessionVersion);
+          }
+
+          const label = doc.createElementNS(HTML_NS, "span") as HTMLSpanElement;
+          label.className = "llm-standalone-search-label";
+          const labelText = entry.mode === "paper"
+            ? resolvePaperLabel(entry.paperItemID)
+            : t("Library chat");
+          label.textContent = `(${labelText})`;
+
+          const title = doc.createElementNS(HTML_NS, "span") as HTMLSpanElement;
+          title.className = "llm-standalone-search-title";
+          title.textContent = entry.title || t("Untitled chat");
+
+          btn.append(label, title);
+          btn.title = `${labelText}: ${entry.title || t("Untitled chat")}`;
+          searchResults.appendChild(btn);
+        }
+      }
+    };
+
+    const runSearch = async (query: string) => {
+      const thisSeq = ++searchSeq;
+      try {
+        const allEntries = await loadAllConversationHistory({ libraryID, limit: 100 });
+        if (thisSeq !== searchSeq || cancelled) return;
+
+        if (!query.trim()) {
+          // Show all entries when no query
+          renderSearchResults(allEntries, "");
+          return;
+        }
+
+        const normalizedQuery = query.trim().toLocaleLowerCase();
+        const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+
+        // First pass: filter by title (instant)
+        const titleMatches = allEntries.filter((entry) => {
+          const normalizedTitle = (entry.title || "").toLocaleLowerCase();
+          return tokens.every((token) => normalizedTitle.includes(token));
+        });
+
+        // Show title matches immediately
+        renderSearchResults(titleMatches, query);
+
+        // Second pass: search message content for entries not already matched
+        const titleMatchKeys = new Set(titleMatches.map((e) => e.conversationKey));
+        const entriesToSearch = allEntries.filter((e) => !titleMatchKeys.has(e.conversationKey));
+
+        const contentMatches: ConversationHistoryScopeEntry[] = [];
+        for (const entry of entriesToSearch) {
+          if (thisSeq !== searchSeq || cancelled) return;
+
+          let doc_: { title: string; messages: string } | undefined = searchDocCache.get(entry.conversationKey);
+          if (!doc_) {
+            try {
+              const messages = await loadConversation(entry.conversationKey, 200);
+              const messageText = messages.map((m) => (m.text || "")).join(" ");
+              doc_ = { title: entry.title || "", messages: messageText };
+              searchDocCache.set(entry.conversationKey, doc_);
+            } catch {
+              continue;
+            }
+          }
+          if (thisSeq !== searchSeq || cancelled) return;
+
+          const normalizedMessages = doc_.messages.toLocaleLowerCase();
+          if (tokens.every((token) => normalizedMessages.includes(token))) {
+            contentMatches.push(entry);
+          }
+        }
+
+        if (thisSeq !== searchSeq || cancelled) return;
+
+        // Merge title matches + content matches
+        const allMatches = [...titleMatches, ...contentMatches];
+        allMatches.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+        renderSearchResults(allMatches, query);
+      } catch (err) {
+        ztoolkit.log("LLM: standalone search failed", err);
+      }
+    };
+
+    // Search popup event handlers
+    iconSearch.addEventListener("click", () => {
+      if (searchOverlay.style.display !== "none") {
+        closeSearchPopup();
+      } else {
+        openSearchPopup();
+      }
+    });
+
+    searchCloseBtn.addEventListener("click", () => closeSearchPopup());
+
+    searchOverlay.addEventListener("click", (e: Event) => {
+      if (e.target === searchOverlay) closeSearchPopup();
+    });
+
+    searchInput.addEventListener("input", () => {
+      if (searchDebounceTimer !== null) clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        searchDebounceTimer = null;
+        void runSearch(searchInput.value);
+      }, 300);
+    });
+
+    searchInput.addEventListener("keydown", (e: Event) => {
+      if ((e as KeyboardEvent).key === "Escape") {
+        e.preventDefault();
+        closeSearchPopup();
+      }
+    });
+
+    searchResults.addEventListener("click", (e: Event) => {
+      const target = e.target as Element | null;
+      if (!target) return;
+      const btn = target.closest(".llm-standalone-search-item") as HTMLButtonElement | null;
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const convKey = Number.parseInt(btn.dataset.conversationKey || "", 10);
+      const mode = btn.dataset.mode || "paper";
+      const paperItemId = Number.parseInt(btn.dataset.paperItemId || "0", 10);
+      const sessionVersion = Number.parseInt(btn.dataset.sessionVersion || "0", 10);
+
+      if (!Number.isFinite(convKey) || convKey <= 0) return;
+
+      closeSearchPopup();
+
+      try {
+        if (mode === "paper" && paperItemId > 0) {
+          const paperItem = Zotero.Items.get(paperItemId) as Zotero.Item | null;
+          if (paperItem) {
+            const sv = sessionVersion > 0 ? sessionVersion : 1;
+            const portalItem = createPaperPortalItem(paperItem, convKey, sv);
+            standaloneMode = "paper";
+            currentPaperItem = paperItem;
+            currentBasePaperItem = paperItem;
+            paperTab.classList.add("active");
+            openTab.classList.remove("active");
+            const noteSession = resolveActiveNoteSession(paperItem);
+            paperTab.textContent = noteSession ? t("Note editing") : t("Paper chat");
+            mountChatPanel(portalItem);
+          }
+        } else {
+          standaloneMode = "open";
+          paperTab.classList.remove("active");
+          openTab.classList.add("active");
+          const portalItem = createGlobalPortalItem(libraryID, convKey);
+          mountChatPanel(portalItem);
+        }
+      } catch (err) {
+        ztoolkit.log("LLM: standalone search navigate failed", err);
+      }
+    });
 
     // History popup renderer — floating conversation list from collapsed icon strip
     const renderHistoryPopup = async () => {

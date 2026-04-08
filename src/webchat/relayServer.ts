@@ -158,10 +158,13 @@ interface ExtensionStatus {
   ts: number;
 }
 
+type HistorySiteSyncMap = Record<string, { lastUpdatedAt: number }>;
+
 const Z = Zotero as unknown as {
   _webchatRelay?: {
     state: RelayState;
     mirroredHistory: Array<{ id: string; title: string; chatUrl: string }>;
+    historySiteSync: HistorySiteSyncMap;
     scrapedMessages: ScrapedChatMessage[] | null;
     lastExtensionContact: number;
     extensionStatus: ExtensionStatus | null;
@@ -209,6 +212,7 @@ if (!Z._webchatRelay) {
       active_target: null,
     },
     mirroredHistory: [],
+    historySiteSync: {},
     scrapedMessages: null,
     lastExtensionContact: 0,
     extensionStatus: null,
@@ -223,6 +227,7 @@ const STORAGE_KEY = "__webchatRelayStorage";
 function _store(): {
   state: RelayState;
   mirroredHistory: Array<{ id: string; title: string; chatUrl: string }>;
+  historySiteSync: HistorySiteSyncMap;
   scrapedMessages: ScrapedChatMessage[] | null;
   lastExtensionContact: number;
   extensionStatus: ExtensionStatus | null;
@@ -237,8 +242,77 @@ function _store(): {
 function S(): RelayState { return _store().state; }
 function getMirroredHistory(): Array<{ id: string; title: string; chatUrl: string }> { return _store().mirroredHistory; }
 function setMirroredHistory(h: Array<{ id: string; title: string; chatUrl: string }>) { _store().mirroredHistory = h; }
+function getHistorySiteSync(): HistorySiteSyncMap { return _store().historySiteSync; }
 function getScrapedMessages(): ScrapedChatMessage[] | null { return _store().scrapedMessages; }
 function setScrapedMessages(m: ScrapedChatMessage[] | null) { _store().scrapedMessages = m; }
+
+function normalizeHistorySiteHostname(hostname: string | null | undefined): string {
+  return String(hostname || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, "");
+}
+
+function cloneHistorySiteSync(): HistorySiteSyncMap {
+  return Object.fromEntries(
+    Object.entries(getHistorySiteSync()).map(([hostname, value]) => [
+      hostname,
+      { lastUpdatedAt: Number(value?.lastUpdatedAt) || 0 },
+    ]),
+  );
+}
+
+function applyChatHistoryUpdate(body: Record<string, unknown>): void {
+  if (!Array.isArray(body.sessions)) return;
+
+  const incoming = (body.sessions as Array<{ id: string; title: string; chatUrl: string }>)
+    .filter((session) =>
+      session &&
+      typeof session.id === "string" &&
+      typeof session.title === "string" &&
+      typeof session.chatUrl === "string"
+    );
+  const incomingSites = new Set<string>();
+
+  for (const session of incoming) {
+    try {
+      incomingSites.add(normalizeHistorySiteHostname(new URL(session.chatUrl).hostname));
+    } catch {
+      // Ignore malformed URLs from the extension.
+    }
+  }
+
+  if (typeof body.siteHostname === "string" && body.siteHostname) {
+    incomingSites.add(normalizeHistorySiteHostname(body.siteHostname));
+  }
+
+  if (incomingSites.size > 0) {
+    const kept = getMirroredHistory().filter((session) => {
+      try {
+        return !incomingSites.has(
+          normalizeHistorySiteHostname(new URL(session.chatUrl).hostname),
+        );
+      } catch {
+        return true;
+      }
+    });
+    setMirroredHistory([...kept, ...incoming]);
+  } else {
+    setMirroredHistory(incoming);
+  }
+
+  if (incomingSites.size === 0) return;
+
+  const lastUpdatedAtRaw = Number(body.scrapedAt);
+  const lastUpdatedAt =
+    Number.isFinite(lastUpdatedAtRaw) && lastUpdatedAtRaw > 0
+      ? Math.floor(lastUpdatedAtRaw)
+      : Date.now();
+  const siteSync = getHistorySiteSync();
+  for (const hostname of incomingSites) {
+    siteSync[hostname] = { lastUpdatedAt };
+  }
+}
 
 function resetState() {
   const prevSeq = S().query.seq; // preserve seq counter so background.js doesn't skip new queries
@@ -927,6 +1001,7 @@ const ChatHistoryEndpoint = createEndpoint(["GET", "POST"], (opts) => {
       title: s.title,
       chatUrl: s.chatUrl,
     })),
+    site_sync: cloneHistorySiteSync(),
   });
 });
 
@@ -936,28 +1011,7 @@ const ChatHistoryEndpoint = createEndpoint(["GET", "POST"], (opts) => {
 // scrapes from wiping DeepSeek history (and vice-versa).
 const UpdateChatHistoryEndpoint = createEndpoint(["POST"], (opts) => {
   const body = parseBody(opts.data);
-  if (Array.isArray(body.sessions)) {
-    const incoming = body.sessions as Array<{ id: string; title: string; chatUrl: string }>;
-    // Determine which site(s) the incoming sessions belong to
-    const incomingSites = new Set<string>();
-    for (const s of incoming) {
-      try { incomingSites.add(new URL(s.chatUrl).hostname); } catch { /* skip */ }
-    }
-    // Also accept explicit siteHostname for empty-array case (site has no history)
-    if (typeof body.siteHostname === "string" && body.siteHostname) {
-      incomingSites.add(body.siteHostname as string);
-    }
-    if (incomingSites.size > 0) {
-      // Keep entries from OTHER sites, replace entries from THIS site
-      const kept = getMirroredHistory().filter((s) => {
-        try { return !incomingSites.has(new URL(s.chatUrl).hostname); } catch { return true; }
-      });
-      setMirroredHistory([...kept, ...incoming]);
-    } else {
-      // Fallback: full replace (backward compat with older extensions)
-      setMirroredHistory(incoming);
-    }
-  }
+  applyChatHistoryUpdate(body);
   return jsonReply({ success: true });
 });
 
@@ -1346,6 +1400,17 @@ export function relayGetChatHistory(): Array<{ id: string; title: string; chatUr
   return getMirroredHistory().map((s) => ({ id: s.id, title: s.title, chatUrl: s.chatUrl }));
 }
 
+/** Get mirrored chat history plus per-site freshness metadata (no HTTP). */
+export function relayGetHistorySnapshot(): {
+  sessions: Array<{ id: string; title: string; chatUrl: string | null }>;
+  siteSync: HistorySiteSyncMap;
+} {
+  return {
+    sessions: relayGetChatHistory(),
+    siteSync: cloneHistorySiteSync(),
+  };
+}
+
 /** Get the reported ChatGPT mode (set by extension via /update_mode). */
 export function relayGetReportedMode(): string | null {
   return S().reported_mode;
@@ -1385,6 +1450,11 @@ export function relayGetExtensionStatus(): ExtensionStatus | null {
 /** Test helper to reset relay state without issuing commands. */
 export function relayResetForTests(): void {
   resetState();
+  setMirroredHistory([]);
+  _store().historySiteSync = {};
+  setScrapedMessages(null);
+  _store().lastExtensionContact = 0;
+  _store().extensionStatus = null;
 }
 
 /**

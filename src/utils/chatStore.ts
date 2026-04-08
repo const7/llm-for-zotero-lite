@@ -1430,6 +1430,58 @@ export async function listPaperConversations(
   return out;
 }
 
+/**
+ * List all paper conversations across all papers for a given library.
+ * Unlike listPaperConversations, this does NOT filter by paperItemID.
+ */
+export async function listAllPaperConversationsByLibrary(
+  libraryID: number,
+  limit: number,
+): Promise<PaperConversationSummary[]> {
+  const normalizedLibraryID = normalizeLibraryID(libraryID);
+  if (!normalizedLibraryID) return [];
+  const normalizedLimit = normalizeLimit(limit, 100);
+
+  const rows = (await Zotero.DB.queryAsync(
+    `SELECT pc.conversation_key AS conversationKey,
+            pc.library_id AS libraryID,
+            pc.paper_item_id AS paperItemID,
+            pc.session_version AS sessionVersion,
+            pc.created_at AS createdAt,
+            COALESCE(
+              NULLIF(TRIM(pc.title), ''),
+              (
+                SELECT m0.text
+                FROM ${CHAT_MESSAGES_TABLE} m0
+                WHERE m0.conversation_key = pc.conversation_key
+                  AND m0.role = 'user'
+                ORDER BY m0.timestamp ASC, m0.id ASC
+                LIMIT 1
+              )
+            ) AS title,
+            COALESCE(MAX(m.timestamp), pc.created_at) AS lastActivityAt,
+            SUM(CASE WHEN m.role = 'user' THEN 1 ELSE 0 END) AS userTurnCount
+     FROM ${PAPER_CONVERSATIONS_TABLE} pc
+     LEFT JOIN ${CHAT_MESSAGES_TABLE} m
+       ON m.conversation_key = pc.conversation_key
+     WHERE pc.library_id = ?
+     GROUP BY pc.conversation_key, pc.library_id, pc.paper_item_id, pc.session_version, pc.created_at, pc.title
+     HAVING SUM(CASE WHEN m.role = 'user' THEN 1 ELSE 0 END) > 0
+     ORDER BY lastActivityAt DESC, pc.conversation_key DESC
+     LIMIT ?`,
+    [normalizedLibraryID, normalizedLimit],
+  )) as PaperConversationSummaryRow[] | undefined;
+
+  if (!rows?.length) return [];
+  const out: PaperConversationSummary[] = [];
+  for (const row of rows) {
+    const normalized = toPaperConversationSummary(row);
+    if (!normalized) continue;
+    out.push(normalized);
+  }
+  return out;
+}
+
 export async function getPaperConversation(
   conversationKey: number,
 ): Promise<PaperConversationSummary | null> {

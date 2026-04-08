@@ -12,7 +12,7 @@ import {
   relayPollResponse,
   relayNewChat,
   relayLoadChat,
-  relayGetChatHistory,
+  relayGetHistorySnapshot,
   relayGetScrapedMessages,
   relayGetStateSnapshot,
   relayGetReportedMode,
@@ -24,6 +24,8 @@ import {
 const POLL_INTERVAL_MS = 500;
 const REMOTE_READY_POLL_INTERVAL_MS = 250;
 const REMOTE_READY_TIMEOUT_MS = 30_000;
+const HISTORY_REFRESH_POLL_INTERVAL_MS = 500;
+const HISTORY_REFRESH_TIMEOUT_MS = 10_000;
 const TIMEOUT_MS = 300_000; // 5 minutes
 
 // ---------------------------------------------------------------------------
@@ -34,6 +36,47 @@ function createAbortError(): Error {
   const err = new Error("Aborted");
   err.name = "AbortError";
   return err;
+}
+
+function normalizeWebChatAnswerText(text: string | null | undefined): string {
+  return String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function hasMeaningfulWebChatAnswerText(
+  text: string | null | undefined,
+): boolean {
+  const normalized = normalizeWebChatAnswerText(text).toLowerCase();
+  if (normalized.length <= 1) return false;
+  if (
+    normalized === "thinking" ||
+    normalized === "thinking..." ||
+    normalized === "stopped thinking" ||
+    normalized === "quick answer" ||
+    normalized === "stopped thinking quick answer"
+  ) {
+    return false;
+  }
+  if (
+    /^thought for .+$/.test(normalized) ||
+    /^reading\s+documents?\.?$/i.test(normalized) ||
+    /^searching(\s+the\s+web)?\.?$/i.test(normalized) ||
+    /^analyzing\.?$/i.test(normalized) ||
+    /^browsing\.?$/i.test(normalized)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function normalizeHistoryHostname(hostname: string | null | undefined): string {
+  return String(hostname || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, "");
 }
 
 /** Convert a Uint8Array to base64, safe for large buffers. */
@@ -256,6 +299,101 @@ export async function pollForResponse(
   let lastCompletionReason: RelayCompletionReason | null = null;
   const startTime = Date.now();
 
+  const buildTerminalResult = (
+    match: PollResponseData["responses"][number],
+    data: PollResponseData,
+  ): WebChatPollResult => {
+    const finalText =
+      hasMeaningfulWebChatAnswerText(match.text) ||
+      !hasMeaningfulWebChatAnswerText(lastAnswerText)
+        ? (typeof match.text === "string" ? match.text : lastAnswerText)
+        : lastAnswerText;
+    const finalThinking =
+      typeof match.thinking === "string" && match.thinking.length > 0
+        ? match.thinking
+        : lastThinkingText;
+    const requestedRunState = match.run_state || "done";
+    const finalAnswerRevision =
+      Number.isFinite(match.answer_revision) && Number(match.answer_revision) >= 0
+        ? Number(match.answer_revision)
+        : lastAnswerRevision;
+    const finalThinkingRevision =
+      Number.isFinite(match.thinking_revision) &&
+      Number(match.thinking_revision) >= 0
+        ? Number(match.thinking_revision)
+        : lastThinkingRevision;
+    const hasAnswer = hasMeaningfulWebChatAnswerText(finalText);
+    const hasPartialContext =
+      finalAnswerRevision > 0 ||
+      finalThinkingRevision > 0 ||
+      hasMeaningfulWebChatAnswerText(lastAnswerText) ||
+      normalizeWebChatAnswerText(finalThinking).length > 0;
+    const runState =
+      requestedRunState === "done" && !hasAnswer && hasPartialContext
+        ? "incomplete"
+        : requestedRunState;
+    const completionReason =
+      runState === "incomplete"
+        ? (match.completion_reason || "error")
+        : (match.completion_reason || null);
+    const result = withRemoteState({
+      text: finalText || "",
+      thinking: finalThinking || "",
+      answerAnchorId: match.answer_anchor_id || lastAnswerAnchorId,
+      answerRevision: finalAnswerRevision,
+      thinkingRevision: finalThinkingRevision,
+      runState,
+      completionReason,
+      remoteChatUrl: match.remote_chat_url || data.remote_chat_url || null,
+      remoteChatId: match.remote_chat_id || data.remote_chat_id || null,
+      userTurnKey: match.user_turn_key || data.user_turn_key || null,
+      assistantTurnKey:
+        match.assistant_turn_key || data.assistant_turn_key || null,
+      baselineTranscriptCount:
+        match.baseline_transcript_count ??
+        data.baseline_transcript_count ??
+        0,
+      baselineTranscriptHash:
+        match.baseline_transcript_hash || data.baseline_transcript_hash || null,
+      turnStatus:
+        match.turn_status ||
+        data.turn_status ||
+        (runState === "incomplete" ? "incomplete" : null),
+    });
+
+    emitAnswerSnapshot(result.text, {
+      answerAnchorId: result.answerAnchorId,
+      answerRevision: result.answerRevision,
+      runState: result.runState,
+      completionReason: result.completionReason,
+      remoteChatUrl: result.remoteChatUrl,
+      remoteChatId: result.remoteChatId,
+      userTurnKey: result.userTurnKey,
+      assistantTurnKey: result.assistantTurnKey,
+      baselineTranscriptCount: result.baselineTranscriptCount,
+      baselineTranscriptHash: result.baselineTranscriptHash,
+      turnStatus: result.turnStatus,
+    });
+    emitThinkingSnapshot(result.thinking, {
+      thinkingRevision: result.thinkingRevision,
+      runState: result.runState,
+      completionReason: result.completionReason,
+      remoteChatUrl: result.remoteChatUrl,
+      remoteChatId: result.remoteChatId,
+      userTurnKey: result.userTurnKey,
+      assistantTurnKey: result.assistantTurnKey,
+      baselineTranscriptCount: result.baselineTranscriptCount,
+      baselineTranscriptHash: result.baselineTranscriptHash,
+      turnStatus: result.turnStatus,
+    });
+
+    if (result.runState !== "incomplete" && !hasAnswer) {
+      throw new Error("Chat finished without a visible final answer.");
+    }
+
+    return result;
+  };
+
   const emitAnswerSnapshot = (
     text: string | null | undefined,
     snapshot: WebChatAnswerSnapshot,
@@ -348,120 +486,7 @@ export async function pollForResponse(
       const match = (data.responses || []).find((r) => r.seq === seq);
       if (match) {
         if (match.error) throw new Error(match.error);
-        const runState = match.run_state || "done";
-        const completionReason = match.completion_reason || null;
-        const finalText =
-          typeof match.text === "string" ? match.text : lastAnswerText;
-        const finalThinking =
-          typeof match.thinking === "string" ? match.thinking : lastThinkingText;
-
-        emitAnswerSnapshot(finalText, {
-          answerAnchorId: match.answer_anchor_id || lastAnswerAnchorId,
-          answerRevision:
-            Number.isFinite(match.answer_revision) &&
-            Number(match.answer_revision) >= 0
-              ? Number(match.answer_revision)
-              : lastAnswerRevision,
-          runState,
-          completionReason,
-          remoteChatUrl: match.remote_chat_url || data.remote_chat_url || null,
-          remoteChatId: match.remote_chat_id || data.remote_chat_id || null,
-          userTurnKey: match.user_turn_key || data.user_turn_key || null,
-          assistantTurnKey:
-            match.assistant_turn_key || data.assistant_turn_key || null,
-          baselineTranscriptCount:
-            match.baseline_transcript_count ??
-            data.baseline_transcript_count ??
-            0,
-          baselineTranscriptHash:
-            match.baseline_transcript_hash || data.baseline_transcript_hash || null,
-          turnStatus: match.turn_status || data.turn_status || null,
-        });
-        emitThinkingSnapshot(finalThinking, {
-          thinkingRevision:
-            Number.isFinite(match.thinking_revision) &&
-            Number(match.thinking_revision) >= 0
-              ? Number(match.thinking_revision)
-              : lastThinkingRevision,
-          runState,
-          completionReason,
-          remoteChatUrl: match.remote_chat_url || data.remote_chat_url || null,
-          remoteChatId: match.remote_chat_id || data.remote_chat_id || null,
-          userTurnKey: match.user_turn_key || data.user_turn_key || null,
-          assistantTurnKey:
-            match.assistant_turn_key || data.assistant_turn_key || null,
-          baselineTranscriptCount:
-            match.baseline_transcript_count ??
-            data.baseline_transcript_count ??
-            0,
-          baselineTranscriptHash:
-            match.baseline_transcript_hash || data.baseline_transcript_hash || null,
-          turnStatus: match.turn_status || data.turn_status || null,
-        });
-
-        if (runState === "incomplete") {
-          return withRemoteState({
-            text: finalText,
-            thinking: finalThinking,
-            answerAnchorId: match.answer_anchor_id || lastAnswerAnchorId,
-            answerRevision:
-              Number.isFinite(match.answer_revision) &&
-              Number(match.answer_revision) >= 0
-                ? Number(match.answer_revision)
-                : lastAnswerRevision,
-            thinkingRevision:
-              Number.isFinite(match.thinking_revision) &&
-              Number(match.thinking_revision) >= 0
-                ? Number(match.thinking_revision)
-                : lastThinkingRevision,
-            runState,
-            completionReason,
-            remoteChatUrl: match.remote_chat_url || data.remote_chat_url || null,
-            remoteChatId: match.remote_chat_id || data.remote_chat_id || null,
-            userTurnKey: match.user_turn_key || data.user_turn_key || null,
-            assistantTurnKey:
-              match.assistant_turn_key || data.assistant_turn_key || null,
-            baselineTranscriptCount:
-              match.baseline_transcript_count ??
-              data.baseline_transcript_count ??
-              0,
-            baselineTranscriptHash:
-              match.baseline_transcript_hash || data.baseline_transcript_hash || null,
-            turnStatus: match.turn_status || data.turn_status || null,
-          });
-        }
-        if (!finalText.trim()) {
-          throw new Error("Chat finished without a visible final answer.");
-        }
-        return withRemoteState({
-          text: finalText,
-          thinking: finalThinking,
-          answerAnchorId: match.answer_anchor_id || lastAnswerAnchorId,
-          answerRevision:
-            Number.isFinite(match.answer_revision) &&
-            Number(match.answer_revision) >= 0
-              ? Number(match.answer_revision)
-              : lastAnswerRevision,
-          thinkingRevision:
-            Number.isFinite(match.thinking_revision) &&
-            Number(match.thinking_revision) >= 0
-              ? Number(match.thinking_revision)
-              : lastThinkingRevision,
-          runState,
-          completionReason,
-          remoteChatUrl: match.remote_chat_url || data.remote_chat_url || null,
-          remoteChatId: match.remote_chat_id || data.remote_chat_id || null,
-          userTurnKey: match.user_turn_key || data.user_turn_key || null,
-          assistantTurnKey:
-            match.assistant_turn_key || data.assistant_turn_key || null,
-          baselineTranscriptCount:
-            match.baseline_transcript_count ??
-            data.baseline_transcript_count ??
-            0,
-          baselineTranscriptHash:
-            match.baseline_transcript_hash || data.baseline_transcript_hash || null,
-          turnStatus: match.turn_status || data.turn_status || null,
-        });
+        return buildTerminalResult(match, data);
       }
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       continue;
@@ -471,120 +496,7 @@ export async function pollForResponse(
     const match = (data.responses || []).find((r) => r.seq === seq);
     if (match) {
       if (match.error) throw new Error(match.error);
-      const runState = match.run_state || "done";
-      const completionReason = match.completion_reason || null;
-      const finalText =
-        typeof match.text === "string" ? match.text : lastAnswerText;
-      const finalThinking =
-        typeof match.thinking === "string" ? match.thinking : lastThinkingText;
-
-      emitAnswerSnapshot(finalText, {
-        answerAnchorId: match.answer_anchor_id || lastAnswerAnchorId,
-        answerRevision:
-          Number.isFinite(match.answer_revision) &&
-          Number(match.answer_revision) >= 0
-            ? Number(match.answer_revision)
-            : lastAnswerRevision,
-        runState,
-        completionReason,
-        remoteChatUrl: match.remote_chat_url || data.remote_chat_url || null,
-        remoteChatId: match.remote_chat_id || data.remote_chat_id || null,
-        userTurnKey: match.user_turn_key || data.user_turn_key || null,
-        assistantTurnKey:
-          match.assistant_turn_key || data.assistant_turn_key || null,
-        baselineTranscriptCount:
-          match.baseline_transcript_count ??
-          data.baseline_transcript_count ??
-          0,
-        baselineTranscriptHash:
-          match.baseline_transcript_hash || data.baseline_transcript_hash || null,
-        turnStatus: match.turn_status || data.turn_status || null,
-      });
-      emitThinkingSnapshot(finalThinking, {
-        thinkingRevision:
-          Number.isFinite(match.thinking_revision) &&
-          Number(match.thinking_revision) >= 0
-            ? Number(match.thinking_revision)
-            : lastThinkingRevision,
-        runState,
-        completionReason,
-        remoteChatUrl: match.remote_chat_url || data.remote_chat_url || null,
-        remoteChatId: match.remote_chat_id || data.remote_chat_id || null,
-        userTurnKey: match.user_turn_key || data.user_turn_key || null,
-        assistantTurnKey:
-          match.assistant_turn_key || data.assistant_turn_key || null,
-        baselineTranscriptCount:
-          match.baseline_transcript_count ??
-          data.baseline_transcript_count ??
-          0,
-        baselineTranscriptHash:
-          match.baseline_transcript_hash || data.baseline_transcript_hash || null,
-        turnStatus: match.turn_status || data.turn_status || null,
-      });
-
-      if (runState === "incomplete") {
-        return withRemoteState({
-          text: finalText,
-          thinking: finalThinking,
-          answerAnchorId: match.answer_anchor_id || lastAnswerAnchorId,
-          answerRevision:
-            Number.isFinite(match.answer_revision) &&
-            Number(match.answer_revision) >= 0
-              ? Number(match.answer_revision)
-              : lastAnswerRevision,
-          thinkingRevision:
-            Number.isFinite(match.thinking_revision) &&
-            Number(match.thinking_revision) >= 0
-              ? Number(match.thinking_revision)
-              : lastThinkingRevision,
-          runState,
-          completionReason,
-          remoteChatUrl: match.remote_chat_url || data.remote_chat_url || null,
-          remoteChatId: match.remote_chat_id || data.remote_chat_id || null,
-          userTurnKey: match.user_turn_key || data.user_turn_key || null,
-          assistantTurnKey:
-            match.assistant_turn_key || data.assistant_turn_key || null,
-          baselineTranscriptCount:
-            match.baseline_transcript_count ??
-            data.baseline_transcript_count ??
-            0,
-          baselineTranscriptHash:
-            match.baseline_transcript_hash || data.baseline_transcript_hash || null,
-          turnStatus: match.turn_status || data.turn_status || null,
-        });
-      }
-      if (!finalText.trim()) {
-        throw new Error("Chat finished without a visible final answer.");
-      }
-      return withRemoteState({
-        text: finalText,
-        thinking: finalThinking,
-        answerAnchorId: match.answer_anchor_id || lastAnswerAnchorId,
-        answerRevision:
-          Number.isFinite(match.answer_revision) &&
-          Number(match.answer_revision) >= 0
-            ? Number(match.answer_revision)
-            : lastAnswerRevision,
-        thinkingRevision:
-          Number.isFinite(match.thinking_revision) &&
-          Number(match.thinking_revision) >= 0
-            ? Number(match.thinking_revision)
-            : lastThinkingRevision,
-        runState,
-        completionReason,
-        remoteChatUrl: match.remote_chat_url || data.remote_chat_url || null,
-        remoteChatId: match.remote_chat_id || data.remote_chat_id || null,
-        userTurnKey: match.user_turn_key || data.user_turn_key || null,
-        assistantTurnKey:
-          match.assistant_turn_key || data.assistant_turn_key || null,
-        baselineTranscriptCount:
-          match.baseline_transcript_count ??
-          data.baseline_transcript_count ??
-          0,
-        baselineTranscriptHash:
-          match.baseline_transcript_hash || data.baseline_transcript_hash || null,
-        turnStatus: match.turn_status || data.turn_status || null,
-      });
+      return buildTerminalResult(match, data);
     }
 
     if (data.status === "error") {
@@ -615,10 +527,72 @@ export type WebChatHistorySession = {
   chatUrl: string | null;
 };
 
+export type WebChatHistorySnapshot = {
+  sessions: WebChatHistorySession[];
+  siteSync: Record<string, { lastUpdatedAt: number }>;
+};
+
 export async function fetchChatHistory(
-  _host: string,
+  host: string,
 ): Promise<WebChatHistorySession[]> {
-  return relayGetChatHistory();
+  return (await fetchChatHistorySnapshot(host)).sessions;
+}
+
+export async function fetchChatHistorySnapshot(
+  _host: string,
+): Promise<WebChatHistorySnapshot> {
+  const snapshot = relayGetHistorySnapshot();
+  return {
+    sessions: snapshot.sessions,
+    siteSync: snapshot.siteSync,
+  };
+}
+
+export function filterWebChatHistorySessionsForHostname(
+  sessions: WebChatHistorySession[],
+  hostname: string | null | undefined,
+): WebChatHistorySession[] {
+  const normalizedHostname = normalizeHistoryHostname(hostname);
+  if (!normalizedHostname) return sessions;
+
+  return sessions.filter((session) => {
+    try {
+      return normalizeHistoryHostname(new URL(session.chatUrl || "").hostname) === normalizedHostname;
+    } catch {
+      return false;
+    }
+  });
+}
+
+export async function waitForFreshChatHistorySnapshot(
+  host: string,
+  siteHostname: string | null | undefined,
+  minLastUpdatedAt: number,
+  timeoutMs = HISTORY_REFRESH_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<WebChatHistorySnapshot> {
+  const normalizedHostname = normalizeHistoryHostname(siteHostname);
+  const deadline = Date.now() + timeoutMs;
+  let latest = await fetchChatHistorySnapshot(host);
+
+  if (!normalizedHostname) {
+    return latest;
+  }
+
+  while (true) {
+    const siteSyncEntry = Object.entries(latest.siteSync).find(
+      ([hostname]) => normalizeHistoryHostname(hostname) === normalizedHostname,
+    )?.[1];
+    if ((siteSyncEntry?.lastUpdatedAt || 0) >= minLastUpdatedAt) {
+      return latest;
+    }
+    if (Date.now() >= deadline) {
+      return latest;
+    }
+    if (signal?.aborted) throw createAbortError();
+    await new Promise((r) => setTimeout(r, HISTORY_REFRESH_POLL_INTERVAL_MS));
+    latest = await fetchChatHistorySnapshot(host);
+  }
 }
 
 export async function loadChatSession(

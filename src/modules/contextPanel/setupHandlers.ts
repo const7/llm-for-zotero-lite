@@ -339,6 +339,8 @@ let setupHandlersGeneration = 0;
 export type SetupHandlersHooks = {
   onConversationHistoryChanged?: () => void;
   onWebChatModeChanged?: (isWebChat: boolean) => void;
+  /** Called by standalone to clear force-new-chat intent before loading a session. */
+  clearWebChatNewChatIntent?: () => void;
 };
 
 export function setupHandlers(
@@ -919,11 +921,6 @@ export function setupHandlers(
     if (historyToggleBtn) {
       historyToggleBtn.setAttribute("aria-expanded", "false");
     }
-    const win = body.ownerDocument?.defaultView;
-    if (win && Number.isFinite(historySectionViewportFrameId)) {
-      win.cancelAnimationFrame(historySectionViewportFrameId as number);
-    }
-    historySectionViewportFrameId = null;
     historySearchLoadSeq += 1;
     historySearchQuery = "";
     historySearchExpanded = false;
@@ -2801,12 +2798,36 @@ export function setupHandlers(
   };
 
   let latestConversationHistory: ConversationHistoryEntry[] = [];
-  const HISTORY_SECTION_VISIBLE_ROW_COUNT = 5;
-  let historySectionViewportFrameId: number | null = null;
-  const historySectionExpandedState = new Map<"paper" | "open", boolean>([
-    ["paper", true],
-    ["open", false],
-  ]);
+
+  // Day-group helpers for history menu (matching standalone sidebar style)
+  const getDayGroupLabel = (ts: number): string => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const yesterdayStart = todayStart - 86_400_000;
+    const weekStart = todayStart - 6 * 86_400_000;
+    const monthStart = todayStart - 29 * 86_400_000;
+    if (ts >= todayStart) return t("Today");
+    if (ts >= yesterdayStart) return t("Yesterday");
+    if (ts >= weekStart) return t("Last 7 days");
+    if (ts >= monthStart) return t("Last 30 days");
+    return t("Older");
+  };
+
+  const groupEntriesByDay = (
+    entries: ConversationHistoryEntry[],
+  ): Array<{ label: string; items: ConversationHistoryEntry[] }> => {
+    const groups: Array<{ label: string; items: ConversationHistoryEntry[] }> = [];
+    let currentLabel = "";
+    for (const entry of entries) {
+      const label = getDayGroupLabel(entry.lastActivityAt);
+      if (label !== currentLabel) {
+        currentLabel = label;
+        groups.push({ label, items: [] });
+      }
+      groups[groups.length - 1].items.push(entry);
+    }
+    return groups;
+  };
   let historySearchQuery = "";
   let historySearchExpanded = false;
   let historySearchLoading = false;
@@ -2963,16 +2984,6 @@ export function setupHandlers(
       return activeConversationKey === entry.conversationKey;
     }
     return false;
-  };
-
-  const isHistorySectionExpanded = (section: "paper" | "open"): boolean =>
-    historySectionExpandedState.get(section) ?? section === "paper";
-
-  const setHistorySectionExpanded = (
-    section: "paper" | "open",
-    expanded: boolean,
-  ) => {
-    historySectionExpandedState.set(section, expanded);
   };
 
   const normalizeHistorySearchQuery = (value: string): string =>
@@ -3283,121 +3294,6 @@ export function setupHandlers(
     return results;
   };
 
-  const applyHistorySectionExpandedState = (
-    sectionBlock: HTMLDivElement,
-    expanded: boolean,
-  ) => {
-    sectionBlock.dataset.expanded = expanded ? "true" : "false";
-    const sectionHeader = sectionBlock.querySelector(
-      ".llm-history-menu-section",
-    ) as HTMLButtonElement | null;
-    if (sectionHeader) {
-      sectionHeader.setAttribute("aria-expanded", expanded ? "true" : "false");
-    }
-    const sectionIcon = sectionBlock.querySelector(
-      ".llm-history-menu-section-icon",
-    ) as HTMLSpanElement | null;
-    if (sectionIcon) {
-      sectionIcon.textContent = expanded ? "▾" : "▸";
-    }
-    const sectionViewport = sectionBlock.querySelector(
-      ".llm-history-menu-section-viewport",
-    ) as HTMLDivElement | null;
-    if (sectionViewport) {
-      sectionViewport.hidden = !expanded;
-      sectionViewport.style.display = expanded ? "block" : "none";
-    }
-  };
-
-  const applyHistorySectionViewportHeights = () => {
-    if (!historyMenu || historyMenu.style.display === "none") return;
-    const sectionViewports = Array.from(
-      historyMenu.querySelectorAll(".llm-history-menu-section-viewport"),
-    ) as HTMLDivElement[];
-
-    // --- Read pass: measure everything before writing any styles. ---
-    // This avoids layout thrashing (interleaved reads + writes force the
-    // browser to recalculate layout on every iteration).
-    const measurements: Array<{ viewport: HTMLDivElement; maxHeight: string }> = [];
-    for (const sectionViewport of sectionViewports) {
-      const shouldLimit =
-        sectionViewport.dataset.scrollLimited === "true" &&
-        !sectionViewport.hidden &&
-        sectionViewport.style.display !== "none";
-      if (!shouldLimit) {
-        measurements.push({ viewport: sectionViewport, maxHeight: "" });
-        continue;
-      }
-      const sectionRows = sectionViewport.querySelector(
-        ".llm-history-menu-section-rows",
-      ) as HTMLDivElement | null;
-      if (!sectionRows) {
-        measurements.push({ viewport: sectionViewport, maxHeight: "" });
-        continue;
-      }
-      const rowElements = Array.from(sectionRows.children).filter((child) =>
-        child.classList.contains("llm-history-menu-row"),
-      ) as HTMLDivElement[];
-      if (!rowElements.length) {
-        measurements.push({ viewport: sectionViewport, maxHeight: "" });
-        continue;
-      }
-      const computedRowsStyle =
-        body.ownerDocument?.defaultView?.getComputedStyle(sectionRows);
-      const parsedRowGap = Number.parseFloat(computedRowsStyle?.rowGap || "");
-      const parsedGap = Number.parseFloat(computedRowsStyle?.gap || "");
-      const rowGap = Number.isFinite(parsedRowGap)
-        ? parsedRowGap
-        : Number.isFinite(parsedGap)
-          ? parsedGap
-          : 0;
-      let visibleHeight = 0;
-      for (const row of rowElements.slice(
-        0,
-        HISTORY_SECTION_VISIBLE_ROW_COUNT,
-      )) {
-        const measuredHeight =
-          row.getBoundingClientRect().height || row.offsetHeight;
-        if (measuredHeight > 0) visibleHeight += measuredHeight;
-      }
-      if (visibleHeight <= 0) {
-        measurements.push({ viewport: sectionViewport, maxHeight: "" });
-        continue;
-      }
-      visibleHeight +=
-        rowGap * Math.max(0, HISTORY_SECTION_VISIBLE_ROW_COUNT - 1);
-      measurements.push({ viewport: sectionViewport, maxHeight: `${Math.ceil(visibleHeight)}px` });
-    }
-
-    // --- Write pass: apply all maxHeight values at once. ---
-    for (const { viewport, maxHeight } of measurements) {
-      viewport.style.maxHeight = maxHeight;
-    }
-  };
-
-  const queueHistorySectionViewportHeights = () => {
-    const win = body.ownerDocument?.defaultView;
-    if (!win) {
-      applyHistorySectionViewportHeights();
-      return;
-    }
-    if (Number.isFinite(historySectionViewportFrameId)) {
-      win.cancelAnimationFrame(historySectionViewportFrameId as number);
-    }
-    historySectionViewportFrameId = win.requestAnimationFrame(() => {
-      historySectionViewportFrameId = null;
-      applyHistorySectionViewportHeights();
-      if (
-        historyToggleBtn &&
-        historyMenu &&
-        historyMenu.style.display !== "none"
-      ) {
-        positionMenuBelowButton(body, historyMenu, historyToggleBtn);
-        historyMenu.style.display = "flex";
-      }
-    });
-  };
-
   const renderGlobalHistoryMenu = () => {
     if (!historyMenu) return;
     historyMenu.innerHTML = "";
@@ -3447,7 +3343,7 @@ export function setupHandlers(
         "llm-history-menu-search-trigger",
         {
           type: "button",
-          textContent: "\u{1F50D} Search history",
+          textContent: "Search history",
           title: "Search chat history",
         },
       ) as HTMLButtonElement;
@@ -3494,235 +3390,108 @@ export function setupHandlers(
       historyMenu.appendChild(emptyRow);
       return;
     }
-    const sectionEntries = new Map<
-      "paper" | "open",
-      { title: string; entries: ConversationHistoryEntry[] }
-    >();
-    for (const entry of filteredEntries) {
-      const section = sectionEntries.get(entry.section) || {
-        title: entry.sectionTitle,
-        entries: [],
-      };
-      section.entries.push(entry);
-      sectionEntries.set(entry.section, section);
-    }
-    const orderedSections = (["paper", "open"] as const)
-      .map((sectionKey) => {
-        const section = sectionEntries.get(sectionKey);
-        if (!section) return null;
-        const latestActivity = section.entries.reduce(
-          (max, entry) => Math.max(max, entry.lastActivityAt || 0),
-          0,
-        );
-        const topMatchCount = searchActive
-          ? section.entries.reduce(
-              (max, entry) =>
-                Math.max(
-                  max,
-                  searchResultsByKey.get(entry.conversationKey)?.matchCount ||
-                    0,
-                ),
-              0,
-            )
-          : 0;
-        const orderedEntries = searchActive
-          ? [...section.entries].sort((a, b) => {
-              const matchDelta =
-                (searchResultsByKey.get(b.conversationKey)?.matchCount || 0) -
-                (searchResultsByKey.get(a.conversationKey)?.matchCount || 0);
-              if (matchDelta !== 0) return matchDelta;
-              if (b.lastActivityAt !== a.lastActivityAt) {
-                return b.lastActivityAt - a.lastActivityAt;
-              }
-              return b.conversationKey - a.conversationKey;
-            })
-          : section.entries;
-        return {
-          sectionKey,
-          title: section.title,
-          entries: orderedEntries,
-          latestActivity,
-          topMatchCount,
-        };
-      })
-      .filter(
-        (
-          section,
-        ): section is {
-          sectionKey: "paper" | "open";
-          title: string;
-          entries: ConversationHistoryEntry[];
-          latestActivity: number;
-          topMatchCount: number;
-        } => Boolean(section),
-      );
+    // Sort entries: by match count when searching, otherwise by recency
+    const sortedEntries = searchActive
+      ? [...filteredEntries].sort((a, b) => {
+          const matchDelta =
+            (searchResultsByKey.get(b.conversationKey)?.matchCount || 0) -
+            (searchResultsByKey.get(a.conversationKey)?.matchCount || 0);
+          if (matchDelta !== 0) return matchDelta;
+          if (b.lastActivityAt !== a.lastActivityAt) {
+            return b.lastActivityAt - a.lastActivityAt;
+          }
+          return b.conversationKey - a.conversationKey;
+        })
+      : [...filteredEntries].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 
-    for (const section of orderedSections) {
-      const expanded = normalizedSearchQuery
-        ? true
-        : isHistorySectionExpanded(section.sectionKey);
-      const sectionBlock = createElement(
+    // Group by day (matching standalone sidebar style)
+    const dayGroups = groupEntriesByDay(sortedEntries);
+
+    const itemsList = createElement(
+      body.ownerDocument as Document,
+      "div",
+      "llm-history-items-list",
+    ) as HTMLDivElement;
+
+    for (const group of dayGroups) {
+      const dayLabel = createElement(
         body.ownerDocument as Document,
         "div",
-        "llm-history-menu-section-block",
-      ) as HTMLDivElement;
-      sectionBlock.dataset.historySection = section.sectionKey;
-
-      const sectionHeader = createElement(
-        body.ownerDocument as Document,
-        "button",
-        "llm-history-menu-section",
-        {
-          type: "button",
-        },
+        "llm-history-day-label",
+        { textContent: group.label },
       );
-      sectionHeader.dataset.action = "toggle-section";
-      sectionHeader.dataset.historySection = section.sectionKey;
-      const sectionLabel = createElement(
-        body.ownerDocument as Document,
-        "span",
-        "llm-history-menu-section-label",
-        {
-          textContent: section.title,
-        },
-      );
-      const sectionIcon = createElement(
-        body.ownerDocument as Document,
-        "span",
-        "llm-history-menu-section-icon",
-        {
-          textContent: expanded ? "▾" : "▸",
-        },
-      );
-      sectionIcon.setAttribute("aria-hidden", "true");
-      sectionHeader.append(sectionLabel, sectionIcon);
-      sectionBlock.appendChild(sectionHeader);
+      itemsList.appendChild(dayLabel);
 
-      const sectionViewport = createElement(
-        body.ownerDocument as Document,
-        "div",
-        "llm-history-menu-section-viewport",
-      ) as HTMLDivElement;
-      sectionViewport.dataset.scrollLimited =
-        section.entries.length > HISTORY_SECTION_VISIBLE_ROW_COUNT
-          ? "true"
-          : "false";
-      const sectionRows = createElement(
-        body.ownerDocument as Document,
-        "div",
-        "llm-history-menu-section-rows",
-      ) as HTMLDivElement;
-      sectionViewport.appendChild(sectionRows);
-      sectionBlock.appendChild(sectionViewport);
-      applyHistorySectionExpandedState(sectionBlock, expanded);
-
-      for (const entry of section.entries) {
-        const row = createElement(
-          body.ownerDocument as Document,
-          "div",
-          "llm-history-menu-row",
-        ) as HTMLDivElement;
-        row.classList.add(
-          section.sectionKey === "paper"
-            ? "llm-history-menu-row-paper"
-            : "llm-history-menu-row-open",
-        );
-        row.dataset.conversationKey = `${entry.conversationKey}`;
-        row.dataset.historyKind = entry.kind;
-        row.dataset.historySection = entry.section;
-        if (isHistoryEntryActive(entry)) {
-          row.classList.add("active");
-        }
-        if (entry.isPendingDelete) {
-          row.classList.add("pending-delete");
-        }
-        const rowMain = createElement(
+      for (const entry of group.items) {
+        const btn = createElement(
           body.ownerDocument as Document,
           "button",
-          "llm-history-menu-row-main",
-          {
-            type: "button",
-          },
+          "llm-history-item",
+          { type: "button" },
         ) as HTMLButtonElement;
-        rowMain.dataset.action = "switch";
-        const titleLine = createElement(
-          body.ownerDocument as Document,
-          "div",
-          "llm-history-row-title-line",
-        );
-        const title = createElement(
+        btn.dataset.conversationKey = `${entry.conversationKey}`;
+        btn.dataset.historyKind = entry.kind;
+        btn.dataset.historySection = entry.section;
+        if (isHistoryEntryActive(entry)) {
+          btn.classList.add("active");
+        }
+        if (entry.isPendingDelete) {
+          btn.classList.add("pending-delete");
+        }
+
+        const titleSpan = createElement(
           body.ownerDocument as Document,
           "span",
-          "llm-history-row-title",
+          "llm-history-item-title",
         );
         const displayTitle = formatHistoryRowDisplayTitle(entry.title);
-        title.title = entry.title;
+        titleSpan.title = entry.title;
         const searchResult = searchResultsByKey.get(entry.conversationKey);
         if (searchResult?.titleRanges.length) {
           appendHistorySearchHighlightedText(
-            title,
+            titleSpan,
             displayTitle,
             searchResult.titleRanges,
           );
         } else {
-          title.textContent = displayTitle;
+          titleSpan.textContent = displayTitle;
         }
-        titleLine.append(title);
-        const preview =
-          searchResult && searchResult.previewText
-            ? createElement(
-                body.ownerDocument as Document,
-                "div",
-                "llm-history-row-preview",
-              )
-            : null;
-        if (preview && searchResult) {
+        btn.appendChild(titleSpan);
+
+        // Search preview snippet
+        if (searchResult && searchResult.previewText) {
+          btn.classList.add("has-preview");
+          const preview = createElement(
+            body.ownerDocument as Document,
+            "div",
+            "llm-history-item-preview",
+          );
           appendHistorySearchHighlightedText(
             preview,
             searchResult.previewText,
             searchResult.previewRanges,
           );
+          btn.appendChild(preview);
         }
-        const meta = createElement(
-          body.ownerDocument as Document,
-          "span",
-          "llm-history-row-meta",
-          {
-            textContent: entry.timestampText,
-            title: entry.timestampText,
-          },
-        );
-        if (preview) {
-          rowMain.append(titleLine, preview, meta);
-        } else {
-          rowMain.append(titleLine, meta);
-        }
-        row.appendChild(rowMain);
 
         if (entry.deletable) {
           const deleteBtn = createElement(
             body.ownerDocument as Document,
-            "button",
-            "llm-history-row-delete",
-            {
-              type: "button",
-              title: "Delete conversation",
-            },
-          ) as HTMLButtonElement;
+            "span",
+            "llm-history-item-delete",
+          ) as HTMLSpanElement;
+          deleteBtn.setAttribute("role", "button");
           deleteBtn.setAttribute("aria-label", `Delete ${entry.title}`);
+          deleteBtn.title = t("Delete conversation");
           deleteBtn.dataset.action = "delete";
-          row.appendChild(deleteBtn);
+          btn.appendChild(deleteBtn);
         }
 
-        sectionRows.appendChild(row);
+        itemsList.appendChild(btn);
       }
-
-      historyMenu.appendChild(sectionBlock);
     }
 
-    if (historyMenu.style.display !== "none") {
-      queueHistorySectionViewportHeights();
-    }
+    historyMenu.appendChild(itemsList);
   };
 
   const restoreHistorySearchInputFocus = () => {
@@ -3750,7 +3519,7 @@ export function setupHandlers(
       historyMenu.style.display !== "none"
     ) {
       positionMenuBelowButton(body, historyMenu, historyToggleBtn);
-      queueHistorySectionViewportHeights();
+
     }
     restoreHistorySearchInputFocus();
   };
@@ -3768,7 +3537,7 @@ export function setupHandlers(
       historyMenu.style.display !== "none"
     ) {
       positionMenuBelowButton(body, historyMenu, historyToggleBtn);
-      queueHistorySectionViewportHeights();
+
     }
   };
 
@@ -3788,7 +3557,7 @@ export function setupHandlers(
         historyMenu.style.display !== "none"
       ) {
         positionMenuBelowButton(body, historyMenu, historyToggleBtn);
-        queueHistorySectionViewportHeights();
+  
       }
       restoreHistorySearchInputFocus();
       return;
@@ -3805,7 +3574,7 @@ export function setupHandlers(
         historyMenu.style.display !== "none"
       ) {
         positionMenuBelowButton(body, historyMenu, historyToggleBtn);
-        queueHistorySectionViewportHeights();
+  
       }
       restoreHistorySearchInputFocus();
       return;
@@ -3818,7 +3587,7 @@ export function setupHandlers(
       historyMenu.style.display !== "none"
     ) {
       positionMenuBelowButton(body, historyMenu, historyToggleBtn);
-      queueHistorySectionViewportHeights();
+
     }
     restoreHistorySearchInputFocus();
     await ensureHistorySearchDocuments(missingEntries);
@@ -3831,7 +3600,7 @@ export function setupHandlers(
       historyMenu.style.display !== "none"
     ) {
       positionMenuBelowButton(body, historyMenu, historyToggleBtn);
-      queueHistorySectionViewportHeights();
+
     }
     restoreHistorySearchInputFocus();
   };
@@ -5289,7 +5058,7 @@ export function setupHandlers(
         positionMenuBelowButton(body, historyMenu, historyToggleBtn);
         historyMenu.style.display = "flex";
         historyToggleBtn.setAttribute("aria-expanded", "true");
-        queueHistorySectionViewportHeights();
+  
       })();
     });
   }
@@ -5349,38 +5118,14 @@ export function setupHandlers(
         return;
       }
 
-      const sectionToggle = target.closest(
-        ".llm-history-menu-section",
-      ) as HTMLButtonElement | null;
-      if (sectionToggle) {
-        e.preventDefault();
-        e.stopPropagation();
-        const section =
-          sectionToggle.dataset.historySection === "paper" ? "paper" : "open";
-        const nextExpanded =
-          sectionToggle.getAttribute("aria-expanded") !== "true";
-        setHistorySectionExpanded(section, nextExpanded);
-        sectionToggle.setAttribute(
-          "aria-expanded",
-          nextExpanded ? "true" : "false",
-        );
-        const sectionBlock = sectionToggle.closest(
-          ".llm-history-menu-section-block",
-        ) as HTMLDivElement | null;
-        if (sectionBlock) {
-          applyHistorySectionExpandedState(sectionBlock, nextExpanded);
-          queueHistorySectionViewportHeights();
-        }
-        return;
-      }
-
+      // Delete button inside a history item
       const deleteBtn = target.closest(
-        ".llm-history-row-delete",
-      ) as HTMLButtonElement | null;
+        ".llm-history-item-delete",
+      ) as HTMLElement | null;
       if (deleteBtn) {
         const row = deleteBtn.closest(
-          ".llm-history-menu-row",
-        ) as HTMLDivElement | null;
+          ".llm-history-item",
+        ) as HTMLButtonElement | null;
         if (!row) return;
         e.preventDefault();
         e.stopPropagation();
@@ -5402,13 +5147,10 @@ export function setupHandlers(
         return;
       }
 
-      const rowMain = target.closest(
-        ".llm-history-menu-row-main",
+      // Click on a history item to switch conversation
+      const row = target.closest(
+        ".llm-history-item",
       ) as HTMLButtonElement | null;
-      if (!rowMain) return;
-      const row = rowMain.closest(
-        ".llm-history-menu-row",
-      ) as HTMLDivElement | null;
       if (!row) return;
       e.preventDefault();
       e.stopPropagation();
@@ -5451,8 +5193,8 @@ export function setupHandlers(
         return;
       }
       const row = target.closest(
-        ".llm-history-menu-row",
-      ) as HTMLDivElement | null;
+        ".llm-history-item",
+      ) as HTMLButtonElement | null;
       if (!row) {
         closeHistoryRowMenu();
         return;
@@ -6450,6 +6192,15 @@ export function setupHandlers(
     webchatPdfUploadedInCurrentConversation = false;
   };
 
+  // Expose webchat intent clearing via hooks so standalone can call it
+  // when loading a conversation from its own sidebar/popup.
+  if (hooks) {
+    hooks.clearWebChatNewChatIntent = () => {
+      clearNextWebChatNewChatIntent();
+      resetWebChatPdfUploadedForCurrentConversation();
+    };
+  }
+
   const startWebChatConnectionCheck = (dot: HTMLElement) => {
     stopWebChatConnectionCheck();
     const check = async () => {
@@ -6755,19 +6506,32 @@ export function setupHandlers(
     if (historyWarmUpRunning) return;
     historyWarmUpRunning = true;
     try {
+      const { getWebChatTargetByModelName } = await import("../../webchat/types");
+      const { currentModel: warmupModel } = getSelectedModelInfo();
+      const warmupTargetEntry = getWebChatTargetByModelName(warmupModel || "");
+      const targetHostname = warmupTargetEntry?.modelName || null;
+      const requestedAt = Date.now();
+
       // Tell the extension to scrape history NOW via a relay command
       const { relaySetCommand } = await import("../../webchat/relayServer");
       relaySetCommand({ type: "SCRAPE_HISTORY" });
 
-      const { fetchChatHistory } = await import("../../webchat/client");
-      // Poll up to 15 seconds for history to arrive from the extension
-      for (let i = 0; i < 10; i++) {
-        const sessions = await fetchChatHistory("");
-        if (sessions.length > 0) {
-          ztoolkit.log(`[webchat] History warmed up: ${sessions.length} conversations`);
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 1500));
+      const {
+        filterWebChatHistorySessionsForHostname,
+        waitForFreshChatHistorySnapshot,
+      } = await import("../../webchat/client");
+      const snapshot = await waitForFreshChatHistorySnapshot(
+        "",
+        targetHostname,
+        requestedAt,
+        15_000,
+      );
+      const sessions = filterWebChatHistorySessionsForHostname(
+        snapshot.sessions,
+        targetHostname,
+      );
+      if (sessions.length > 0) {
+        ztoolkit.log(`[webchat] History warmed up: ${sessions.length} conversations`);
       }
     } catch { /* ignore */ }
     historyWarmUpRunning = false;
@@ -6807,9 +6571,13 @@ export function setupHandlers(
     const { getRelayBaseUrl: getHost } = await import("../../webchat/relayServer");
     const host = getHost();
     const { relaySetCommand } = await import("../../webchat/relayServer");
-    const { fetchChatHistory } = await import("../../webchat/client");
+    const {
+      filterWebChatHistorySessionsForHostname,
+      waitForFreshChatHistorySnapshot,
+    } = await import("../../webchat/client");
 
     // Tell the extension to scrape history NOW
+    const requestedAt = Date.now();
     relaySetCommand({ type: "SCRAPE_HISTORY" });
 
     // Resolve active webchat target for filtering
@@ -6818,23 +6586,20 @@ export function setupHandlers(
     const historyTargetEntry = getWebChatTargetByModelName(historyModel || "");
     const targetHostname = historyTargetEntry?.modelName || null; // e.g. "chatgpt.com" or "chat.deepseek.com"
 
-    // Poll for results — the extension scrapes the sidebar and pushes via HISTORY_UPDATE
-    let sessions: Array<{ id: string; title: string; chatUrl: string | null }> = [];
-    for (let i = 0; i < 10; i++) {
-      try {
-        let allSessions = await fetchChatHistory(host);
-        // Filter to only show conversations from the active target site
-        if (targetHostname) {
-          allSessions = allSessions.filter((s) => {
-            try { return s.chatUrl ? new URL(s.chatUrl).hostname === targetHostname : false; }
-            catch { return false; }
-          });
-        }
-        sessions = allSessions;
-      } catch { /* relay not reachable */ }
-      if (sessions.length > 0) break;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+    // Wait for a fresh update for the active site before deciding the list is empty.
+    let sessions: Array<{ id: string; title: string; chatUrl: string | null }> =
+      [];
+    try {
+      const snapshot = await waitForFreshChatHistorySnapshot(
+        host,
+        targetHostname,
+        requestedAt,
+      );
+      sessions = filterWebChatHistorySessionsForHostname(
+        snapshot.sessions,
+        targetHostname,
+      );
+    } catch { /* relay not reachable */ }
 
     // Remove loading indicator
     loadingEl.remove();
