@@ -57,8 +57,11 @@ async function onStartup() {
     ztoolkit.log("LLM: Failed to initialize agent subsystem", err);
   }
   try {
-    const { loadUserSkills } = await import("./agent/skills/userSkills");
+    const { initUserSkills, loadUserSkills } = await import(
+      "./agent/skills/userSkills"
+    );
     const { setUserSkills } = await import("./agent/skills");
+    await initUserSkills();
     const userSkills = await loadUserSkills();
     setUserSkills(userSkills);
   } catch (err) {
