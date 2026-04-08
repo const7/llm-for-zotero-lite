@@ -6,15 +6,14 @@
  * instruction is injected into the agent system prompt alongside tool
  * guidances.
  *
- * To add a new skill:
- * 1. Create a `.md` file in this directory (use existing skills as templates).
- * 2. Import it below and add it to the BUILTIN_SKILLS array.
+ * Built-in skills are bundled at compile time and copied to the user's
+ * data directory on first run. The user folder is the sole source of
+ * truth — the agent reads only from there.
  *
- * Users can also add custom skills by placing `.md` files in:
+ * Users can create, edit, or delete skills by managing `.md` files in:
  *   {Zotero data directory}/llm-for-zotero/skills/
- * These are loaded at runtime via loadUserSkills().
  */
-import { parseSkill, matchesSkill } from "./skillLoader";
+import { matchesSkill } from "./skillLoader";
 import type { AgentSkill } from "./skillLoader";
 import libraryAnalysisRaw from "./library-analysis.md";
 import comparePapersRaw from "./compare-papers.md";
@@ -29,42 +28,43 @@ import writeToObsidianRaw from "./write-to-obsidian.md";
 export { matchesSkill } from "./skillLoader";
 export type { AgentSkill } from "./skillLoader";
 
-/** Built-in skills bundled at compile time. */
-const BUILTIN_SKILLS: AgentSkill[] = [
-  parseSkill(libraryAnalysisRaw),
-  parseSkill(comparePapersRaw),
-  parseSkill(analyzeFiguresRaw),
-  parseSkill(simplePaperQaRaw),
-  parseSkill(evidenceBasedQaRaw),
-  parseSkill(noteFromPaperRaw),
-  parseSkill(noteEditingRaw),
-  parseSkill(literatureReviewRaw),
-  parseSkill(writeToObsidianRaw),
-];
-
-/** User-defined skills loaded at runtime from the data directory. */
-let userSkills: AgentSkill[] = [];
+/**
+ * Built-in skill files bundled at compile time.
+ * Used by initUserSkills() to copy defaults to the user folder.
+ */
+export const BUILTIN_SKILL_FILES: Record<string, string> = {
+  "library-analysis.md": libraryAnalysisRaw,
+  "compare-papers.md": comparePapersRaw,
+  "analyze-figures.md": analyzeFiguresRaw,
+  "simple-paper-qa.md": simplePaperQaRaw,
+  "evidence-based-qa.md": evidenceBasedQaRaw,
+  "note-from-paper.md": noteFromPaperRaw,
+  "note-editing.md": noteEditingRaw,
+  "literature-review.md": literatureReviewRaw,
+  "write-to-obsidian.md": writeToObsidianRaw,
+};
 
 /**
- * Replace the current set of user-defined skills.
+ * Skills loaded from the user's data directory.
+ * This is the sole source of truth — the agent reads only from here.
+ */
+let skills: AgentSkill[] = [];
+
+/**
+ * Replace the current set of skills.
  * Called once at plugin startup after scanning the user skills directory.
  */
-export function setUserSkills(skills: AgentSkill[]): void {
-  userSkills = skills;
+export function setUserSkills(loaded: AgentSkill[]): void {
+  skills = loaded;
 }
 
 /**
- * Returns all skills (built-in + user-defined).
+ * Returns all skills loaded from the user folder.
  * This is the primary accessor used by messageBuilder and trace events.
  */
 export function getAllSkills(): AgentSkill[] {
-  return [...BUILTIN_SKILLS, ...userSkills];
+  return skills;
 }
-
-/**
- * @deprecated Use {@link getAllSkills} instead. Kept for backward compatibility.
- */
-export const AGENT_SKILLS = BUILTIN_SKILLS;
 
 /**
  * Returns the IDs of all skills whose patterns match the request.

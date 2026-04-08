@@ -477,6 +477,11 @@ export function openStandaloneChat(options?: {
     iconSearch.type = "button";
     iconSearch.title = t("Search history");
 
+    const iconSkill = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+    iconSkill.className = "llm-standalone-icon-btn llm-standalone-icon-skill";
+    iconSkill.type = "button";
+    iconSkill.title = t("Skills");
+
     const iconStripSpacer = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
     iconStripSpacer.style.flex = "1";
 
@@ -495,7 +500,7 @@ export function openStandaloneChat(options?: {
     iconClear.type = "button";
     iconClear.title = t("Clear");
 
-    iconStrip.append(iconSidebarToggle, iconNewChat, iconSearch, iconStripSpacer, iconSettings, iconExport, iconClear);
+    iconStrip.append(iconSidebarToggle, iconNewChat, iconSearch, iconSkill, iconStripSpacer, iconSettings, iconExport, iconClear);
 
     // Export popup — floating menu from sidebar export icon
     const exportPopup = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
@@ -590,7 +595,52 @@ export function openStandaloneChat(options?: {
     searchPopup.append(searchHeader, searchResults);
     searchOverlay.appendChild(searchPopup);
 
-    root.append(lowerArea, exportPopup, searchOverlay);
+    // -- Skills overlay (popup for managing agent skills) --
+    const skillOverlay = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
+    skillOverlay.className = "llm-standalone-skill-overlay";
+    skillOverlay.style.display = "none";
+
+    const skillPopup = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
+    skillPopup.className = "llm-standalone-skill-popup";
+
+    const skillHeader = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
+    skillHeader.className = "llm-standalone-skill-header";
+
+    const skillTitle = doc.createElementNS(HTML_NS, "span") as HTMLSpanElement;
+    skillTitle.className = "llm-standalone-skill-title";
+    skillTitle.textContent = t("Skills");
+
+    const skillCloseBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+    skillCloseBtn.className = "llm-standalone-search-close";
+    skillCloseBtn.type = "button";
+    skillCloseBtn.textContent = "\u00D7";
+
+    skillHeader.append(skillTitle, skillCloseBtn);
+
+    const skillGrid = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
+    skillGrid.className = "llm-standalone-skill-grid";
+
+    skillPopup.append(skillHeader, skillGrid);
+    skillOverlay.appendChild(skillPopup);
+
+    // Skills context menu (right-click)
+    const skillCtxMenu = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
+    skillCtxMenu.className = "llm-standalone-skill-ctx-menu";
+    skillCtxMenu.style.display = "none";
+
+    const skillCtxShowInFs = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+    skillCtxShowInFs.className = "llm-standalone-skill-ctx-item";
+    skillCtxShowInFs.type = "button";
+    skillCtxShowInFs.textContent = t("Show in file system");
+
+    const skillCtxDelete = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+    skillCtxDelete.className = "llm-standalone-skill-ctx-item llm-standalone-skill-ctx-delete";
+    skillCtxDelete.type = "button";
+    skillCtxDelete.textContent = t("Delete");
+
+    skillCtxMenu.append(skillCtxShowInFs, skillCtxDelete);
+
+    root.append(lowerArea, exportPopup, searchOverlay, skillOverlay, skillCtxMenu);
 
     // -- Sidebar state management --
     let userManualSidebarState: "expanded" | "collapsed" | null = null;
@@ -1276,6 +1326,168 @@ export function openStandaloneChat(options?: {
         }
       } catch (err) {
         ztoolkit.log("LLM: standalone search navigate failed", err);
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // Skills popup — open/close/render/interactions
+    // ----------------------------------------------------------------
+    let skillCtxFilePath = ""; // tracks which file the context menu targets
+
+    /** Reload the in-memory skill list from disk (call after create/delete). */
+    const reloadRuntimeSkills = async () => {
+      const { loadUserSkills } = await import("../../agent/skills/userSkills");
+      const { setUserSkills } = await import("../../agent/skills");
+      const skills = await loadUserSkills();
+      setUserSkills(skills);
+    };
+
+    const renderSkillGrid = async () => {
+      const { listSkillFiles } = await import("../../agent/skills/userSkills");
+      const files = await listSkillFiles();
+      skillGrid.textContent = "";
+
+      // "+" add button — first grid item
+      const addBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+      addBtn.className = "llm-standalone-skill-item llm-standalone-skill-add";
+      addBtn.type = "button";
+      const addIcon = doc.createElementNS(HTML_NS, "span") as HTMLSpanElement;
+      addIcon.className = "llm-standalone-skill-add-icon";
+      addIcon.textContent = "+";
+      const addLabel = doc.createElementNS(HTML_NS, "span") as HTMLSpanElement;
+      addLabel.className = "llm-standalone-skill-label";
+      addLabel.textContent = t("New skill");
+      addBtn.append(addIcon, addLabel);
+      addBtn.addEventListener("click", async () => {
+        const { createSkillTemplate } = await import(
+          "../../agent/skills/userSkills"
+        );
+        const filePath = await createSkillTemplate();
+        if (filePath) {
+          try {
+            (
+              Zotero as unknown as { launchFile?: (p: string) => void }
+            ).launchFile?.(filePath);
+          } catch { /* */ }
+          await reloadRuntimeSkills();
+          void renderSkillGrid();
+        }
+      });
+      skillGrid.appendChild(addBtn);
+
+      // Skill file items
+      for (const fullPath of files) {
+        const filename = fullPath.split("/").pop() || fullPath.split("\\").pop() || fullPath;
+        const item = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+        item.className = "llm-standalone-skill-item";
+        item.type = "button";
+        item.dataset.filePath = fullPath;
+
+        const icon = doc.createElementNS(HTML_NS, "span") as HTMLSpanElement;
+        icon.className = "llm-standalone-skill-doc-icon";
+
+        const label = doc.createElementNS(HTML_NS, "span") as HTMLSpanElement;
+        label.className = "llm-standalone-skill-label";
+        label.textContent = filename;
+
+        item.append(icon, label);
+
+        // Left click — open in system editor
+        item.addEventListener("click", () => {
+          try {
+            (
+              Zotero as unknown as { launchFile?: (p: string) => void }
+            ).launchFile?.(fullPath);
+          } catch { /* */ }
+        });
+
+        // Right click — context menu
+        item.addEventListener("contextmenu", (e: Event) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const me = e as MouseEvent;
+          skillCtxFilePath = fullPath;
+          skillCtxMenu.style.display = "flex";
+
+          // Position with viewport bounds checking
+          const menuW = 180;
+          const menuH = 80;
+          let x = me.clientX + 4;
+          let y = me.clientY + 4;
+          if (x + menuW > (doc.documentElement?.clientWidth ?? 9999)) x = me.clientX - menuW;
+          if (y + menuH > (doc.documentElement?.clientHeight ?? 9999)) y = me.clientY - menuH;
+          skillCtxMenu.style.left = `${x}px`;
+          skillCtxMenu.style.top = `${y}px`;
+        });
+
+        skillGrid.appendChild(item);
+      }
+    };
+
+    const openSkillPopup = () => {
+      skillOverlay.style.display = "flex";
+      void renderSkillGrid();
+    };
+
+    const closeSkillPopup = () => {
+      skillOverlay.style.display = "none";
+      skillCtxMenu.style.display = "none";
+    };
+
+    // Skill icon toggle
+    iconSkill.addEventListener("click", () => {
+      if (skillOverlay.style.display !== "none") {
+        closeSkillPopup();
+      } else {
+        openSkillPopup();
+      }
+    });
+
+    skillCloseBtn.addEventListener("click", () => closeSkillPopup());
+
+    skillOverlay.addEventListener("click", (e: Event) => {
+      if (e.target === skillOverlay) closeSkillPopup();
+    });
+
+    // Escape key — attached at document level so it works regardless of focus
+    doc.addEventListener("keydown", (e: Event) => {
+      if (skillOverlay.style.display === "none") return;
+      if ((e as KeyboardEvent).key === "Escape") {
+        e.preventDefault();
+        closeSkillPopup();
+      }
+    });
+
+    // Context menu: Show in file system
+    skillCtxShowInFs.addEventListener("click", async () => {
+      skillCtxMenu.style.display = "none";
+      const { getUserSkillsDir } = await import("../../agent/skills/userSkills");
+      const dir = getUserSkillsDir();
+      try {
+        (
+          Zotero as unknown as { launchFile?: (p: string) => void }
+        ).launchFile?.(dir);
+      } catch { /* */ }
+    });
+
+    // Context menu: Delete (+ reload runtime skills)
+    skillCtxDelete.addEventListener("click", async () => {
+      skillCtxMenu.style.display = "none";
+      if (!skillCtxFilePath) return;
+      const { deleteSkillFile } = await import("../../agent/skills/userSkills");
+      await deleteSkillFile(skillCtxFilePath);
+      skillCtxFilePath = "";
+      await reloadRuntimeSkills();
+      void renderSkillGrid();
+    });
+
+    // Dismiss context menu on click outside
+    doc.addEventListener("mousedown", (e: Event) => {
+      const target = e.target as HTMLElement;
+      if (skillCtxMenu.style.display !== "none") {
+        if (!skillCtxMenu.contains(target)) {
+          skillCtxMenu.style.display = "none";
+        }
       }
     });
 
