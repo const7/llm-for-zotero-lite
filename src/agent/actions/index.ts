@@ -4,7 +4,6 @@ import { organizeUnfiledAction } from "./organizeUnfiled";
 import { autoTagAction } from "./autoTag";
 import { discoverRelatedAction } from "./discoverRelated";
 import { completeMetadataAction } from "./completeMetadata";
-import { selectCollectionAction } from "./selectCollection";
 import { literatureReviewAction } from "./literatureReview";
 import { libraryStatisticsAction } from "./libraryStatistics";
 
@@ -15,7 +14,6 @@ export function createBuiltInActionRegistry(): ActionRegistry {
   registry.register(autoTagAction);
   registry.register(discoverRelatedAction);
   registry.register(completeMetadataAction);
-  registry.register(selectCollectionAction);
   registry.register(literatureReviewAction);
   registry.register(libraryStatisticsAction);
   return registry;

@@ -1093,6 +1093,66 @@ export async function searchAllItemCandidates(
 
 export { ZOTERO_NOTE_CONTENT_TYPE };
 
+const DEFAULT_COLLECTION_SEARCH_LIMIT = 5;
+
+export async function searchCollectionCandidates(
+  libraryID: number,
+  query: string,
+  limit = DEFAULT_COLLECTION_SEARCH_LIMIT,
+): Promise<PaperBrowseCollectionCandidate[]> {
+  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
+  const normalizedQuery = normalizePaperSearchText(query);
+  if (!normalizedQuery) return [];
+  const normalizedLimit = Number.isFinite(limit)
+    ? Math.max(1, Math.floor(limit))
+    : DEFAULT_COLLECTION_SEARCH_LIMIT;
+  const queryTokens = getSearchTokens(normalizedQuery);
+  if (!queryTokens.length) return [];
+
+  const index = await getAllItemsLibraryIndex(Math.floor(libraryID));
+  const ranked: Array<{
+    collection: IndexedCollection;
+    score: number;
+    matchedTokenCount: number;
+  }> = [];
+
+  for (const collection of index.collections) {
+    const normalizedName = normalizePaperSearchText(collection.name);
+    if (!normalizedName) continue;
+    const scoreState: PaperSearchScore = { score: 0, matchedTokens: new Set() };
+    const nameScore = scoreField(
+      scoreState,
+      normalizedName,
+      normalizedQuery,
+      queryTokens,
+      { exact: 1000, prefix: 900, contains: 700, tokenBonus: 80 },
+    );
+    if (nameScore <= 0) continue;
+    ranked.push({
+      collection,
+      score: nameScore,
+      matchedTokenCount: scoreState.matchedTokens.size,
+    });
+  }
+
+  ranked.sort((a, b) => {
+    const scoreDelta = b.score - a.score;
+    if (scoreDelta !== 0) return scoreDelta;
+    const matchedTokenDelta = b.matchedTokenCount - a.matchedTokenCount;
+    if (matchedTokenDelta !== 0) return matchedTokenDelta;
+    return a.collection.name.localeCompare(b.collection.name, undefined, {
+      sensitivity: "base",
+    });
+  });
+
+  return ranked.slice(0, normalizedLimit).map((e) => ({
+    collectionId: e.collection.collectionId,
+    name: e.collection.name,
+    childCollections: [],
+    papers: [],
+  }));
+}
+
 export async function browseAllItemCandidates(
   libraryID: number,
 ): Promise<PaperBrowseCollectionCandidate[]> {

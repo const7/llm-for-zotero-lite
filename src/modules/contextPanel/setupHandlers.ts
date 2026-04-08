@@ -252,6 +252,7 @@ import type { ReasoningConfig as LLMReasoningConfig } from "../../utils/llmClien
 import {
   browseAllItemCandidates,
   searchAllItemCandidates,
+  searchCollectionCandidates,
   ZOTERO_NOTE_CONTENT_TYPE,
   normalizePaperSearchText,
   parsePaperSearchSlashToken,
@@ -6901,7 +6902,7 @@ export function setupHandlers(
   };
 
   type ActiveSlashToken = PaperSearchSlashToken;
-  type PaperPickerMode = "browse" | "search" | "empty" | "collection-browse";
+  type PaperPickerMode = "browse" | "search" | "empty";
   type PaperPickerRow =
     | {
         kind: "collection";
@@ -6979,6 +6980,7 @@ export function setupHandlers(
   const isPaperPickerOpen = () =>
     Boolean(paperPicker && paperPicker.style.display !== "none");
   const closePaperPicker = () => {
+    consumeActiveAtToken(); // Remove leftover "@" + query from textarea on dismiss
     paperPickerRequestSeq += 1;
     clearPaperPickerDebounceTimer();
     resetPaperPickerState();
@@ -7598,11 +7600,6 @@ export function setupHandlers(
         e.stopPropagation();
         consumeActiveActionToken();
         closeSlashMenu();
-        // UI-driven actions: handle directly instead of inserting a command token
-        if (action.name === "select_collection") {
-          void openCollectionOnlyPicker();
-          return;
-        }
         void insertCommandToken(action);
       });
       list.insertBefore(btn, firstBase);
@@ -7753,6 +7750,29 @@ export function setupHandlers(
       paperPickerGroupByItemId.set(group.itemId, group);
     }
   };
+  /** Sets search results containing both papers and (optionally) collections. */
+  const setPaperPickerSearchResults = (
+    groups: PaperSearchGroupCandidate[],
+    collections: PaperBrowseCollectionCandidate[],
+  ): void => {
+    paperPickerMode = groups.length || collections.length ? "search" : "empty";
+    paperPickerEmptyMessage = "No items matched.";
+    paperPickerGroups = groups;
+    paperPickerCollections = collections;
+    paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
+    paperPickerCollectionById = new Map<
+      number,
+      PaperBrowseCollectionCandidate
+    >();
+    paperPickerExpandedPaperKeys = new Set<number>();
+    paperPickerExpandedCollectionKeys = new Set<number>();
+    for (const group of groups) {
+      paperPickerGroupByItemId.set(group.itemId, group);
+    }
+    for (const collection of collections) {
+      paperPickerCollectionById.set(collection.collectionId, collection);
+    }
+  };
   const setPaperPickerCollections = (
     collections: PaperBrowseCollectionCandidate[],
   ): void => {
@@ -7773,32 +7793,6 @@ export function setupHandlers(
       for (const paper of collection.papers) {
         paperPickerGroupByItemId.set(paper.itemId, paper);
       }
-      for (const child of collection.childCollections) {
-        registerCollection(child);
-      }
-    };
-    for (const collection of collections) {
-      registerCollection(collection);
-    }
-  };
-  /** Sets the picker to collection-only mode (no papers shown). */
-  const setPaperPickerCollectionsOnly = (
-    collections: PaperBrowseCollectionCandidate[],
-  ): void => {
-    paperPickerMode = collections.length ? "collection-browse" : "empty";
-    paperPickerEmptyMessage = t("No collections available.");
-    paperPickerGroups = [];
-    paperPickerCollections = collections;
-    paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
-    paperPickerCollectionById = new Map<
-      number,
-      PaperBrowseCollectionCandidate
-    >();
-    paperPickerExpandedPaperKeys = new Set<number>();
-    paperPickerExpandedCollectionKeys = new Set<number>();
-
-    const registerCollection = (collection: PaperBrowseCollectionCandidate) => {
-      paperPickerCollectionById.set(collection.collectionId, collection);
       for (const child of collection.childCollections) {
         registerCollection(child);
       }
@@ -7849,24 +7843,15 @@ export function setupHandlers(
 
     if (paperPickerMode === "browse") {
       appendCollectionRows(paperPickerCollections, 0);
-    } else if (paperPickerMode === "collection-browse") {
-      // Collection-only mode: show collections (with hierarchy) but no papers
-      const appendCollectionRowsOnly = (
-        collections: PaperBrowseCollectionCandidate[],
-        depth: number,
-      ) => {
-        for (const collection of collections) {
-          rows.push({
-            kind: "collection",
-            collectionId: collection.collectionId,
-            depth,
-          });
-          if (!isPaperPickerCollectionExpanded(collection.collectionId)) continue;
-          appendCollectionRowsOnly(collection.childCollections, depth + 1);
-        }
-      };
-      appendCollectionRowsOnly(paperPickerCollections, 0);
     } else if (paperPickerMode === "search") {
+      // Collections first, then papers
+      for (const collection of paperPickerCollections) {
+        rows.push({
+          kind: "collection",
+          collectionId: collection.collectionId,
+          depth: 0,
+        });
+      }
       paperPickerGroups.forEach((group) => {
         appendPaperRow(group, 0);
       });
@@ -8071,6 +8056,19 @@ export function setupHandlers(
     inputBox.setSelectionRange(nextCaret, nextCaret);
     return true;
   };
+  /** Removes only the query text after `@`, preserving the `@` character itself.
+   *  Used after item selection so the picker can reset to browse mode. */
+  const consumeAtQueryOnly = (): boolean => {
+    const token = getActiveAtToken();
+    if (!token || token.query.length === 0) return false;
+    const beforeQuery = inputBox.value.slice(0, token.slashStart + 1); // keeps "@"
+    const afterCaret = inputBox.value.slice(token.caretEnd);
+    inputBox.value = `${beforeQuery}${afterCaret}`;
+    persistDraftInputForCurrentConversation();
+    const nextCaret = token.slashStart + 1; // right after "@"
+    inputBox.setSelectionRange(nextCaret, nextCaret);
+    return true;
+  };
   const consumeActiveSlashToken = (): boolean =>
     consumeActiveAtToken();
   const consumeActiveActionToken = (): boolean => {
@@ -8126,13 +8124,18 @@ export function setupHandlers(
         refKind: kind === "figure" ? "figure" : "other",
       });
     }
+    // Clear the query text (e.g. "abc" from "@abc") but keep "@" so the picker
+    // stays open for further selections.  The ensuing schedulePaperPickerSearch()
+    // will detect the empty query after its debounce and reset to browse mode.
+    consumeAtQueryOnly();
+    schedulePaperPickerSearch();
     // Re-render to show visual feedback (selected state) while keeping picker open
     renderPaperPicker();
     inputBox.focus({ preventScroll: true });
     return true;
   };
-  /** Selects a collection from the collection-only picker and adds it as context. */
-  const selectCollectionFromPicker = (collectionId: number): boolean => {
+  /** Selects a collection and adds it as context, keeping the picker open for multi-select. */
+  const selectCollectionFromPickerUnified = (collectionId: number): boolean => {
     if (!item) return false;
     const collection = getPaperPickerCollectionById(collectionId);
     if (!collection) return false;
@@ -8148,36 +8151,20 @@ export function setupHandlers(
       return false;
     }
     selectedCollectionContextCache.set(item.id, [...existing, ref]);
-    closePaperPicker();
+    consumeAtQueryOnly();
+    schedulePaperPickerSearch();
     updatePaperPreviewPreservingScroll();
+    renderPaperPicker();
     inputBox.focus({ preventScroll: true });
     if (status) setStatus(status, t("Collection context added."), "ready");
     return true;
-  };
-  /** Opens the paper picker in collection-only mode (no papers visible). */
-  const openCollectionOnlyPicker = async () => {
-    if (!item || !paperPicker || !paperPickerList) return;
-    const libraryID = getCurrentLibraryID();
-    if (!libraryID) return;
-    const collections = await browseAllItemCandidates(libraryID);
-    setPaperPickerCollectionsOnly(collections);
-    paperPickerActiveRowIndex = 0;
-    rebuildPaperPickerRows();
-    renderPaperPicker();
-    if (status) {
-      setStatus(
-        status,
-        t("Select a collection to add as context."),
-        "ready",
-      );
-    }
   };
   const selectPaperPickerRowAt = (index: number): boolean => {
     const row = getPaperPickerRowAt(index);
     if (!row) return false;
     if (row.kind === "collection") {
-      if (paperPickerMode === "collection-browse") {
-        return selectCollectionFromPicker(row.collectionId);
+      if (paperPickerMode === "search") {
+        return selectCollectionFromPickerUnified(row.collectionId);
       }
       togglePaperPickerCollectionExpanded(row.collectionId);
       renderPaperPicker();
@@ -8364,6 +8351,13 @@ export function setupHandlers(
       if (row.kind === "collection") {
         const collection = getPaperPickerCollectionById(row.collectionId);
         if (!collection) return;
+        // Visual feedback: mark already-selected collections
+        if (item) {
+          const selectedCollections = selectedCollectionContextCache.get(item.id) || [];
+          if (selectedCollections.some((c) => c.collectionId === row.collectionId)) {
+            option.classList.add("llm-paper-picker-selected");
+          }
+        }
         option.setAttribute(
           "aria-expanded",
           isPaperPickerCollectionExpanded(row.collectionId) ? "true" : "false",
@@ -8397,6 +8391,20 @@ export function setupHandlers(
         titleLine.append(chevron, title);
         rowMain.appendChild(titleLine);
         option.appendChild(rowMain);
+
+        // "+" button to add collection as context (visible on hover)
+        const addBtn = createElement(
+          ownerDoc,
+          "button",
+          "llm-paper-picker-collection-add-btn",
+          { textContent: "+", title: t("Add collection as context") },
+        );
+        addBtn.addEventListener("mousedown", (e: Event) => {
+          e.preventDefault();
+          e.stopPropagation();
+          selectCollectionFromPickerUnified(row.collectionId);
+        });
+        option.appendChild(addBtn);
       } else if (row.kind === "paper") {
         const group = getPaperPickerGroupByItemId(row.itemId);
         if (!group) return;
@@ -8512,8 +8520,8 @@ export function setupHandlers(
         e.stopPropagation();
         paperPickerActiveRowIndex = rowIndex;
         if (row.kind === "collection") {
-          if (paperPickerMode === "collection-browse") {
-            selectCollectionFromPicker(row.collectionId);
+          if (paperPickerMode === "search") {
+            selectCollectionFromPickerUnified(row.collectionId);
             return;
           }
           togglePaperPickerCollectionExpanded(row.collectionId);
@@ -8600,17 +8608,16 @@ export function setupHandlers(
         renderPaperPicker();
         return;
       }
-      const results = await searchAllItemCandidates(
-        libraryID,
-        activeSlashToken.query,
-        20,
-      );
+      const [paperResults, collectionResults] = await Promise.all([
+        searchAllItemCandidates(libraryID, activeSlashToken.query, 20),
+        searchCollectionCandidates(libraryID, activeSlashToken.query),
+      ]);
       if (requestId !== paperPickerRequestSeq) return;
       if (!getActiveSlashToken()) {
         closePaperPicker();
         return;
       }
-      setPaperPickerSearchGroups(results);
+      setPaperPickerSearchResults(paperResults, collectionResults);
       paperPickerActiveRowIndex = 0;
       renderPaperPicker();
     };

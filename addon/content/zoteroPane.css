@@ -4692,6 +4692,40 @@ label.llm-search-results-item:hover {
   color: var(--fill-secondary);
 }
 
+.llm-paper-picker-collection-add-btn {
+  all: unset;
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  font-size: var(--llm-fs-12);
+  font-weight: 600;
+  color: var(--fill-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.llm-paper-picker-collection-row:hover .llm-paper-picker-collection-add-btn,
+.llm-paper-picker-item[aria-selected="true"] .llm-paper-picker-collection-add-btn {
+  opacity: 1;
+}
+
+.llm-paper-picker-collection-add-btn:hover {
+  background: color-mix(
+    in srgb,
+    var(--material-background) 70%,
+    var(--fill-quinary)
+  );
+  color: var(--fill-primary);
+}
+
 .llm-paper-picker-group-row-main {
   min-width: 0;
   display: grid;
