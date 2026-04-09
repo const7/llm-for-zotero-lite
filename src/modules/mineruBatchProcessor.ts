@@ -444,12 +444,44 @@ export type MineruItemEntry = {
   parentItemId: number;
   attachmentId: number;
   title: string;
+  pdfTitle: string;
   firstCreator: string;
   year: string;
   dateAdded: string;
   cached: boolean;
   collectionIds: number[];
 };
+
+export type MineruParentGroup = {
+  parentItemId: number;
+  title: string;
+  firstCreator: string;
+  year: string;
+  dateAdded: string;
+  collectionIds: number[];
+  children: MineruItemEntry[];
+};
+
+export function groupByParent(items: MineruItemEntry[]): MineruParentGroup[] {
+  const map = new Map<number, MineruParentGroup>();
+  for (const item of items) {
+    let group = map.get(item.parentItemId);
+    if (!group) {
+      group = {
+        parentItemId: item.parentItemId,
+        title: item.title,
+        firstCreator: item.firstCreator,
+        year: item.year,
+        dateAdded: item.dateAdded,
+        collectionIds: item.collectionIds,
+        children: [],
+      };
+      map.set(item.parentItemId, group);
+    }
+    group.children.push(item);
+  }
+  return [...map.values()];
+}
 
 export type MineruCollectionNode = {
   collectionId: number;
@@ -512,14 +544,12 @@ export async function getMineruItemList(): Promise<MineruItemEntry[]> {
       }
       for (const pdfAtt of pdfs) {
         const cached = await hasCachedMineruMd(pdfAtt.id);
-        const title =
-          pdfs.length > 1
-            ? `${parentTitle} [${pdfAtt.getField?.("title") || `PDF ${pdfAtt.id}`}]`
-            : parentTitle;
+        const pdfTitle = pdfAtt.getField?.("title") || `PDF ${pdfAtt.id}`;
         results.push({
           parentItemId: item.id,
           attachmentId: pdfAtt.id,
-          title,
+          title: parentTitle,
+          pdfTitle,
           firstCreator,
           year,
           dateAdded,

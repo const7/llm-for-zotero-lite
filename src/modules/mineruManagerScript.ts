@@ -8,12 +8,14 @@ import {
   deleteAllMineruCache,
   deleteMineruCacheForItem,
   onBatchStateChange,
+  groupByParent,
 } from "./mineruBatchProcessor";
 import { t } from "../utils/i18n";
 import type {
   MineruBatchState,
   MineruItemEntry,
   MineruCollectionNode,
+  MineruParentGroup,
 } from "./mineruBatchProcessor";
 import { getMineruItemDir } from "./contextPanel/mineruCache";
 import {
@@ -83,6 +85,9 @@ export async function registerMineruManagerScript(
   let sortKey: SortKey = "dateAdded";
   let sortDir: SortDir = "desc";
 
+  // Tree view collapse state
+  const collapsedParents = new Set<number>();
+
   // Multi-selection (shift/cmd+click)
   const selectedIds = new Set<number>();
   let lastClickedId: number | null = null; // for shift-range
@@ -123,6 +128,23 @@ export async function registerMineruManagerScript(
       return va < vb ? -dir : va > vb ? dir : 0;
     });
     return copy;
+  }
+
+  function getVisibleGroups(): MineruParentGroup[] {
+    const items = getVisibleItems();
+    const groups = groupByParent(items);
+    const dir = sortDir === "asc" ? 1 : -1;
+    groups.sort((a, b) => {
+      if (sortKey === "cached") {
+        const va = a.children.every((c) => c.cached) ? 1 : 0;
+        const vb = b.children.every((c) => c.cached) ? 1 : 0;
+        return (va - vb) * dir;
+      }
+      const va = (a[sortKey as keyof MineruParentGroup] as string) || "";
+      const vb = (b[sortKey as keyof MineruParentGroup] as string) || "";
+      return va < vb ? -dir : va > vb ? dir : 0;
+    });
+    return groups;
   }
 
   function isSubfolder(): boolean {
@@ -375,115 +397,295 @@ export async function registerMineruManagerScript(
     }
   }
 
+  // Parent dot aggregation for multi-PDF items
+  const parentDotElements = new Map<number, HTMLSpanElement>();
+
+  function updateParentDot(parentId: number, group: MineruParentGroup): void {
+    const parentDot = parentDotElements.get(parentId);
+    if (!parentDot) return;
+    let hasProcessing = false;
+    let hasFailed = false;
+    let allGreen = true;
+    for (const child of group.children) {
+      const childDot = dotElements.get(child.attachmentId);
+      const bg = childDot?.style.background || "";
+      if (bg.includes("245, 158, 11") || bg === "#f59e0b") hasProcessing = true;
+      else if (bg.includes("239, 68, 68") || bg === "#ef4444") hasFailed = true;
+      if (!bg.includes("16, 185, 129") && bg !== "#10b981") allGreen = false;
+    }
+    if (allGreen) parentDot.style.background = "#10b981";
+    else if (hasProcessing) parentDot.style.background = "#f59e0b";
+    else if (hasFailed) parentDot.style.background = "#ef4444";
+    else parentDot.style.background = "#d1d5db";
+  }
+
+  /** Build a standard item row (reused for parent, child, and single-PDF rows). */
+  function buildItemRow(
+    item: MineruItemEntry,
+    opts: { isChild?: boolean; fontWeight?: string } = {},
+  ): HTMLDivElement {
+    const row = doc.createElement("div");
+    row.setAttribute("data-attachment-id", String(item.attachmentId));
+    row.style.cssText =
+      "display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid rgba(128,128,128,0.1); cursor: default;";
+    if (opts.fontWeight) row.style.fontWeight = opts.fontWeight;
+    if (opts.isChild) row.style.borderBottomColor = "rgba(128,128,128,0.06)";
+
+    const dot = doc.createElement("span");
+    dot.style.cssText = "width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;";
+    dot.style.background = item.cached ? "#10b981" : "#d1d5db";
+    dotElements.set(item.attachmentId, dot);
+    row.appendChild(dot);
+
+    void (async () => {
+      const status = await getMineruStatus(item.attachmentId);
+      if (status === "cached") dot.style.background = "#10b981";
+      else if (status === "processing") dot.style.background = "#f59e0b";
+      else if (status === "failed") dot.style.background = "#ef4444";
+      else dot.style.background = "#d1d5db";
+    })();
+
+    const titleSpan = doc.createElement("span");
+    titleSpan.style.cssText =
+      "flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px;";
+    if (opts.isChild) {
+      titleSpan.style.paddingLeft = "20px";
+      titleSpan.style.color = "#888";
+      titleSpan.style.fontSize = "11.5px";
+      titleSpan.textContent = item.pdfTitle;
+      titleSpan.title = item.pdfTitle;
+    } else {
+      titleSpan.textContent = item.title;
+      titleSpan.title = item.title;
+    }
+    row.appendChild(titleSpan);
+
+    const authorSpan = doc.createElement("span");
+    authorSpan.style.cssText =
+      "flex: 0 0 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: #888;";
+    authorSpan.textContent = opts.isChild ? "" : item.firstCreator;
+    row.appendChild(authorSpan);
+
+    const yearSpan = doc.createElement("span");
+    yearSpan.style.cssText =
+      "flex: 0 0 40px; text-align: right; font-size: 11.5px; color: #888;";
+    yearSpan.textContent = opts.isChild ? "" : item.year;
+    row.appendChild(yearSpan);
+
+    const dateSpan = doc.createElement("span");
+    dateSpan.style.cssText =
+      "flex: 0 0 72px; text-align: right; font-size: 11px; color: #888;";
+    dateSpan.textContent = opts.isChild ? "" : fmtDate(item.dateAdded);
+    row.appendChild(dateSpan);
+
+    row.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).tagName === "INPUT") return;
+      handleRowClick(item.attachmentId, e as MouseEvent);
+    });
+    row.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      contextMenuItemId = item.attachmentId;
+      if (!selectedIds.has(item.attachmentId)) {
+        selectedIds.clear();
+        selectedIds.add(item.attachmentId);
+        lastClickedId = item.attachmentId;
+        renderItemsList();
+        updateButtons();
+      }
+      showContextMenu(e as MouseEvent);
+    });
+
+    return row;
+  }
+
   function renderItemsList(): void {
     if (!itemsList) return;
     itemsList.innerHTML = "";
     dotElements.clear();
+    parentDotElements.clear();
 
-    visibleItemsOrdered = getVisibleItems();
+    const groups = getVisibleGroups();
+    visibleItemsOrdered = [];
+    for (const g of groups) {
+      for (const c of g.children) visibleItemsOrdered.push(c);
+    }
+
     const hasSelection = selectedIds.size > 0;
     syncHeaderCheckboxSpacer(hasSelection);
     const fragment = doc.createDocumentFragment();
 
-    for (const item of visibleItemsOrdered) {
-      const row = doc.createElement("div");
-      row.setAttribute("data-attachment-id", String(item.attachmentId));
-      const isSelected = selectedIds.has(item.attachmentId);
-      row.style.cssText =
+    for (const group of groups) {
+      const isMultiPdf = group.children.length > 1;
+      const collapsed = collapsedParents.has(group.parentItemId);
+
+      // ── Parent row (all groups, single or multi) ────────────────────
+      const parentRow = doc.createElement("div");
+      parentRow.setAttribute("data-parent-id", String(group.parentItemId));
+      const allChildrenSelected = group.children.every((c) =>
+        selectedIds.has(c.attachmentId),
+      );
+      parentRow.style.cssText =
         "display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid rgba(128,128,128,0.1); cursor: default;";
-      if (isSelected)
-        row.style.background =
+      if (allChildrenSelected)
+        parentRow.style.background =
           "color-mix(in srgb, var(--color-accent, #2563eb) 12%, transparent)";
 
-      // Checkbox (shown when any selection exists)
+      // Checkbox
       if (hasSelection) {
         const cb = doc.createElement("input");
         cb.type = "checkbox";
-        cb.checked = isSelected;
+        cb.checked = allChildrenSelected;
         cb.style.cssText = "flex-shrink: 0; margin: 0; cursor: pointer;";
         cb.addEventListener("change", () => {
-          if (cb.checked) selectedIds.add(item.attachmentId);
-          else selectedIds.delete(item.attachmentId);
-          lastClickedId = item.attachmentId;
+          if (cb.checked) {
+            for (const c of group.children) selectedIds.add(c.attachmentId);
+          } else {
+            for (const c of group.children) selectedIds.delete(c.attachmentId);
+          }
           renderItemsList();
           updateButtons();
         });
         cb.addEventListener("click", (e) => e.stopPropagation());
-        row.appendChild(cb);
+        parentRow.appendChild(cb);
       }
 
-      // Status dot
-      const dot = doc.createElement("span");
-      dot.style.cssText =
-        "width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;";
-      dot.style.background = item.cached ? "#10b981" : "#d1d5db";
-      dotElements.set(item.attachmentId, dot);
-      row.appendChild(dot);
+      // Aggregated status dot (before chevron)
+      const parentDot = doc.createElement("span");
+      parentDot.style.cssText = "width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;";
 
-      void (async () => {
-        const status = await getMineruStatus(item.attachmentId);
-        if (status === "cached") {
-          dot.style.background = "#10b981";
-        } else if (status === "processing") {
-          dot.style.background = "#f59e0b";
-        } else if (status === "failed") {
-          dot.style.background = "#ef4444";
-        } else {
-          dot.style.background = "#d1d5db";
-        }
-      })();
+      // Chevron (expand/collapse) — SVG triangle, after dot, before title
+      const chev = doc.createElement("span");
+      chev.style.cssText =
+        "width: 12px; height: 12px; flex-shrink: 0; cursor: pointer; user-select: none; display: inline-flex; align-items: center; justify-content: center;";
+      const svgNS = "http://www.w3.org/2000/svg";
+      const svg = doc.createElementNS(svgNS, "svg");
+      svg.setAttribute("width", "8");
+      svg.setAttribute("height", "8");
+      svg.setAttribute("viewBox", "0 0 8 8");
+      svg.setAttribute("style", collapsed
+        ? "transform: rotate(0deg); transition: transform 0.1s;"
+        : "transform: rotate(90deg); transition: transform 0.1s;");
+      const path = doc.createElementNS(svgNS, "path");
+      path.setAttribute("d", "M2 1 L6 4 L2 7 Z");
+      path.setAttribute("fill", "#888");
+      svg.appendChild(path);
+      chev.appendChild(svg);
+      chev.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (collapsed) collapsedParents.delete(group.parentItemId);
+        else collapsedParents.add(group.parentItemId);
+        renderItemsList();
+      });
+      parentDot.style.background = group.children.every((c) => c.cached) ? "#10b981" : "#d1d5db";
+      parentDotElements.set(group.parentItemId, parentDot);
+      parentRow.appendChild(parentDot);
+      parentRow.appendChild(chev);
 
       // Title
       const titleSpan = doc.createElement("span");
       titleSpan.style.cssText =
         "flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px;";
-      titleSpan.textContent = item.title;
-      titleSpan.title = item.title;
-      row.appendChild(titleSpan);
+      titleSpan.textContent = group.title;
+      titleSpan.title = group.title;
+      parentRow.appendChild(titleSpan);
 
-      // Author
+      // Badge (multi-PDF only)
+      if (isMultiPdf) {
+        const badge = doc.createElement("span");
+        badge.style.cssText =
+          "flex-shrink: 0; font-size: 9px; color: #888; background: rgba(128,128,128,0.15); border-radius: 3px; padding: 0 4px; font-weight: 600;";
+        badge.textContent = String(group.children.length);
+        parentRow.appendChild(badge);
+      }
+
+      // Author / Year / Added
       const authorSpan = doc.createElement("span");
       authorSpan.style.cssText =
         "flex: 0 0 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: #888;";
-      authorSpan.textContent = item.firstCreator;
-      row.appendChild(authorSpan);
+      authorSpan.textContent = group.firstCreator;
+      parentRow.appendChild(authorSpan);
 
-      // Year
       const yearSpan = doc.createElement("span");
-      yearSpan.style.cssText =
-        "flex: 0 0 40px; text-align: right; font-size: 11.5px; color: #888;";
-      yearSpan.textContent = item.year;
-      row.appendChild(yearSpan);
+      yearSpan.style.cssText = "flex: 0 0 40px; text-align: right; font-size: 11.5px; color: #888;";
+      yearSpan.textContent = group.year;
+      parentRow.appendChild(yearSpan);
 
-      // Date added
       const dateSpan = doc.createElement("span");
-      dateSpan.style.cssText =
-        "flex: 0 0 72px; text-align: right; font-size: 11px; color: #888;";
-      dateSpan.textContent = fmtDate(item.dateAdded);
-      row.appendChild(dateSpan);
+      dateSpan.style.cssText = "flex: 0 0 72px; text-align: right; font-size: 11px; color: #888;";
+      dateSpan.textContent = fmtDate(group.dateAdded);
+      parentRow.appendChild(dateSpan);
 
-      // Click handler: shift=range, cmd/ctrl=toggle, plain=single select
-      row.addEventListener("click", (e) => {
+      // Click: select all children
+      parentRow.addEventListener("click", (e) => {
         if ((e.target as HTMLElement).tagName === "INPUT") return;
-        handleRowClick(item.attachmentId, e as MouseEvent);
-      });
-
-      // Right-click
-      row.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        contextMenuItemId = item.attachmentId;
-        if (!selectedIds.has(item.attachmentId)) {
-          // If right-clicking an unselected row, select only it
+        const isMeta = (e as MouseEvent).metaKey || (e as MouseEvent).ctrlKey;
+        if (isMeta) {
+          if (allChildrenSelected) {
+            for (const c of group.children) selectedIds.delete(c.attachmentId);
+          } else {
+            for (const c of group.children) selectedIds.add(c.attachmentId);
+          }
+        } else {
           selectedIds.clear();
-          selectedIds.add(item.attachmentId);
-          lastClickedId = item.attachmentId;
+          for (const c of group.children) selectedIds.add(c.attachmentId);
+        }
+        lastClickedId = group.children[0]?.attachmentId ?? null;
+        renderItemsList();
+        updateButtons();
+      });
+      parentRow.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        contextMenuItemId = group.children[0]?.attachmentId ?? null;
+        if (!allChildrenSelected) {
+          selectedIds.clear();
+          for (const c of group.children) selectedIds.add(c.attachmentId);
+          lastClickedId = group.children[0]?.attachmentId ?? null;
           renderItemsList();
           updateButtons();
         }
         showContextMenu(e as MouseEvent);
       });
+      fragment.appendChild(parentRow);
 
-      fragment.appendChild(row);
+      // ── Child rows (when expanded) ──────────────────────────────────
+      if (!collapsed) {
+        for (const child of group.children) {
+          const childRow = buildItemRow(child, { isChild: true });
+          if (selectedIds.has(child.attachmentId))
+            childRow.style.background =
+              "color-mix(in srgb, var(--color-accent, #2563eb) 12%, transparent)";
+
+          const childDot = dotElements.get(child.attachmentId);
+          if (childDot) {
+            void (async () => {
+              const status = await getMineruStatus(child.attachmentId);
+              if (status === "cached") childDot.style.background = "#10b981";
+              else if (status === "processing") childDot.style.background = "#f59e0b";
+              else if (status === "failed") childDot.style.background = "#ef4444";
+              else childDot.style.background = "#d1d5db";
+              updateParentDot(group.parentItemId, group);
+            })();
+          }
+
+          if (hasSelection) {
+            const isSelected = selectedIds.has(child.attachmentId);
+            const cb = doc.createElement("input");
+            cb.type = "checkbox";
+            cb.checked = isSelected;
+            cb.style.cssText = "flex-shrink: 0; margin: 0; cursor: pointer;";
+            cb.addEventListener("change", () => {
+              if (cb.checked) selectedIds.add(child.attachmentId);
+              else selectedIds.delete(child.attachmentId);
+              lastClickedId = child.attachmentId;
+              renderItemsList();
+              updateButtons();
+            });
+            cb.addEventListener("click", (e) => e.stopPropagation());
+            childRow.insertBefore(cb, childRow.firstChild);
+          }
+          fragment.appendChild(childRow);
+        }
+      }
     }
 
     itemsList.appendChild(fragment);
@@ -958,6 +1160,11 @@ export async function registerMineruManagerScript(
   });
 
   await loadData();
+  // Default: collapse single-PDF items, expand multi-PDF items
+  const initGroups = groupByParent(allItems);
+  for (const g of initGroups) {
+    if (g.children.length === 1) collapsedParents.add(g.parentItemId);
+  }
   renderSidebar();
   renderColumnHeaders();
   renderItemsList();
