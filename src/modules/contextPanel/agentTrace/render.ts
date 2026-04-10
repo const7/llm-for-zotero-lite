@@ -894,6 +894,63 @@ function renderPaperResultListField(
   });
   toolbar.appendChild(deselectAllButton);
 
+  // Sort buttons — re-order results client-side
+  const hasSortableData =
+    field.rows.some((r) => typeof r.year === "number") ||
+    field.rows.some((r) => typeof r.citationCount === "number");
+  if (hasSortableData) {
+    const sortSep = doc.createElement("span");
+    sortSep.className = "llm-search-sort-separator";
+    toolbar.appendChild(sortSep);
+
+    const sortGroup = doc.createElement("span");
+    sortGroup.className = "llm-search-sort-group";
+
+    const sortLabel = doc.createElement("span");
+    sortLabel.className = "llm-search-sort-label";
+    sortLabel.textContent = "Sort:";
+    sortGroup.appendChild(sortLabel);
+
+    type SortKey = "relevance" | "date" | "citations";
+    const sortButtons: Record<string, HTMLButtonElement> = {};
+    const rowElements: HTMLElement[] = [];
+    // Filled after rows are created below
+
+    const applySort = (key: SortKey) => {
+      // Update active state
+      for (const [k, btn] of Object.entries(sortButtons)) {
+        btn.classList.toggle("llm-search-sort-active", k === key);
+      }
+      // Build index-order pairs
+      const indices = field.rows.map((_, i) => i);
+      if (key === "date") {
+        indices.sort((a, b) => (field.rows[b].year || 0) - (field.rows[a].year || 0));
+      } else if (key === "citations") {
+        indices.sort(
+          (a, b) => (field.rows[b].citationCount || 0) - (field.rows[a].citationCount || 0),
+        );
+      }
+      // Re-order DOM elements (preserves checkbox state)
+      for (const idx of indices) {
+        if (rowElements[idx]) list.appendChild(rowElements[idx]);
+      }
+    };
+
+    for (const key of ["relevance", "date", "citations"] as SortKey[]) {
+      const btn = doc.createElement("button");
+      btn.type = "button";
+      btn.className = "llm-search-sort-btn" + (key === "relevance" ? " llm-search-sort-active" : "");
+      btn.textContent = key === "relevance" ? "Relevance" : key === "date" ? "Date" : "Citations";
+      btn.addEventListener("click", () => applySort(key));
+      sortGroup.appendChild(btn);
+      sortButtons[key] = btn;
+    }
+
+    toolbar.appendChild(sortGroup);
+    // rowElements will be populated as rows are rendered below, then accessible to applySort
+    (container as any)._sortRowElements = rowElements;
+  }
+
   for (const rowData of field.rows) {
     const row = doc.createElement("label");
     row.className = "llm-search-results-item";
@@ -967,6 +1024,9 @@ function renderPaperResultListField(
 
     row.appendChild(content);
     list.appendChild(row);
+    // Track row elements for sort re-ordering
+    const sortRowElements = (container as any)._sortRowElements as HTMLElement[] | undefined;
+    if (sortRowElements) sortRowElements.push(row);
   }
 
   const getSelectedIds = () =>

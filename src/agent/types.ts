@@ -147,6 +147,8 @@ export type AgentPendingField =
         href?: string;
         importIdentifier?: string;
         checked?: boolean;
+        year?: number;
+        citationCount?: number;
       }>;
       minSelectedByAction?: Array<{
         actionId: string;

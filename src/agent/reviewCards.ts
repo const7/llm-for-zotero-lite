@@ -711,6 +711,8 @@ export function createSearchLiteratureReviewAction(
           href: paper.href,
           importIdentifier: paper.importIdentifier,
           checked: true,
+          year: typeof paper.raw.year === "number" ? paper.raw.year : undefined,
+          citationCount: typeof paper.raw.citationCount === "number" ? paper.raw.citationCount : undefined,
         })),
         minSelectedByAction: [
           { actionId: "import", min: 1 },
