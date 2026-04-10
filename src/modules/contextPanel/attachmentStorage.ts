@@ -103,7 +103,7 @@ export function getChatAttachmentsRootDir(): string {
 async function ensureDir(path: string): Promise<void> {
   const io = getIOUtils();
   if (io?.makeDirectory) {
-      await io.makeDirectory(path, {
+    await io.makeDirectory(path, {
       createAncestors: true,
       ignoreExisting: true,
     });
@@ -111,7 +111,7 @@ async function ensureDir(path: string): Promise<void> {
   }
   const osFile = getOSFile();
   if (osFile?.makeDir) {
-      await osFile.makeDir(path, {
+    await osFile.makeDir(path, {
       from: getLocalParentPath(path),
       ignoreExisting: true,
     });

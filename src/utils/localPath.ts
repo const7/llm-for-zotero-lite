@@ -160,7 +160,7 @@ export function fileUrlToPath(url: string | undefined): string | undefined {
     const parsed = new URL(raw);
     if (parsed.protocol !== "file:") return undefined;
 
-    if (parsed.host) {
+    if (parsed.host && parsed.host.toLowerCase() !== "localhost") {
       const segments = decodeFileUrlSegments(parsed.pathname);
       const [share, ...rest] = segments;
       if (!share) return undefined;
