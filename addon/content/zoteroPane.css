@@ -4033,6 +4033,43 @@ label.llm-search-results-item:hover {
   opacity: 0.6;
 }
 
+/* Sort controls in search results toolbar */
+.llm-search-sort-separator {
+  flex: 1;
+}
+
+.llm-search-sort-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.llm-search-sort-label {
+  font-size: var(--llm-fs-10);
+  color: var(--fill-secondary);
+  margin-right: 2px;
+}
+
+.llm-search-sort-btn {
+  font-size: var(--llm-fs-10);
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--fill-secondary) 30%, transparent);
+  background: transparent;
+  color: var(--fill-secondary);
+  cursor: pointer;
+}
+
+.llm-search-sort-btn:hover {
+  background: color-mix(in srgb, var(--fill-secondary) 10%, transparent);
+}
+
+.llm-search-sort-btn.llm-search-sort-active {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--fill-primary);
+}
+
 /* Typing Indicator */
 .llm-typing {
   display: flex;
