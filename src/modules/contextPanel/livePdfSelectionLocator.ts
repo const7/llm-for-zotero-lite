@@ -1686,7 +1686,7 @@ function buildPageTextQuoteResult(
   };
 }
 
-function locateQuoteProgressivelyInPageTexts(
+export function locateQuoteProgressivelyInPageTexts(
   pages: LivePdfPageText[],
   quoteText: string,
   expectedPageIndex: number | null,

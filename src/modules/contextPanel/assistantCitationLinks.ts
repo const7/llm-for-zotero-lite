@@ -19,6 +19,7 @@ import {
   locateQuoteByRawPrefixInPages,
   locateQuoteInPageTexts,
   locateQuoteInLivePdfReader,
+  locateQuoteProgressivelyInPageTexts,
   getPageLabelForIndex,
   resolvePageIndexForLabel,
   scrollToExactQuoteInReader,
@@ -1268,6 +1269,19 @@ async function locateCitationPageWithPdfWorker(
         return { pageIndex, pageLabel: `${pageIndex + 1}` };
       }
 
+      const progressive = locateQuoteProgressivelyInPageTexts(
+        pages,
+        cleanQuote,
+        null,
+      );
+      if (
+        progressive.result?.status === "resolved" &&
+        progressive.result.computedPageIndex !== null
+      ) {
+        const pageIndex = Math.floor(progressive.result.computedPageIndex);
+        return { pageIndex, pageLabel: `${pageIndex + 1}` };
+      }
+
       const segments = splitQuoteAtEllipsis(cleanQuote);
       if (segments.length >= 2) {
         for (const segment of segments) {
@@ -1487,13 +1501,23 @@ async function resolvePageForCitationButton(params: {
         normalizedQuoteText,
       );
       if (!resolved) continue;
+      // When the active reader matches this candidate, use its page labels
+      // for correct Roman numeral / offset numbering instead of simple 1-based.
+      let resolvedPageLabel = resolved.pageLabel;
+      if (activeReader && activeReaderItemId === candidate.contextItemId) {
+        const readerLabel = getPageLabelForIndex(
+          activeReader,
+          resolved.pageIndex,
+        );
+        if (readerLabel) resolvedPageLabel = readerLabel;
+      }
       const pageLabel =
         rememberCachedCitationPage(
           candidate.contextItemId,
           normalizedQuoteText,
           resolved.pageIndex,
-          resolved.pageLabel,
-        ) || resolved.pageLabel;
+          resolvedPageLabel,
+        ) || resolvedPageLabel;
       updateCitationButtonPage(
         params.button,
         params.displayCitationLabel,
