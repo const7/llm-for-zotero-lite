@@ -10,6 +10,7 @@ import {
   invalidateMineruMd,
   getMineruCacheDir,
 } from "./contextPanel/mineruCache";
+import { invalidateCachedContextText } from "./contextPanel/pdfContext";
 import {
   setItemProcessing,
   setItemCached,
@@ -238,6 +239,9 @@ async function processNext(): Promise<void> {
         result.files,
       );
       setItemCached(entry.attachmentId);
+      // Flush stale in-memory text cache and disk embedding cache so the
+      // next query picks up MinerU-quality chunks and re-generates embeddings.
+      invalidateCachedContextText(entry.attachmentId);
       state.processedCount++;
       state.lastFailedItemId = null;
     } else {
