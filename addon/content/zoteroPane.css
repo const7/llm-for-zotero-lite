@@ -1349,6 +1349,7 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  background: var(--material-sidepane);
 }
 
 .llm-standalone-content-title {
