@@ -185,23 +185,6 @@ function normalizeMetadataValue(value: unknown): string {
   return `${value ?? ""}`.trim();
 }
 
-function stripHtmlContent(html: string): string {
-  return html
-    .replace(/<\/p>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/h[1-6]>/gi, "\n")
-    .replace(/<hr\s*\/?>/gi, "\n---\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
 function normalizeText(value: unknown): string {
   return `${value ?? ""}`.replace(/\s+/g, " ").trim();
 }
@@ -1470,7 +1453,7 @@ export class ZoteroGateway {
       if (results.length >= params.limit) break;
       if ((item as any).isNote?.() && !item.parentID) {
         const html = item.getNote?.() || "";
-        const text = stripHtmlContent(html);
+        const text = normalizeNoteSourceText(html);
         const rawTitle = normalizeText(
           (item as any).getNoteTitle?.() || item.getDisplayTitle?.() || "",
         ).trim();
@@ -1490,7 +1473,7 @@ export class ZoteroGateway {
         const noteItem = Zotero.Items.get(noteId);
         if (!noteItem?.isNote?.()) continue;
         const html = noteItem.getNote?.() || "";
-        const text = stripHtmlContent(html);
+        const text = normalizeNoteSourceText(html);
         const rawTitle = normalizeText(
           (noteItem as any).getNoteTitle?.() || noteItem.getDisplayTitle?.() || "",
         ).trim();

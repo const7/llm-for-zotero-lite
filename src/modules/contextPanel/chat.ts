@@ -2676,13 +2676,25 @@ function buildActiveNoteRuntimeContext(
   if (!noteSession) return undefined;
   const snapshot = readNoteSnapshot(item);
   if (!snapshot) return undefined;
+  // Only send raw HTML when the note is a styled template (has inline
+  // style= attributes).  Plain notes don't need it — noteText suffices.
+  // Cap at 10 000 chars to avoid inflating the LLM prompt with heavy CSS.
+  const MAX_NOTE_HTML_LEN = 10_000;
+  const isStyledNote =
+    snapshot.html && /<[^>]+\bstyle\s*=/i.test(snapshot.html);
+  const noteHtml = isStyledNote
+    ? snapshot.html.length > MAX_NOTE_HTML_LEN
+      ? snapshot.html.slice(0, MAX_NOTE_HTML_LEN) + "\n[...truncated]"
+      : snapshot.html
+    : undefined;
+
   return {
     noteId: noteSession.noteId,
     title: noteSession.title,
     noteKind: noteSession.noteKind,
     parentItemId: noteSession.parentItemId,
     noteText: snapshot.text,
-    noteHtml: snapshot.html || undefined,
+    noteHtml,
   };
 }
 

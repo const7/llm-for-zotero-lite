@@ -41,3 +41,12 @@ Fall back to PDF tools:
 - Prefer MinerU cache over raw PDF — it's faster and gives better quality.
 - Always include the figure caption and surrounding context in your analysis, not just the image.
 - For tables: the MinerU markdown usually contains the table as structured text — read that directly instead of rendering images.
+
+### Saving figure analysis to notes
+When the user asks to save your figure analysis to a note (e.g., "save it", "put that in a note", "create a note"):
+- **Always embed the figure image** in the note alongside your explanation. A note explaining Figure 2 must show Figure 2.
+- Use `![Figure N caption](file:///{mineruCacheDir}/{figure_path})` — the same image path you read with `file_io` during analysis.
+- Place the image at the start of the relevant section, before the explanation text.
+- If you analyzed multiple figures, embed all of them.
+- If MinerU cache was not available (you used `view_pdf_pages` instead), the figure image cannot be embedded — mention this.
+- The `edit_current_note` tool auto-imports `file://` images as Zotero embedded attachments.

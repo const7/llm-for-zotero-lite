@@ -7,6 +7,7 @@ import {
   stripNoteHtml,
   renderRawNoteHtml,
 } from "../../../modules/contextPanel/notes";
+import { rememberAssistantNoteForParent } from "../../../modules/contextPanel/prefHelpers";
 import { escapeNoteHtml } from "../../../modules/contextPanel/textUtils";
 import { fileUrlToPath } from "../../../utils/localPath";
 import { ok, fail, validateObject, normalizePositiveInt } from "../shared";
@@ -80,6 +81,29 @@ async function importLocalImages(
 
 type NotePatch = { find: string; replace: string };
 
+/**
+ * Sanitise HTML before writing to a Zotero note.  Strips dangerous
+ * elements and attributes while preserving inline `style=` styling.
+ */
+function sanitizeNoteHtml(html: string): string {
+  let s = html;
+  // Remove dangerous elements (with content)
+  s = s.replace(/<(script|style|iframe|object|embed|form|input)[^>]*>[\s\S]*?<\/\1>/gi, "");
+  // Remove self-closing / void variants
+  s = s.replace(/<(script|style|iframe|object|embed|form|input)\b[^>]*\/?>/gi, "");
+  // Remove event-handler attributes (on*)
+  s = s.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+  // Neutralise javascript: / vbscript: URLs in href / src
+  s = s.replace(/(href|src)\s*=\s*"(?:javascript|vbscript):[^"]*"/gi, '$1=""');
+  s = s.replace(/(href|src)\s*=\s*'(?:javascript|vbscript):[^']*'/gi, "$1=''");
+  return s;
+}
+
+/** Detect whether an HTML string contains inline `style=` attributes. */
+function htmlHasInlineStyles(html: string): boolean {
+  return /<[^>]+\bstyle\s*=/i.test(html);
+}
+
 type EditCurrentNoteInput = {
   mode: "edit" | "create";
   content: string;
@@ -88,10 +112,13 @@ type EditCurrentNoteInput = {
    *  note HTML.  When set, `execute()` uses this instead of round-tripping
    *  through `renderRawNoteHtml` to preserve images, list numbering, etc. */
   _patchedHtml?: string;
-  /** True when the LLM's content is styled HTML (has inline `style=`
-   *  attributes). When set, the content bypasses markdown normalisation
-   *  and is written directly to the note via `setNote()`. */
+  /** True when the content is styled HTML that should bypass markdown
+   *  normalisation and be written directly via `setNote()`. */
   _isHtml?: boolean;
+  /** Raw HTML content from the LLM, kept until `createPendingAction` can
+   *  verify that the source note is actually a styled template (edit mode)
+   *  or accept it outright (create mode). */
+  _rawHtmlContent?: string;
   noteId?: number;
   noteTitle?: string;
   target?: "item" | "standalone";
@@ -335,7 +362,8 @@ export function createEditCurrentNoteTool(
         "When a note is open and the user asks to edit, rewrite, revise, polish, or update ANY text, call `edit_current_note` with mode 'edit'. NEVER output note text directly in chat. " +
         "For edits, PREFER `patches` (find-and-replace pairs) over `content` (full rewrite). " +
         "To create a new note, call `edit_current_note` with mode 'create' and `content`. " +
-        "Pass Markdown by default. When the user explicitly requests HTML output (e.g. for styled note templates), pass well-formed HTML with inline styles directly.",
+        "Pass Markdown by default. When the user explicitly requests HTML output (e.g. for styled note templates), pass well-formed HTML with inline styles directly. " +
+        "When the note discusses a specific figure or table you previously read via file_io, embed the image: `![Figure N](file:///{path})` — auto-imported as a Zotero attachment.",
     },
     presentation: {
       label: "Edit / Create Note",
@@ -418,20 +446,20 @@ export function createEditCurrentNoteTool(
       // For patches mode, content will be resolved in createPendingAction
       // using the current note snapshot + patches
       const rawContent = hasContent ? (args.content as string) : "";
-      // Detect styled HTML (inline style= attributes) — pass through as-is
-      // to preserve colours, backgrounds, font sizes from user templates.
-      const contentIsStyledHtml =
-        hasContent && /<[^>]+\bstyle\s*=/i.test(rawContent);
-      const content = hasContent
-        ? contentIsStyledHtml
-          ? rawContent.trim()
-          : normalizeNoteSourceText(rawContent)
-        : "";
+      // Always normalise content.  If the LLM produced styled HTML, keep the
+      // raw version aside — createPendingAction will decide whether to use it
+      // based on whether the *source* note is a styled template (edit mode)
+      // or accept it outright (create mode).
+      const contentHasStyledHtml =
+        hasContent && htmlHasInlineStyles(rawContent);
+      const content = hasContent ? normalizeNoteSourceText(rawContent) : "";
 
       return ok<EditCurrentNoteInput & { _patches?: NotePatch[] }>({
         mode,
         content,
-        _isHtml: contentIsStyledHtml || undefined,
+        _rawHtmlContent: contentHasStyledHtml
+          ? rawContent.trim()
+          : undefined,
         _patches: patches,
         target: mode === "create" ? target : undefined,
         targetItemId:
@@ -442,8 +470,8 @@ export function createEditCurrentNoteTool(
     },
     createPendingAction: (input, context) => {
       // Resolve patches into full content if needed
-      const inputWithPatches = input as EditCurrentNoteInput & { _patches?: NotePatch[] };
-      if (inputWithPatches._patches && input.mode === "edit") {
+      const inputExt = input as EditCurrentNoteInput & { _patches?: NotePatch[] };
+      if (inputExt._patches && input.mode === "edit") {
         const snapshot = zoteroGateway.getActiveNoteSnapshot({
           request: context.request,
           item: context.item,
@@ -452,19 +480,26 @@ export function createEditCurrentNoteTool(
           throw new Error("No active note is available to edit");
         }
         // Apply patches to the plain text representation for the diff preview.
-        const patched = applyPatches(snapshot.text, inputWithPatches._patches);
+        const patched = applyPatches(snapshot.text, inputExt._patches);
         input.content = normalizeNoteSourceText(patched);
 
         // Also apply patches directly to the original HTML so that images,
         // list numbering, and other structure are preserved when executing.
         const patchedHtml = applyPatchesToNoteHtml(
           snapshot.html,
-          inputWithPatches._patches,
+          inputExt._patches,
         );
         if (patchedHtml) {
           input._patchedHtml = patchedHtml;
         }
-        delete inputWithPatches._patches;
+        delete inputExt._patches;
+      }
+
+      // --- Resolve _isHtml for create mode from LLM output ---
+      if (input.mode === "create" && input._rawHtmlContent) {
+        input._isHtml = true;
+        input.content = sanitizeNoteHtml(input._rawHtmlContent);
+        delete input._rawHtmlContent;
       }
 
       const normalizedContent = input._isHtml
@@ -501,9 +536,24 @@ export function createEditCurrentNoteTool(
       if (!snapshot) {
         throw new Error("No active note is available to edit");
       }
+
+      // --- Resolve _isHtml for edit mode: only activate when the source
+      //     note itself is a styled template (has inline style= attributes). ---
+      if (input._rawHtmlContent && htmlHasInlineStyles(snapshot.html)) {
+        input._isHtml = true;
+        input.content = sanitizeNoteHtml(input._rawHtmlContent);
+      }
+      delete input._rawHtmlContent;
+
       input.expectedOriginalHtml = snapshot.html;
       input.noteId = snapshot.noteId;
       input.noteTitle = snapshot.title || "Untitled note";
+
+      // Diff preview always uses readable text, even for styled HTML notes
+      const diffAfter = input._isHtml
+        ? normalizeNoteSourceText(input.content)
+        : normalizedContent;
+
       return {
         toolName: "edit_current_note",
         mode: "review",
@@ -516,8 +566,8 @@ export function createEditCurrentNoteTool(
             type: "diff_preview",
             id: "noteDiff",
             label: "Note changes",
-            before: input._isHtml ? snapshot.html : snapshot.text,
-            after: normalizedContent,
+            before: snapshot.text,
+            after: diffAfter,
             sourceFieldId: "content",
             contextLines: 0,
             emptyMessage: "No note changes yet.",
@@ -526,7 +576,7 @@ export function createEditCurrentNoteTool(
             type: "textarea",
             id: "content",
             label: "Final note content",
-            value: normalizedContent,
+            value: input._isHtml ? input.content : normalizedContent,
           },
         ],
       };
@@ -538,7 +588,7 @@ export function createEditCurrentNoteTool(
       const userEditedContent =
         typeof resolutionData.content === "string"
           ? input._isHtml
-            ? resolutionData.content
+            ? sanitizeNoteHtml(resolutionData.content)
             : normalizeNoteSourceText(resolutionData.content)
           : input.content;
       // If the user modified the textarea, discard the pre-patched HTML
@@ -614,12 +664,15 @@ export function createEditCurrentNoteTool(
 
         // Now set the final note HTML with data-attachment-key img tags
         if (input._isHtml) {
-          note.setNote(finalContent);
+          note.setNote(sanitizeNoteHtml(finalContent));
         } else {
-          const { renderRawNoteHtml } = await import("../../../modules/contextPanel/notes");
           note.setNote(renderRawNoteHtml(finalContent));
         }
         await note.saveTx();
+
+        if (input.target !== "standalone" && parentId && noteId > 0) {
+          rememberAssistantNoteForParent(parentId, noteId);
+        }
 
         // Register undo
         pushUndoEntry(context.request.conversationKey, {
@@ -661,7 +714,9 @@ export function createEditCurrentNoteTool(
         item: context.item,
         content: contentToSave,
         expectedOriginalHtml: input.expectedOriginalHtml,
-        preRenderedHtml: input._isHtml ? contentToSave : input._patchedHtml,
+        preRenderedHtml: input._isHtml
+          ? sanitizeNoteHtml(contentToSave)
+          : input._patchedHtml,
       });
       pushUndoEntry(context.request.conversationKey, {
         id: `undo-edit-current-note-${result.noteId}-${Date.now()}`,

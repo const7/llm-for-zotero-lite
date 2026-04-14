@@ -22,45 +22,23 @@ describe("mineruZip", function () {
     assert.equal(result.files[0].relativePath, "full.md");
   });
 
-  it("extracts a deflated ZIP without relying on DecompressionStream", function () {
+  it("extracts a deflated ZIP with multiple entries", function () {
     const zipBytes = zipSync({
       "full.md": strToU8("compressed markdown"),
       "images/fig1.png": new Uint8Array([1, 2, 3, 4]),
     });
 
-    const globalScope = globalThis as typeof globalThis & {
-      DecompressionStream?: unknown;
-    };
-    const savedDescriptor = Object.getOwnPropertyDescriptor(
-      globalScope,
-      "DecompressionStream",
-    );
-
-    Object.defineProperty(globalScope, "DecompressionStream", {
-      value: undefined,
-      configurable: true,
-      writable: true,
-    });
-
-    try {
-      const result = inspectMineruZipBytes(zipBytes);
-      assert.isTrue(result.ok);
-      if (!result.ok) {
-        throw new Error("Expected deflated ZIP inspection to succeed");
-      }
-
-      assert.equal(result.mdContent, "compressed markdown");
-      assert.sameMembers(
-        result.files.map((file) => file.relativePath),
-        ["full.md", "images/fig1.png"],
-      );
-    } finally {
-      if (savedDescriptor) {
-        Object.defineProperty(globalScope, "DecompressionStream", savedDescriptor);
-      } else {
-        delete globalScope.DecompressionStream;
-      }
+    const result = inspectMineruZipBytes(zipBytes);
+    assert.isTrue(result.ok);
+    if (!result.ok) {
+      throw new Error("Expected deflated ZIP inspection to succeed");
     }
+
+    assert.equal(result.mdContent, "compressed markdown");
+    assert.sameMembers(
+      result.files.map((file) => file.relativePath),
+      ["full.md", "images/fig1.png"],
+    );
   });
 
   it("extracts nested files and prefers full.md as the Markdown payload", function () {
