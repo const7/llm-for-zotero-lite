@@ -72,7 +72,6 @@ async function executeCommand(params: {
       const proc = await Subprocess.call({
         command: shell,
         arguments: [shellFlag, command],
-        environment: {},
         workdir: params.cwd || undefined,
       });
 
