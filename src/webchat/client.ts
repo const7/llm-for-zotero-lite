@@ -29,7 +29,7 @@ const REMOTE_READY_POLL_INTERVAL_MS = 250;
 const REMOTE_READY_TIMEOUT_MS = 30_000;
 const DEEPSEEK_SCRAPE_TIMEOUT_MS = 45_000;
 const HISTORY_REFRESH_POLL_INTERVAL_MS = 500;
-const HISTORY_REFRESH_TIMEOUT_MS = 10_000;
+const HISTORY_REFRESH_TIMEOUT_MS = 25_000;
 const TIMEOUT_MS = 300_000; // 5 minutes
 
 // ---------------------------------------------------------------------------

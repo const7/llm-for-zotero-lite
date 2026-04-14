@@ -22,7 +22,7 @@ match: /\b(create|make|new)\b.*\bnote\b/i
 
 ### Key rules
 - NEVER output note text in chat. Always use `edit_current_note`.
-- Always pass plain text or Markdown, never raw HTML.
+- Pass Markdown by default. When the user explicitly requests HTML output or provides an HTML template (e.g. Better Notes templates with inline styles), write HTML with inline styles directly. The original note HTML is available in the context when editing an existing note.
 
 ### Figures from MinerU cache
 When MinerU cache is available (`mineruCacheDir` in paper context), extracted figures can be embedded in notes:

@@ -101,6 +101,9 @@ function buildUserMessage(request: AgentRuntimeRequest): AgentModelMessage {
       contextLines.push(`- Active note parent item ID: ${note.parentItemId}`);
     }
     contextLines.push(`Current note content for this turn:\n"""\n${note.noteText}\n"""`);
+    if (note.noteHtml) {
+      contextLines.push(`Original note HTML:\n"""\n${note.noteHtml}\n"""`);
+    }
   }
   if (Array.isArray(request.selectedTexts) && request.selectedTexts.length) {
     const selectedTextBlock = request.selectedTexts

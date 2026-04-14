@@ -6446,7 +6446,7 @@ export function setupHandlers(
         "",
         targetHostname,
         requestedAt,
-        15_000,
+        25_000,
       );
       const sessions = filterWebChatHistorySessionsForHostname(
         snapshot.sessions,

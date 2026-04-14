@@ -2682,6 +2682,7 @@ function buildActiveNoteRuntimeContext(
     noteKind: noteSession.noteKind,
     parentItemId: noteSession.parentItemId,
     noteText: snapshot.text,
+    noteHtml: snapshot.html || undefined,
   };
 }
 

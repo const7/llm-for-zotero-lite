@@ -32,6 +32,7 @@ created directly.
 - NEVER output the note text in chat. Always use `edit_current_note`.
 - Keep the read phase minimal: 1 call (MinerU) or 1–2 calls (read_paper/search_paper). Do not read the entire paper section by section.
 - When MinerU cache is available, figures are available for inclusion — use them when they add value to the note.
+- If the user has a custom skill with an HTML note template, follow that template and write HTML with inline styles directly.
 
 ### Budget
 Total tool calls: 2–4 (one read, optionally one more for detail, one note write).

@@ -90,6 +90,9 @@ export type ActiveNoteContext = {
   noteKind: "item" | "standalone";
   parentItemId?: number;
   noteText: string;
+  /** Raw HTML of the note, provided so the agent can see the original
+   *  structure and inline styles when editing styled/template notes. */
+  noteHtml?: string;
 };
 
 export type GlobalConversationSummary = {

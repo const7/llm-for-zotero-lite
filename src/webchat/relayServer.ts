@@ -427,9 +427,12 @@ function applyChatHistoryUpdate(body: Record<string, unknown>): void {
     const existing = getHistorySiteSync()[hostname];
     return existing?.status === "ok" || existing?.status === "empty";
   });
+  // Never replace history with an empty array on timeout — a timeout means
+  // the scrape failed, not that the user has zero conversations.
   const shouldReplaceHistory =
     incomingSites.size > 0 &&
-    (incoming.length > 0 || status === "empty" || !trustedExistingHistory);
+    (incoming.length > 0 || status === "empty" || !trustedExistingHistory) &&
+    !(incoming.length === 0 && status === "timeout");
 
   if (shouldReplaceHistory) {
     const kept = getMirroredHistory().filter((session) => {

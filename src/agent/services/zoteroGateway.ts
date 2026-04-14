@@ -1302,7 +1302,7 @@ export class ZoteroGateway {
     const noteItem = this.getItem(params.noteId);
     if (!noteItem || !(noteItem as any).isNote?.()) return null;
     const html = noteItem.getNote?.() || "";
-    const text = stripHtmlContent(html);
+    const text = normalizeNoteSourceText(html);
     if (!text.trim()) return null;
     const rawTitle = normalizeText(
       (noteItem as any).getNoteTitle?.() || noteItem.getDisplayTitle?.() || "",
@@ -1840,7 +1840,7 @@ export class ZoteroGateway {
         const noteItem = Zotero.Items.get(noteId);
         if (!noteItem?.isNote?.()) continue;
         const html = noteItem.getNote?.() || "";
-        const text = stripHtmlContent(html);
+        const text = normalizeNoteSourceText(html);
         if (!text.trim()) continue;
         const rawTitle = normalizeText(
           (noteItem as unknown as { getNoteTitle?: () => unknown }).getNoteTitle?.() || "",
