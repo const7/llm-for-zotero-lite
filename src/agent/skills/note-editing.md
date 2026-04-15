@@ -38,6 +38,9 @@ match: /\b(create|make|new)\b.*\bnote\b/i
 - PREFER `patches` (find-and-replace pairs) over `content` (full rewrite) — patches are faster.
 - Use mode 'edit' for: append to specific position, insert, delete, rewrite sections.
 
+### Note structure
+Follow the note template provided in this prompt by the Note Template skill. For Zotero notes, omit YAML frontmatter. If no template instructions are present, use your own judgment.
+
 ### Key rules
 - NEVER output note text in chat. Always use `edit_current_note`.
 - Pass Markdown by default. When the user explicitly requests HTML output or provides an HTML template (e.g. Better Notes templates with inline styles), write HTML with inline styles directly. The original note HTML is available in the context when editing an existing note.
