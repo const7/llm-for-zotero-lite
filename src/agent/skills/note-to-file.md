@@ -37,21 +37,15 @@ This skill is content-agnostic — it works for any note type: single paper summ
 - The user's notes directory path and default folder are provided in the system prompt under "Notes directory configuration". If missing, tell the user to configure the notes directory in the plugin preferences (Settings > Agent tab).
 - The default folder is used when the user doesn't specify a folder. If the user specifies a different folder, write there instead.
 
-### Default template
+### Template
+
+Apply the note template provided elsewhere in this prompt (from the Note Template skill).
+If no template instructions are present, use this minimal fallback:
 
 ```
----
-title: "{{title}}"
-date: {{date}}
-tags: [zotero]
----
-
 # {{title}}
 
 {{content}}
-
----
-*Written by LLM-for-Zotero*
 ```
 
 ### Recipe
@@ -68,7 +62,7 @@ tags: [zotero]
 - Optionally add a `## References` section at the end listing full citations.
 
 **Step 3 — Compose the note:**
-- Use the template above as the skeleton.
+- Use the note template as the skeleton (from the Note Template skill, or the fallback above if unavailable).
 - Fill in `{{title}}` with the note title (paper title, review topic, or user-provided title).
 - Fill in `{{date}}` with today's date in YYYY-MM-DD format.
 - Fill in `{{content}}` with the full note body.
@@ -88,7 +82,7 @@ tags: [zotero]
 
 ### Key rules
 - Always use `file_io` for writing — never output the full note text in chat.
-- Use the template above. If this skill has been customized by the user, follow their template.
+- Use the note template from the Note Template skill. If unavailable, use the fallback template in this skill.
 - Use `[@citekey]` Pandoc syntax when referencing papers — look up citekeys from Zotero metadata. Adapt citation syntax to the target format.
 - If writing fails, report the error clearly with the attempted path.
 - Use the native path separator provided in the runtime platform section of the system prompt. Never mix separators.

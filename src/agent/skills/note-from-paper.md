@@ -43,6 +43,7 @@ notes, follow this efficient two-step workflow.
 - Place figures near the text that discusses them.
 
 **Step 3 — Create the note:**
+Follow the note template provided in this prompt by the Note Template skill. For Zotero notes, omit YAML frontmatter.
 Call `edit_current_note(mode:'create')` with the note content. The note is
 created directly.
 

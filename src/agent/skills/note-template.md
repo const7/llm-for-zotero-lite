@@ -36,6 +36,31 @@ match: /\b(use|apply|with)\b.*\btemplate\b/i
 
 ## Note Template
 
-This is the default note template. It has not been customized, so you should use your own judgment to structure notes appropriately for the content and context. Write clear, well-organized notes as you normally would.
+Use this template as the default structure for all notes you create, whether writing to Zotero (`edit_current_note`) or to files (`file_io`).
 
-**If the user has replaced this section with a custom template below, follow that template exactly for all notes you create — whether using `edit_current_note` (Zotero notes) or `file_io` (file-based notes).**
+### Default template
+
+```
+---
+title: "{{title}}"
+date: {{date}}
+tags: [zotero]
+---
+
+# {{title}}
+
+{{content}}
+
+---
+*Written by LLM-for-Zotero*
+```
+
+### How to apply
+- Fill in `{{title}}` with the note title (paper title, review topic, or user-provided title).
+- Fill in `{{date}}` with today's date in YYYY-MM-DD format.
+- Fill in `{{content}}` with the full note body.
+- Add extra YAML frontmatter fields as appropriate (e.g., `authors`, `doi`, `journal` for paper notes).
+- For Zotero notes (`edit_current_note`): omit the YAML frontmatter block (Zotero notes don't use frontmatter). Use the heading and content structure only.
+- For file-based notes (`file_io`): include the full template with YAML frontmatter.
+
+**If the user has replaced this template with their own, follow their template exactly for all notes you create — whether using `edit_current_note` (Zotero notes) or `file_io` (file-based notes).**

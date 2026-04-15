@@ -7338,7 +7338,10 @@ export function setupHandlers(
       forcedSkillBadge.remove();
       forcedSkillBadge = null;
     }
-    inputBox.style.textIndent = "";
+    if (inputBox.dataset.originalPaddingLeft !== undefined) {
+      inputBox.style.paddingLeft = inputBox.dataset.originalPaddingLeft;
+      delete inputBox.dataset.originalPaddingLeft;
+    }
     if (inputBox.dataset.originalPlaceholder !== undefined) {
       inputBox.placeholder = inputBox.dataset.originalPlaceholder;
       delete inputBox.dataset.originalPlaceholder;
@@ -7360,9 +7363,9 @@ export function setupHandlers(
       inputBox.closest(".llm-compose-area") || inputBox.parentElement;
     if (!ownerDoc || !composeArea) return;
 
-    // Render inline badge (same pattern as insertCommandToken)
+    // Render inline badge (same pattern as insertCommandToken, skill variant)
     const badge = ownerDoc.createElement("div");
-    badge.className = "llm-command-inline";
+    badge.className = "llm-command-inline llm-command-inline--skill";
     badge.title = skill.description || skill.name;
     badge.textContent = `/${skill.id}`;
 
@@ -7377,7 +7380,10 @@ export function setupHandlers(
     forcedSkillBadge = badge;
 
     const badgeWidth = badge.offsetWidth;
-    inputBox.style.textIndent = `${badgeWidth + 6}px`;
+    if (inputBox.dataset.originalPaddingLeft === undefined) {
+      inputBox.dataset.originalPaddingLeft = cs ? cs.paddingLeft : "14px";
+    }
+    inputBox.style.paddingLeft = `${badgeWidth + 6 + parseFloat(inputBox.dataset.originalPaddingLeft)}px`;
 
     if (inputBox.dataset.originalPlaceholder === undefined) {
       inputBox.dataset.originalPlaceholder = inputBox.placeholder;
@@ -7403,8 +7409,11 @@ export function setupHandlers(
       activeCommandBadge.remove();
       activeCommandBadge = null;
     }
-    // Reset the text-indent we added to make room for the badge
-    inputBox.style.textIndent = "";
+    // Reset the padding-left we added to make room for the badge
+    if (inputBox.dataset.originalPaddingLeft !== undefined) {
+      inputBox.style.paddingLeft = inputBox.dataset.originalPaddingLeft;
+      delete inputBox.dataset.originalPaddingLeft;
+    }
     // Restore original placeholder
     if (inputBox.dataset.originalPlaceholder !== undefined) {
       inputBox.placeholder = inputBox.dataset.originalPlaceholder;
@@ -7415,7 +7424,7 @@ export function setupHandlers(
   /**
    * Creates an inline command badge inside the textarea area.
    * The badge is positioned at the textarea's first-line text start position,
-   * and the textarea's text-indent is increased to flow around it.
+   * and the textarea's padding-left is increased to flow around it.
    * The badge is atomic — removed entirely via its x button or Backspace.
    */
   const insertCommandToken = (action: ActionPickerItem): void => {
@@ -7444,9 +7453,12 @@ export function setupHandlers(
     composeArea.appendChild(badge);
     activeCommandBadge = badge;
 
-    // Measure the badge width and set text-indent to push textarea text past it
+    // Measure the badge width and set padding-left to push textarea text past it
     const badgeWidth = badge.offsetWidth;
-    inputBox.style.textIndent = `${badgeWidth + 6}px`; // badge width + gap
+    if (inputBox.dataset.originalPaddingLeft === undefined) {
+      inputBox.dataset.originalPaddingLeft = cs ? cs.paddingLeft : "14px";
+    }
+    inputBox.style.paddingLeft = `${badgeWidth + 6 + parseFloat(inputBox.dataset.originalPaddingLeft)}px`;
 
     // Save original placeholder and update hint
     if (inputBox.dataset.originalPlaceholder === undefined) {
