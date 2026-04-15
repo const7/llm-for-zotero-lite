@@ -5390,7 +5390,7 @@ label.llm-search-results-item:hover {
 
 .llm-input {
   width: 100%;
-  min-height: 96px;
+  min-height: 60px;
   max-height: 220px;
   font: inherit;
   font-size: var(--llm-fs-12);
@@ -5439,7 +5439,7 @@ label.llm-search-results-item:hover {
 .llm-actions-left {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
