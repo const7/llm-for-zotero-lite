@@ -1,6 +1,5 @@
 ---
 id: note-from-paper
-name: Reading Notes
 description: Create reading notes from a paper with optional figures
 version: 1
 match: /\b(create|make|write|draft|generate)\b.*\b(note|summary note|reading note|notes?)\b.*\b(for|from|about|on)\b.*\b(paper|article|this)\b/i

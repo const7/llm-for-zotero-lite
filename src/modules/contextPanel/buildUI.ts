@@ -706,6 +706,40 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   actionHitlPanel.style.display = "none";
   composeArea.appendChild(actionHitlPanel);
 
+  // Command row — shows active skill/action badge above textarea
+  // Uses the exact same chip DOM as paper context chips
+  const commandRow = createElement(
+    doc,
+    "div",
+    "llm-command-row llm-selected-context",
+    { id: "llm-command-row" },
+  );
+  const commandRowHeader = createElement(
+    doc,
+    "div",
+    "llm-image-preview-header llm-selected-context-header llm-paper-context-chip-header",
+  );
+  const commandRowLabel = createElement(
+    doc,
+    "span",
+    "llm-paper-context-chip-label",
+    { id: "llm-command-row-badge" },
+  );
+  const commandRowClear = createElement(
+    doc,
+    "button",
+    "llm-remove-img-btn llm-paper-context-clear",
+    {
+      type: "button",
+      textContent: "\u00d7",
+      title: t("Clear"),
+    },
+  );
+  commandRowHeader.appendChild(commandRowLabel);
+  commandRowHeader.appendChild(commandRowClear);
+  commandRow.appendChild(commandRowHeader);
+  composeArea.appendChild(commandRow);
+
   const inputBox = createElement(doc, "textarea", "llm-input", {
     id: "llm-input",
     placeholder: hasItem

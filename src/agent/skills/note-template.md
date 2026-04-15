@@ -1,6 +1,5 @@
 ---
 id: note-template
-name: Note Template
 description: Default note structure — customize this to shape all your notes
 version: 1
 match: /\b(create|make|write|draft|generate)\b.*\b(note|notes?)\b/i

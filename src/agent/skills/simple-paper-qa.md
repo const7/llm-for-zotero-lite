@@ -1,6 +1,5 @@
 ---
 id: simple-paper-qa
-name: Paper Q&A
 description: Answer general questions about a paper
 version: 1
 match: /\b(what|who|when|where|which|tell me|explain)\b.*\b(about|paper|article|study|wrote|author|publish|year|journal|abstract|topic|field|contribution|finding|claim|conclusion|argue)\b/i

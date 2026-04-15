@@ -1,6 +1,5 @@
 ---
 id: analyze-figures
-name: Analyze Figures
 description: Analyze figures, tables, and diagrams from papers
 version: 1
 match: /\b(figure|fig\.?|table|diagram|chart|graph|plot|schematic|illustration)\s*\d/i

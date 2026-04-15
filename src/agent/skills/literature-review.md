@@ -1,6 +1,5 @@
 ---
 id: literature-review
-name: Literature Review
 description: Structured scientific review with thematic synthesis and citations
 version: 1
 match: /\b(literature review|lit review|review of (the )?literature)\b/i
