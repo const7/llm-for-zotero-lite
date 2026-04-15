@@ -7085,7 +7085,7 @@ export function setupHandlers(
       option.setAttribute("aria-selected", idx === actionPickerActiveIndex ? "true" : "false");
       option.tabIndex = -1;
       const titleEl = createElement(ownerDoc, "div", "llm-action-picker-title", {
-        textContent: formatActionLabel(action.name),
+        textContent: action.name,
       });
       const descEl = createElement(ownerDoc, "div", "llm-action-picker-description", {
         textContent: action.description,
@@ -7334,13 +7334,11 @@ export function setupHandlers(
 
   const clearForcedSkill = (): void => {
     forcedSkillId = null;
-    if (forcedSkillBadge) {
-      forcedSkillBadge.remove();
-      forcedSkillBadge = null;
-    }
-    if (inputBox.dataset.originalPaddingLeft !== undefined) {
-      inputBox.style.paddingLeft = inputBox.dataset.originalPaddingLeft;
-      delete inputBox.dataset.originalPaddingLeft;
+    forcedSkillBadge = null;
+    const row = body.querySelector("#llm-command-row");
+    if (row) {
+      row.removeAttribute("data-active");
+      row.classList.remove("llm-command-row--skill");
     }
     if (inputBox.dataset.originalPlaceholder !== undefined) {
       inputBox.placeholder = inputBox.dataset.originalPlaceholder;
@@ -7358,37 +7356,20 @@ export function setupHandlers(
       setCurrentRuntimeMode("agent");
     }
 
-    const ownerDoc = body.ownerDocument;
-    const composeArea =
-      inputBox.closest(".llm-compose-area") || inputBox.parentElement;
-    if (!ownerDoc || !composeArea) return;
+    // Populate the command row above the textarea
+    const row = body.querySelector("#llm-command-row");
+    const badgeEl = body.querySelector("#llm-command-row-badge");
+    if (!row || !badgeEl) return;
 
-    // Render inline badge (same pattern as insertCommandToken, skill variant)
-    const badge = ownerDoc.createElement("div");
-    badge.className = "llm-command-inline llm-command-inline--skill";
-    badge.title = skill.description || skill.name;
-    badge.textContent = `/${skill.id}`;
-
-    const cs = ownerDoc.defaultView?.getComputedStyle(inputBox);
-    const padTop = cs ? parseFloat(cs.paddingTop) : 12;
-    const padLeft = cs ? parseFloat(cs.paddingLeft) : 14;
-    const borderTop = cs ? parseFloat(cs.borderTopWidth) : 1;
-    const borderLeft = cs ? parseFloat(cs.borderLeftWidth) : 1;
-    badge.style.top = `${inputBox.offsetTop + borderTop + padTop}px`;
-    badge.style.left = `${inputBox.offsetLeft + borderLeft + padLeft}px`;
-    composeArea.appendChild(badge);
-    forcedSkillBadge = badge;
-
-    const badgeWidth = badge.offsetWidth;
-    if (inputBox.dataset.originalPaddingLeft === undefined) {
-      inputBox.dataset.originalPaddingLeft = cs ? cs.paddingLeft : "14px";
-    }
-    inputBox.style.paddingLeft = `${badgeWidth + 6 + parseFloat(inputBox.dataset.originalPaddingLeft)}px`;
+    badgeEl.textContent = `/${skill.id}`;
+    row.classList.add("llm-command-row--skill");
+    row.setAttribute("data-active", "");
+    forcedSkillBadge = row as HTMLElement;
 
     if (inputBox.dataset.originalPlaceholder === undefined) {
       inputBox.dataset.originalPlaceholder = inputBox.placeholder;
     }
-    inputBox.placeholder = skill.description || "";
+    inputBox.placeholder = "";
     inputBox.value = "";
     inputBox.focus({ preventScroll: true });
     const EvtCtor =
@@ -7405,14 +7386,11 @@ export function setupHandlers(
   /** Removes the inline command badge from the textarea and restores state. */
   const clearCommandChip = (): void => {
     activeCommandAction = null;
-    if (activeCommandBadge) {
-      activeCommandBadge.remove();
-      activeCommandBadge = null;
-    }
-    // Reset the padding-left we added to make room for the badge
-    if (inputBox.dataset.originalPaddingLeft !== undefined) {
-      inputBox.style.paddingLeft = inputBox.dataset.originalPaddingLeft;
-      delete inputBox.dataset.originalPaddingLeft;
+    activeCommandBadge = null;
+    const row = body.querySelector("#llm-command-row");
+    if (row) {
+      row.removeAttribute("data-active");
+      row.classList.remove("llm-command-row--skill");
     }
     // Restore original placeholder
     if (inputBox.dataset.originalPlaceholder !== undefined) {
@@ -7430,41 +7408,22 @@ export function setupHandlers(
   const insertCommandToken = (action: ActionPickerItem): void => {
     clearCommandChip();
     activeCommandAction = action;
-    const ownerDoc = body.ownerDocument;
-    // The compose area wraps the textarea and has position: relative
-    const composeArea = inputBox.closest(".llm-compose-area") || inputBox.parentElement;
-    if (!ownerDoc || !composeArea) return;
 
-    // Create the inline badge element
-    const badge = ownerDoc.createElement("div");
-    badge.className = "llm-command-inline";
-    badge.title = action.description;
-    badge.textContent = `/${action.name}`;
+    // Populate the command row above the textarea
+    const row = body.querySelector("#llm-command-row");
+    const badgeEl = body.querySelector("#llm-command-row-badge");
+    if (!row || !badgeEl) return;
 
-    // Position the badge at the textarea's text start position.
-    // Use computed style to get exact padding/border values.
-    const cs = ownerDoc.defaultView?.getComputedStyle(inputBox);
-    const padTop = cs ? parseFloat(cs.paddingTop) : 12;
-    const padLeft = cs ? parseFloat(cs.paddingLeft) : 14;
-    const borderTop = cs ? parseFloat(cs.borderTopWidth) : 1;
-    const borderLeft = cs ? parseFloat(cs.borderLeftWidth) : 1;
-    badge.style.top = `${inputBox.offsetTop + borderTop + padTop}px`;
-    badge.style.left = `${inputBox.offsetLeft + borderLeft + padLeft}px`;
-    composeArea.appendChild(badge);
-    activeCommandBadge = badge;
-
-    // Measure the badge width and set padding-left to push textarea text past it
-    const badgeWidth = badge.offsetWidth;
-    if (inputBox.dataset.originalPaddingLeft === undefined) {
-      inputBox.dataset.originalPaddingLeft = cs ? cs.paddingLeft : "14px";
-    }
-    inputBox.style.paddingLeft = `${badgeWidth + 6 + parseFloat(inputBox.dataset.originalPaddingLeft)}px`;
+    badgeEl.textContent = `/${action.name}`;
+    row.classList.remove("llm-command-row--skill");
+    row.setAttribute("data-active", "");
+    activeCommandBadge = row as HTMLElement;
 
     // Save original placeholder and update hint
     if (inputBox.dataset.originalPlaceholder === undefined) {
       inputBox.dataset.originalPlaceholder = inputBox.placeholder;
     }
-    inputBox.placeholder = ""; // the badge itself serves as context
+    inputBox.placeholder = "";
     inputBox.value = "";
     inputBox.focus({ preventScroll: true });
     const EvtCtor = (inputBox.ownerDocument?.defaultView as any)?.Event ?? Event;
@@ -7647,9 +7606,8 @@ export function setupHandlers(
     const filtered = query
       ? allSkills.filter(
           (s: AgentSkill) =>
-            s.name.toLowerCase().includes(query) ||
-            s.description.toLowerCase().includes(query) ||
-            s.id.toLowerCase().includes(query),
+            s.id.toLowerCase().includes(query) ||
+            s.description.toLowerCase().includes(query),
         )
       : allSkills;
 
@@ -7682,11 +7640,11 @@ export function setupHandlers(
         "llm-action-picker-item",
       ) as HTMLButtonElement;
       btn.type = "button";
-      btn.title = skill.description || skill.name;
+      btn.title = skill.description || skill.id;
 
       const titleEl = ownerDoc.createElement("span");
       titleEl.className = "llm-action-picker-title";
-      titleEl.textContent = skill.name;
+      titleEl.textContent = skill.id;
 
       const descEl = ownerDoc.createElement("span");
       descEl.className = "llm-action-picker-description";
@@ -7769,7 +7727,7 @@ export function setupHandlers(
       btn.title = action.description;
       const titleEl = ownerDoc.createElement("span");
       titleEl.className = "llm-action-picker-title";
-      titleEl.textContent = formatActionLabel(action.name);
+      titleEl.textContent = action.name;
       btn.append(titleEl);
       btn.addEventListener("click", (e: Event) => {
         e.preventDefault();
@@ -8886,7 +8844,15 @@ export function setupHandlers(
       inputBox.focus({ preventScroll: true });
     });
 
+    /** Auto-resize the textarea to fit its content, up to max-height. */
+    const autoResizeInput = (): void => {
+      inputBox.style.height = "auto";
+      const max = 220; // matches CSS max-height
+      inputBox.style.height = `${Math.min(inputBox.scrollHeight, max)}px`;
+    };
+
     inputBox.addEventListener("input", () => {
+      autoResizeInput();
       persistDraftInputForCurrentConversation();
       schedulePaperPickerSearch();
       scheduleActionPickerTrigger();
@@ -8895,6 +8861,20 @@ export function setupHandlers(
       schedulePaperPickerSearch();
       scheduleActionPickerTrigger();
     });
+
+    // Command row dismiss button (reuses .llm-paper-context-clear class)
+    const commandRowClearBtn = body.querySelector("#llm-command-row .llm-paper-context-clear");
+    if (commandRowClearBtn) {
+      commandRowClearBtn.addEventListener("click", () => {
+        if (forcedSkillId) {
+          clearForcedSkill();
+        } else if (activeCommandAction) {
+          clearCommandChip();
+        }
+        inputBox.focus({ preventScroll: true });
+      });
+    }
+
     inputBox.addEventListener("keyup", (e: Event) => {
       const key = (e as KeyboardEvent).key;
       if (

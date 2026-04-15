@@ -1,6 +1,5 @@
 ---
 id: compare-papers
-name: Compare Papers
 description: Compare multiple papers by theme, methodology, or findings
 version: 1
 match: /\b(compare|contrast|difference|differ|similarities|similarity)\b.*\b(papers?|articles?|studies|works?)\b/i

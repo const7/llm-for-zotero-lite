@@ -1,6 +1,5 @@
 ---
 id: library-analysis
-name: Library Analysis
 description: Analyze your whole library or collection with statistics
 version: 1
 match: /\b(summarize|summarise|summary|overview|statistics|stats|analyze|analyse|breakdown|survey|audit)\b.*\b(library|collection|all papers|all items|my papers|entire|whole)\b/i

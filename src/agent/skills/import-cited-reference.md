@@ -1,6 +1,5 @@
 ---
 id: import-to-library
-name: Import References
 description: Import cited papers into your Zotero library by DOI
 version: 1
 match: /\b(add|import|save|get)\b.*\b(to|into)\s*(my\s*)?(library|zotero|collection)\b/i

@@ -18,7 +18,6 @@ import type { AgentRuntimeRequest } from "../types";
  */
 export type AgentSkill = {
   id: string;
-  name: string;
   description: string;
   version: number;
   patterns: RegExp[];
@@ -55,7 +54,6 @@ export function parseSkill(raw: string): AgentSkill {
   }
 
   let id = "unknown";
-  let name = "";
   let description = "";
   let version = 0;
   const patterns: RegExp[] = [];
@@ -64,11 +62,6 @@ export function parseSkill(raw: string): AgentSkill {
     const idMatch = line.match(/^id:\s*(.+)$/);
     if (idMatch) {
       id = idMatch[1].trim();
-      continue;
-    }
-    const nameMatch = line.match(/^name:\s*(.+)$/);
-    if (nameMatch) {
-      name = nameMatch[1].trim();
       continue;
     }
     const descMatch = line.match(/^description:\s*(.+)$/);
@@ -81,6 +74,8 @@ export function parseSkill(raw: string): AgentSkill {
       version = parseInt(versionMatch[1], 10);
       continue;
     }
+    // Skip name: lines (legacy, no longer used)
+    if (/^name:\s/.test(line)) continue;
     const matchMatch = line.match(/^match:\s*\/(.+)\/([gimsuy]*)$/);
     if (matchMatch) {
       try {
@@ -93,14 +88,7 @@ export function parseSkill(raw: string): AgentSkill {
 
   const instruction = lines.slice(frontmatterEnd).join("\n").trim();
 
-  // Default name from id if not provided
-  if (!name) {
-    name = id
-      .replace(/[-_]/g, " ")
-      .replace(/\b\w/g, (c) => c.toUpperCase());
-  }
-
-  return { id, name, description, version, patterns, instruction, source: "personal" };
+  return { id, description, version, patterns, instruction, source: "personal" };
 }
 
 /**

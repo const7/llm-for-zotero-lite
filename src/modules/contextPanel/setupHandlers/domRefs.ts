@@ -63,6 +63,8 @@ export type PanelDomRefs = {
   actionPicker: HTMLDivElement | null;
   actionPickerList: HTMLDivElement | null;
   actionHitlPanel: HTMLDivElement | null;
+  commandRow: HTMLDivElement | null;
+  commandRowBadge: HTMLSpanElement | null;
   responseMenu: HTMLDivElement | null;
   responseMenuCopyBtn: HTMLButtonElement | null;
   responseMenuNoteBtn: HTMLButtonElement | null;
@@ -251,6 +253,12 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     actionHitlPanel: body.querySelector(
       "#llm-action-hitl-panel",
     ) as HTMLDivElement | null,
+    commandRow: body.querySelector(
+      "#llm-command-row",
+    ) as HTMLDivElement | null,
+    commandRowBadge: body.querySelector(
+      "#llm-command-row-badge",
+    ) as HTMLSpanElement | null,
     responseMenu: body.querySelector(
       "#llm-response-menu",
     ) as HTMLDivElement | null,

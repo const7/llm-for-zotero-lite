@@ -1,6 +1,5 @@
 ---
 id: evidence-based-qa
-name: Evidence-Based Q&A
 description: Find specific evidence, methods, or results in papers
 version: 1
 match: /\b(what method|what approach|what technique|what model|how did they|how does it|what results?|what data|what dataset|what experiment|what metric|what performance|what accuracy|what baseline)\b/i

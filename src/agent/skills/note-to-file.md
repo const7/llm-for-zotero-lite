@@ -1,6 +1,5 @@
 ---
 id: note-to-file
-name: Save Note to File
 description: Write notes to a local directory as Markdown, Org-mode, or any text format
 version: 1
 match: /\b(write|save|export|send)\b.*\bobsidian\b/i

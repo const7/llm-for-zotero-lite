@@ -260,7 +260,6 @@ export function patchSkillFrontmatter(
   const patchedFm = [
     "---",
     idLine,
-    `name: ${shipped.name}`,
     `description: ${shipped.description}`,
     `version: ${shipped.version}`,
     ...onDiskMatchLines,
@@ -412,7 +411,6 @@ export async function createSkillTemplate(): Promise<string | null> {
   const encoder = new TextEncoder();
   const template = `---
 id: my-custom-skill
-name: My Custom Skill
 description: Describe what this skill does
 version: 1
 match: /your regex pattern here/i

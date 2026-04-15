@@ -1,6 +1,5 @@
 ---
 id: note-editing
-name: Edit Note
 description: Create, edit, or append to Zotero notes
 version: 1
 match: /\b(save|write|append|add|put)\b.*\b(to\s+)?(note|notes?)\b/i
