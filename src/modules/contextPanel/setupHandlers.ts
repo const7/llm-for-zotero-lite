@@ -7406,6 +7406,7 @@ export function setupHandlers(
    * The badge is atomic — removed entirely via its x button or Backspace.
    */
   const insertCommandToken = (action: ActionPickerItem): void => {
+    clearForcedSkill();
     clearCommandChip();
     activeCommandAction = action;
 

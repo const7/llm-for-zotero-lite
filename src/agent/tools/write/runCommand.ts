@@ -106,6 +106,7 @@ async function executeCommand(params: {
         const race = await Promise.race([resultPromise, timeoutPromise]);
         if (race === "timeout") {
           try { proc.kill(); } catch { /* ignore */ }
+          try { const IO = (globalThis as any).IOUtils; await IO.remove(tempOut, { ignoreAbsent: true }); } catch { /* ignore */ }
           return { stdout: "", stderr: "[Command timed out]", exitCode: -1 };
         }
 

@@ -1417,6 +1417,12 @@
   justify-content: center;
 }
 
+/* Paper chat in standalone should match library chat layout */
+[data-standalone="true"] .llm-start-page {
+  flex: 1;
+  justify-content: center;
+}
+
 [data-start-page-active="true"][data-conversation-kind="global"] .llm-shortcuts {
   display: none;
 }
