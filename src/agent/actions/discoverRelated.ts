@@ -168,6 +168,13 @@ export const discoverRelatedAction: AgentAction<DiscoverRelatedInput, DiscoverRe
           badges: badges.length ? badges : undefined,
           href: typeof r.openAccessUrl === "string" ? r.openAccessUrl : undefined,
           importIdentifier,
+          // Numeric year / citation count drive the client-side Sort buttons
+          // in the review card (renderPaperResultListField). Without these,
+          // hasSortableData is false and the "Sort: relevance / date /
+          // citations" toolbar group is hidden.
+          year: typeof r.year === "number" ? r.year : undefined,
+          citationCount:
+            typeof r.citationCount === "number" ? r.citationCount : undefined,
         };
       });
 
@@ -214,7 +221,10 @@ export const discoverRelatedAction: AgentAction<DiscoverRelatedInput, DiscoverRe
         {
           type: "paper_result_list" as const,
           id: "selectedPaperIds",
-          label: modeLabel,
+          // Label intentionally omitted — the outer card title already says
+          // "Recommended papers for …" and repeating it creates visual
+          // redundancy above the toolbar row.
+          label: "",
           rows: paperRows.map((p) => ({ ...p, checked: true })),
           minSelectedByAction: [{ actionId: "import", min: 1 }],
         },

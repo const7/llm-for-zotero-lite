@@ -1536,10 +1536,12 @@ export function renderPendingActionCard(
     }
 
     if (field.type === "paper_result_list") {
-      const label = doc.createElement("label");
-      label.className = "llm-agent-hitl-label";
-      label.textContent = field.label;
-      fieldContainer.appendChild(label);
+      if (field.label) {
+        const label = doc.createElement("label");
+        label.className = "llm-agent-hitl-label";
+        label.textContent = field.label;
+        fieldContainer.appendChild(label);
+      }
       const rendered = renderPaperResultListField(doc, field);
       fieldContainer.appendChild(rendered.element);
       fieldAccessors.push({

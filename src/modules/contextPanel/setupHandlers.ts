@@ -7146,12 +7146,30 @@ export function setupHandlers(
   };
 
   // ── Action HITL panel ──────────────────────────────────────────────────────
+  /**
+   * Refreshes the `data-has-action-card` attribute on the panel root so CSS
+   * can restore chat-mode shell sizing when a card is present on the start
+   * page. Called whenever a card is added or removed.
+   */
+  const syncHasActionCardAttr = () => {
+    if (!panelRoot) return;
+    const hasCard = !!chatBox?.querySelector(
+      ".llm-action-inline-card, .llm-action-progress-card",
+    );
+    if (hasCard) {
+      panelRoot.dataset.hasActionCard = "true";
+    } else {
+      delete panelRoot.dataset.hasActionCard;
+    }
+  };
+
   const closeActionHitlPanel = () => {
     if (actionHitlPanel) {
       actionHitlPanel.style.display = "none";
       actionHitlPanel.innerHTML = "";
     }
     chatBox?.querySelector(".llm-action-inline-card")?.remove();
+    syncHasActionCardAttr();
   };
 
   const showActionHitlCard = (requestId: string, action: AgentPendingAction): Promise<AgentConfirmationResolution> => {
@@ -7169,6 +7187,7 @@ export function setupHandlers(
         wrapper.appendChild(card);
         chatBox.appendChild(wrapper);
         chatBox.scrollTop = chatBox.scrollHeight;
+        syncHasActionCardAttr();
       }
     });
   };
@@ -7220,6 +7239,7 @@ export function setupHandlers(
       chatBox.appendChild(wrapper);
       chatBox.scrollTop = chatBox.scrollHeight;
       element = wrapper;
+      syncHasActionCardAttr();
     };
 
     // Mount right away so the user sees feedback before the first step event.
@@ -7246,6 +7266,7 @@ export function setupHandlers(
         element = null;
         stepText = null;
         summaryText = null;
+        syncHasActionCardAttr();
       },
       remove() {
         if (element && element.isConnected) {
@@ -7254,6 +7275,7 @@ export function setupHandlers(
         element = null;
         stepText = null;
         summaryText = null;
+        syncHasActionCardAttr();
       },
     };
   };
