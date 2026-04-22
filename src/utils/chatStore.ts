@@ -15,6 +15,7 @@ import {
   normalizeSelectedTextSource,
   normalizePaperContextRefs,
 } from "../modules/contextPanel/normalizers";
+import { initRememberedPaperConversationStore } from "./paperConversationSessionStore";
 
 export type StoredChatMessage = {
   role: "user" | "assistant";
@@ -45,7 +46,12 @@ export type StoredChatMessage = {
   modelEntryId?: string;
   modelProviderLabel?: string;
   webchatRunState?: "done" | "incomplete" | "error";
-  webchatCompletionReason?: "settled" | "forced_cancel" | "timeout" | "error" | null;
+  webchatCompletionReason?:
+    | "settled"
+    | "forced_cancel"
+    | "timeout"
+    | "error"
+    | null;
   webchatChatUrl?: string;
   webchatChatId?: string;
   reasoningSummary?: string;
@@ -159,9 +165,8 @@ function normalizeLimit(limit: number, fallback: number): number {
 function resolveUserLibraryID(): number {
   const normalized = normalizeLibraryID(
     Number(
-      (
-        Zotero as unknown as { Libraries?: { userLibraryID?: unknown } }
-      ).Libraries?.userLibraryID,
+      (Zotero as unknown as { Libraries?: { userLibraryID?: unknown } })
+        .Libraries?.userLibraryID,
     ),
   );
   return normalized || 1;
@@ -203,7 +208,9 @@ async function reconcileGlobalConversationCatalog(): Promise<void> {
   )) as ConversationCatalogSeedRow[] | undefined;
 
   for (const row of rows || []) {
-    const conversationKey = normalizeConversationKey(Number(row.conversationKey));
+    const conversationKey = normalizeConversationKey(
+      Number(row.conversationKey),
+    );
     if (!conversationKey) continue;
     const title =
       typeof row.title === "string" && row.title.trim()
@@ -247,7 +254,9 @@ async function reconcileLegacyPaperV1ConversationCatalog(): Promise<void> {
   )) as ConversationCatalogSeedRow[] | undefined;
 
   for (const row of rows || []) {
-    const conversationKey = normalizeConversationKey(Number(row.conversationKey));
+    const conversationKey = normalizeConversationKey(
+      Number(row.conversationKey),
+    );
     if (!conversationKey) continue;
     const paperItem = Zotero.Items.get(conversationKey) || null;
     if (!paperItem?.isRegularItem?.()) continue;
@@ -434,7 +443,9 @@ export async function initChatStore(): Promise<void> {
       );
     }
     const hasFullTextPaperContextsJsonColumn = Boolean(
-      columns?.some((column) => column?.name === "full_text_paper_contexts_json"),
+      columns?.some(
+        (column) => column?.name === "full_text_paper_contexts_json",
+      ),
     );
     if (!hasFullTextPaperContextsJsonColumn) {
       await Zotero.DB.queryAsync(
@@ -516,6 +527,7 @@ export async function initChatStore(): Promise<void> {
     );
 
     await reconcileConversationCatalogs();
+    await initRememberedPaperConversationStore();
   });
 }
 
