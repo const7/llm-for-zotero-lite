@@ -1,5 +1,11 @@
 import { renderMarkdown, renderMarkdownForNote } from "../../utils/markdown";
-import { getWelcomeHtml, getWebChatWelcomeHtml, getStandaloneLibraryChatStartPageHtml, getPaperChatStartPageHtml, getNoteEditingStartPageHtml } from "../../utils/i18n";
+import {
+  getWelcomeHtml,
+  getWebChatWelcomeHtml,
+  getStandaloneLibraryChatStartPageHtml,
+  getPaperChatStartPageHtml,
+  getNoteEditingStartPageHtml,
+} from "../../utils/i18n";
 import {
   appendMessage as appendStoredMessage,
   clearConversation as clearStoredConversation,
@@ -81,10 +87,7 @@ import {
   selectedRuntimeModeCache,
   pdfTextCache,
 } from "./state";
-import {
-  agentRunTraceCache,
-  agentRunTraceLoadingTasks,
-} from "./agentState";
+import { agentRunTraceCache, agentRunTraceLoadingTasks } from "./agentState";
 import {
   sanitizeText,
   formatTime,
@@ -138,6 +141,11 @@ import { buildChatHistoryNotePayload, readNoteSnapshot } from "./notes";
 import { extractManagedBlobHash } from "./attachmentStorage";
 import { buildContextPlanSystemMessages } from "./requestSystemMessages";
 import { canEditUserPromptTurn } from "./editability";
+import {
+  buildChatMessageDomKey,
+  countReusableChatMessagePrefix,
+  type ChatRenderedMessageState,
+} from "./chatRenderReconciler";
 import { renderAgentTrace } from "./agentTrace/render";
 import { toFileUrl } from "../../utils/pathFileUrl";
 import { replaceOwnerAttachmentRefs } from "../../utils/attachmentRefStore";
@@ -331,7 +339,10 @@ function resolveAutoLoadedPaperContextForItem(
   if (activeNoteSession?.noteKind === "standalone") {
     return null;
   }
-  if (activeNoteSession?.noteKind === "item" && activeNoteSession.parentItemId) {
+  if (
+    activeNoteSession?.noteKind === "item" &&
+    activeNoteSession.parentItemId
+  ) {
     const parentItem = Zotero.Items.get(activeNoteSession.parentItemId) || null;
     if (!parentItem?.isRegularItem?.()) return null;
     const activeContextItem = getActiveContextAttachmentFromTabs();
@@ -919,7 +930,9 @@ async function ensureAgentRunTraceLoaded(
   await task;
 }
 
-function getCachedAgentRunEvents(runId: string | undefined): AgentRunEventRecord[] {
+function getCachedAgentRunEvents(
+  runId: string | undefined,
+): AgentRunEventRecord[] {
   const normalizedRunId = (runId || "").trim();
   if (!normalizedRunId) return [];
   return agentRunTraceCache.get(normalizedRunId) || [];
@@ -1250,8 +1263,11 @@ function resolveEffectiveRequestConfig(params: {
   const apiKey = (params.apiKey || fallbackEntry?.apiKey || "").trim();
   const authMode =
     params.authMode ||
-    (fallbackEntry?.authMode === "webchat" ? "webchat" :
-     fallbackEntry?.authMode === "codex_auth" ? "codex_auth" : "api_key");
+    (fallbackEntry?.authMode === "webchat"
+      ? "webchat"
+      : fallbackEntry?.authMode === "codex_auth"
+        ? "codex_auth"
+        : "api_key");
   const reasoning =
     params.reasoning ||
     getSelectedReasoningForItem(params.item.id, model, apiBase);
@@ -1314,13 +1330,15 @@ async function buildContextPlanForRequest(params: {
     if (!rawActiveContextItem || !params.pdfModePaperKeys?.size) return false;
     const autoLoaded = resolveAutoLoadedPaperContextForItem(params.item);
     if (!autoLoaded) return false;
-    return params.pdfModePaperKeys.has(`${autoLoaded.itemId}:${autoLoaded.contextItemId}`);
+    return params.pdfModePaperKeys.has(
+      `${autoLoaded.itemId}:${autoLoaded.contextItemId}`,
+    );
   })();
-  const activeContextItem = activeContextItemInPdfMode ? null : rawActiveContextItem;
+  const activeContextItem = activeContextItemInPdfMode
+    ? null
+    : rawActiveContextItem;
   const conversationMode: "open" | "paper" =
-    resolveDisplayConversationKind(params.item) === "global"
-      ? "open"
-      : "paper";
+    resolveDisplayConversationKind(params.item) === "global" ? "open" : "paper";
   const systemPrompt = getStringPref("systemPrompt") || undefined;
 
   const plan = await resolveMultiContextPlan({
@@ -1330,7 +1348,10 @@ async function buildContextPlanForRequest(params: {
     contextPrefix: "",
     // Exclude PDF-mode papers from the text retrieval pipeline
     paperContexts: params.pdfModePaperKeys?.size
-      ? params.paperContexts.filter((p) => !params.pdfModePaperKeys!.has(`${p.itemId}:${p.contextItemId}`))
+      ? params.paperContexts.filter(
+          (p) =>
+            !params.pdfModePaperKeys!.has(`${p.itemId}:${p.contextItemId}`),
+        )
       : params.paperContexts,
     fullTextPaperContexts: params.fullTextPaperContexts,
     historyPaperContexts: params.recentPaperContexts,
@@ -1372,16 +1393,16 @@ async function buildContextPlanForRequest(params: {
     contextBudgetTokens: plan.contextBudget.contextBudgetTokens,
     usedContextTokens: plan.usedContextTokens,
   });
-  const noteContext = buildActiveNoteContextBlock(
-    params.item,
-  ).trim();
+  const noteContext = buildActiveNoteContextBlock(params.item).trim();
   const planContext = sanitizeText(plan.contextText || "").trim();
   // Include provider-uploaded PDF content (Qwen fileid://, Kimi extracted text)
   const uploadedPdfContext = (params.pdfUploadSystemMessages || [])
     .map((msg) => sanitizeText(msg).trim())
     .filter(Boolean)
     .join("\n\n");
-  const combinedContext = [noteContext, planContext, uploadedPdfContext].filter(Boolean).join("\n\n");
+  const combinedContext = [noteContext, planContext, uploadedPdfContext]
+    .filter(Boolean)
+    .join("\n\n");
 
   // Extract MinerU figure images from the context (if applicable).
   // Skip for text-only models (e.g. DeepSeek) that reject image_url content.
@@ -1397,8 +1418,14 @@ async function buildContextPlanForRequest(params: {
       }
     }
     // Also include @-referenced papers with MinerU cache
-    for (const paper of [...params.paperContexts, ...params.fullTextPaperContexts]) {
-      if (paper.contextItemId && !mineruAttachmentIds.includes(paper.contextItemId)) {
+    for (const paper of [
+      ...params.paperContexts,
+      ...params.fullTextPaperContexts,
+    ]) {
+      if (
+        paper.contextItemId &&
+        !mineruAttachmentIds.includes(paper.contextItemId)
+      ) {
         const pdfCtx = pdfTextCache.get(paper.contextItemId);
         if (pdfCtx?.sourceType === "mineru") {
           mineruAttachmentIds.push(paper.contextItemId);
@@ -1542,7 +1569,14 @@ function applyWebChatAnswerSnapshot(
   message: Message,
   text: string,
   snapshot: {
-    runState?: "submitted" | "active" | "settling" | "done" | "incomplete" | "error" | null;
+    runState?:
+      | "submitted"
+      | "active"
+      | "settling"
+      | "done"
+      | "incomplete"
+      | "error"
+      | null;
     completionReason?: "settled" | "forced_cancel" | "timeout" | "error" | null;
     remoteChatUrl?: string | null;
     remoteChatId?: string | null;
@@ -1570,7 +1604,14 @@ function applyWebChatThinkingSnapshot(
   message: Message,
   text: string,
   snapshot: {
-    runState?: "submitted" | "active" | "settling" | "done" | "incomplete" | "error" | null;
+    runState?:
+      | "submitted"
+      | "active"
+      | "settling"
+      | "done"
+      | "incomplete"
+      | "error"
+      | null;
     completionReason?: "settled" | "forced_cancel" | "timeout" | "error" | null;
   },
 ): void {
@@ -1871,15 +1912,14 @@ function includeAutoLoadedPaperContext(
       autoLoadedPaperContext,
       ...normalizedPaperContexts,
     ]),
-    fullTextPaperContexts:
-      isExcludedFromTextPipeline
-        ? normalizedFullTextPaperContexts
-        : fullTextPaperContexts === undefined
-          ? normalizePaperContexts([
-              autoLoadedPaperContext,
-              ...normalizedFullTextPaperContexts,
-            ])
-          : normalizedFullTextPaperContexts,
+    fullTextPaperContexts: isExcludedFromTextPipeline
+      ? normalizedFullTextPaperContexts
+      : fullTextPaperContexts === undefined
+        ? normalizePaperContexts([
+            autoLoadedPaperContext,
+            ...normalizedFullTextPaperContexts,
+          ])
+        : normalizedFullTextPaperContexts,
   };
 }
 
@@ -1957,7 +1997,10 @@ function syncComposeContextForInlineEdit(
     if (key.startsWith(modePrefix)) paperContextModeOverrides.delete(key);
   }
   for (const paperContext of fullTextPaperContexts) {
-    paperContextModeOverrides.set(`${item.id}:${buildPaperKey(paperContext)}`, "full-next");
+    paperContextModeOverrides.set(
+      `${item.id}:${buildPaperKey(paperContext)}`,
+      "full-next",
+    );
   }
 
   activeContextPanelStateSync.get(body)?.();
@@ -1967,11 +2010,25 @@ export async function editLatestUserMessageAndRetry(
   opts: import("./types").EditRetryOptions,
 ): Promise<EditLatestTurnResult> {
   const {
-    body, item, displayQuestion, selectedTexts, selectedTextSources,
-    selectedTextPaperContexts, selectedTextNoteContexts, screenshotImages,
-    paperContexts, fullTextPaperContexts, attachments, pdfUploadSystemMessages,
+    body,
+    item,
+    displayQuestion,
+    selectedTexts,
+    selectedTextSources,
+    selectedTextPaperContexts,
+    selectedTextNoteContexts,
+    screenshotImages,
+    paperContexts,
+    fullTextPaperContexts,
+    attachments,
+    pdfUploadSystemMessages,
     targetRuntimeMode,
-    expected, model, apiBase, apiKey, reasoning, advanced,
+    expected,
+    model,
+    apiBase,
+    apiKey,
+    reasoning,
+    advanced,
   } = opts;
   await ensureConversationLoaded(item);
   const conversationKey = getConversationKey(item);
@@ -2227,7 +2284,10 @@ export async function retryLatestAssistantResponse(
   try {
     const llmHistory = buildLLMHistoryMessages(historyForLLM);
     const recentPaperContexts = collectRecentPaperContexts(historyForLLM);
-    const retryPdfKeys = derivePdfModePaperKeys(retryPair.userMessage.attachments, item);
+    const retryPdfKeys = derivePdfModePaperKeys(
+      retryPair.userMessage.attachments,
+      item,
+    );
 
     // Create AbortController early so the signal is available during context
     // planning.
@@ -2254,17 +2314,20 @@ export async function retryLatestAssistantResponse(
     });
     let combinedContext = contextPlan.combinedContext;
     // Append collection scope context if any collections are selected
-    const retrySelectedCollections = selectedCollectionContextCache.get(item.id) || [];
+    const retrySelectedCollections =
+      selectedCollectionContextCache.get(item.id) || [];
     if (retrySelectedCollections.length > 0) {
-      const collectionNames = retrySelectedCollections.map((c) => c.name).join(", ");
+      const collectionNames = retrySelectedCollections
+        .map((c) => c.name)
+        .join(", ");
       combinedContext = `${combinedContext}\n\n[Selected Zotero collections as context scope: ${collectionNames}]`;
     }
     retryPair.userMessage.paperContexts = contextPlan.paperContexts.length
       ? contextPlan.paperContexts
       : undefined;
-    retryPair.userMessage.fullTextPaperContexts =
-      contextPlan.fullTextPaperContexts.length
-        ? contextPlan.fullTextPaperContexts
+    retryPair.userMessage.fullTextPaperContexts = contextPlan
+      .fullTextPaperContexts.length
+      ? contextPlan.fullTextPaperContexts
       : undefined;
     await updateStoredLatestUserMessage(conversationKey, {
       text: retryPair.userMessage.text,
@@ -2456,12 +2519,26 @@ export async function editUserTurnAndRetry(opts: {
   advanced?: AdvancedModelParams;
 }): Promise<void> {
   const {
-    body, item, userTimestamp, assistantTimestamp, newText,
-    selectedTexts, selectedTextSources, selectedTextPaperContexts,
-    selectedTextNoteContexts, screenshotImages, paperContexts,
-    fullTextPaperContexts, attachments, pdfUploadSystemMessages,
+    body,
+    item,
+    userTimestamp,
+    assistantTimestamp,
+    newText,
+    selectedTexts,
+    selectedTextSources,
+    selectedTextPaperContexts,
+    selectedTextNoteContexts,
+    screenshotImages,
+    paperContexts,
+    fullTextPaperContexts,
+    attachments,
+    pdfUploadSystemMessages,
     targetRuntimeMode,
-    model, apiBase, apiKey, reasoning, advanced,
+    model,
+    apiBase,
+    apiKey,
+    reasoning,
+    advanced,
   } = opts;
   await ensureConversationLoaded(item);
   const conversationKey = getConversationKey(item);
@@ -2710,7 +2787,9 @@ async function enrichPaperContextsWithMineruCache(
       if (await hasCachedMineruMd(paper.contextItemId)) {
         mineruCacheDir = getMineruItemDir(paper.contextItemId);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     enriched.push(mineruCacheDir ? { ...paper, mineruCacheDir } : paper);
   }
   return enriched;
@@ -2757,7 +2836,8 @@ function buildAgentEngineDeps(): AgentEngineDeps {
     agentRunTraceCache,
     cancelledRequestId: (ck: number) => getCancelledRequestId(ck),
     currentAbortController: (ck: number) => getAbortController(ck),
-    setCurrentAbortController: (ck: number, ctrl: AbortController | null) => setAbortController(ck, ctrl),
+    setCurrentAbortController: (ck: number, ctrl: AbortController | null) =>
+      setAbortController(ck, ctrl),
     getAbortControllerCtor,
     nextRequestId,
     setPendingRequestId,
@@ -2784,8 +2864,10 @@ function buildAgentEngineDeps(): AgentEngineDeps {
     finalizeCancelledAssistantMessage,
     sanitizeText,
     persistConversationMessage,
-    updateStoredLatestUserMessage: updateStoredLatestUserMessage as AgentEngineDeps["updateStoredLatestUserMessage"],
-    updateStoredLatestAssistantMessage: updateStoredLatestAssistantMessage as AgentEngineDeps["updateStoredLatestAssistantMessage"],
+    updateStoredLatestUserMessage:
+      updateStoredLatestUserMessage as AgentEngineDeps["updateStoredLatestUserMessage"],
+    updateStoredLatestAssistantMessage:
+      updateStoredLatestAssistantMessage as AgentEngineDeps["updateStoredLatestAssistantMessage"],
     sendChatFallback: sendQuestion,
     getAgentRuntime,
     maxSelectedImages: MAX_SELECTED_IMAGES,
@@ -2808,7 +2890,16 @@ async function retryLatestAgentResponse(
   reasoning?: LLMReasoningConfig,
   advanced?: AdvancedModelParams,
 ): Promise<void> {
-  await retryAgentTurn(body, item, model, apiBase, apiKey, reasoning, advanced, buildAgentEngineDeps());
+  await retryAgentTurn(
+    body,
+    item,
+    model,
+    apiBase,
+    apiKey,
+    reasoning,
+    advanced,
+    buildAgentEngineDeps(),
+  );
 }
 
 async function sendAgentQuestion(opts: {
@@ -2836,19 +2927,53 @@ async function sendAgentQuestion(opts: {
   await sendAgentTurn(opts, buildAgentEngineDeps());
 }
 
-export async function sendQuestion(opts: import("./types").SendQuestionOptions) {
+export async function sendQuestion(
+  opts: import("./types").SendQuestionOptions,
+) {
   const {
-    body, item, question, images, model, apiBase, apiKey, reasoning, advanced,
-    displayQuestion, selectedTexts, selectedTextSources, selectedTextPaperContexts,
-    selectedTextNoteContexts, paperContexts, fullTextPaperContexts, attachments,
-    runtimeMode = "chat", agentRunId, skipAgentDispatch = false, pdfModePaperKeys,
+    body,
+    item,
+    question,
+    images,
+    model,
+    apiBase,
+    apiKey,
+    reasoning,
+    advanced,
+    displayQuestion,
+    selectedTexts,
+    selectedTextSources,
+    selectedTextPaperContexts,
+    selectedTextNoteContexts,
+    paperContexts,
+    fullTextPaperContexts,
+    attachments,
+    runtimeMode = "chat",
+    agentRunId,
+    skipAgentDispatch = false,
+    pdfModePaperKeys,
   } = opts;
   if (runtimeMode === "agent" && !skipAgentDispatch) {
     await sendAgentQuestion({
-      body, item, question, images, model, apiBase, apiKey, reasoning, advanced,
-      displayQuestion, selectedTexts, selectedTextSources, selectedTextPaperContexts,
-      selectedTextNoteContexts, paperContexts, fullTextPaperContexts, attachments,
-      pdfModePaperKeys, forcedSkillIds: opts.forcedSkillIds,
+      body,
+      item,
+      question,
+      images,
+      model,
+      apiBase,
+      apiKey,
+      reasoning,
+      advanced,
+      displayQuestion,
+      selectedTexts,
+      selectedTextSources,
+      selectedTextPaperContexts,
+      selectedTextNoteContexts,
+      paperContexts,
+      fullTextPaperContexts,
+      attachments,
+      pdfModePaperKeys,
+      forcedSkillIds: opts.forcedSkillIds,
       pdfUploadSystemMessages: opts.pdfUploadSystemMessages,
     });
     return;
@@ -2909,7 +3034,9 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
     item,
     normalizedPaperContexts,
     normalizedFullTextPaperContexts,
-    pdfModePaperKeys && pdfModePaperKeys.size > 0 ? pdfModePaperKeys : undefined,
+    pdfModePaperKeys && pdfModePaperKeys.size > 0
+      ? pdfModePaperKeys
+      : undefined,
   );
   const screenshotImagesForMessage = Array.isArray(images)
     ? images
@@ -2939,8 +3066,8 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
     )
       ? selectedTextPaperContextsForMessage
       : undefined,
-    selectedTextNoteContexts: selectedTextNoteContextsForMessage.some(
-      (entry) => Boolean(entry),
+    selectedTextNoteContexts: selectedTextNoteContextsForMessage.some((entry) =>
+      Boolean(entry),
     )
       ? selectedTextNoteContextsForMessage
       : undefined,
@@ -2960,21 +3087,6 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
     attachments: attachments?.length ? attachments : undefined,
   };
   history.push(userMessage);
-  await persistConversationMessage(conversationKey, {
-    role: "user",
-    text: userMessage.text,
-    timestamp: userMessage.timestamp,
-    runMode: userMessage.runMode,
-    agentRunId: userMessage.agentRunId,
-    selectedText: userMessage.selectedText,
-    selectedTexts: userMessage.selectedTexts,
-    selectedTextSources: userMessage.selectedTextSources,
-    selectedTextPaperContexts: userMessage.selectedTextPaperContexts,
-    paperContexts: userMessage.paperContexts,
-    fullTextPaperContexts: userMessage.fullTextPaperContexts,
-    screenshotImages: userMessage.screenshotImages,
-    attachments: userMessage.attachments,
-  });
 
   const assistantMessage: Message = {
     role: "assistant",
@@ -2999,11 +3111,29 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
     ui,
   );
   refreshChatSafely();
+  await waitForUiStep();
+
+  const persistUserMessageTask = persistConversationMessage(conversationKey, {
+    role: "user",
+    text: userMessage.text,
+    timestamp: userMessage.timestamp,
+    runMode: userMessage.runMode,
+    agentRunId: userMessage.agentRunId,
+    selectedText: userMessage.selectedText,
+    selectedTexts: userMessage.selectedTexts,
+    selectedTextSources: userMessage.selectedTextSources,
+    selectedTextPaperContexts: userMessage.selectedTextPaperContexts,
+    paperContexts: userMessage.paperContexts,
+    fullTextPaperContexts: userMessage.fullTextPaperContexts,
+    screenshotImages: userMessage.screenshotImages,
+    attachments: userMessage.attachments,
+  });
 
   let assistantPersisted = false;
   const persistAssistantOnce = async () => {
     if (assistantPersisted) return;
     assistantPersisted = true;
+    await persistUserMessageTask;
     await persistConversationMessage(conversationKey, {
       role: "assistant",
       text: assistantMessage.text,
@@ -3024,8 +3154,9 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
   const markCancelled = async () => {
     finalizeCancelledAssistantMessage(assistantMessage);
     refreshChatSafely();
-    await persistAssistantOnce();
     setStatusSafely("Cancelled", "ready");
+    await waitForUiStep();
+    void persistAssistantOnce();
   };
 
   // [webchat] Dedicated pipeline — bypass context assembly, send raw PDF + question
@@ -3033,8 +3164,11 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
     const webChatQueueRefresh = createQueuedRefresh(refreshChatSafely);
     try {
       // Determine webchat target from the model name (e.g., "chatgpt.com" → "chatgpt", "chat.deepseek.com" → "deepseek")
-      const { getWebChatTargetByModelName } = await import("../../webchat/types");
-      const webchatTargetEntry = getWebChatTargetByModelName(effectiveRequestConfig.model || "");
+      const { getWebChatTargetByModelName } =
+        await import("../../webchat/types");
+      const webchatTargetEntry = getWebChatTargetByModelName(
+        effectiveRequestConfig.model || "",
+      );
       const webchatTarget = webchatTargetEntry?.id || "chatgpt";
       const webchatLabel = webchatTargetEntry?.label || "ChatGPT";
       setStatusSafely(`Sending to ${webchatLabel}…`, "sending");
@@ -3055,7 +3189,10 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
         host: getRelayBaseUrl(),
         sendPdf: opts.webchatSendPdf === true,
         forceNewChat: opts.webchatForceNewChat === true,
-        images: screenshotImagesForMessage.length > 0 ? screenshotImagesForMessage : undefined,
+        images:
+          screenshotImagesForMessage.length > 0
+            ? screenshotImagesForMessage
+            : undefined,
         chatgptMode,
         target: webchatTarget,
         signal: getAbortController(conversationKey)?.signal,
@@ -3069,13 +3206,19 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
         },
       });
 
-      if (getCancelledRequestId(conversationKey) >= thisRequestId || Boolean(getAbortController(conversationKey)?.signal.aborted)) {
+      if (
+        getCancelledRequestId(conversationKey) >= thisRequestId ||
+        Boolean(getAbortController(conversationKey)?.signal.aborted)
+      ) {
         await markCancelled();
         return;
       }
 
-      assistantMessage.text = sanitizeText(answer.text) || assistantMessage.text || "No response.";
-      assistantMessage.reasoningDetails = sanitizeText(answer.thinking || "") || assistantMessage.reasoningDetails;
+      assistantMessage.text =
+        sanitizeText(answer.text) || assistantMessage.text || "No response.";
+      assistantMessage.reasoningDetails =
+        sanitizeText(answer.thinking || "") ||
+        assistantMessage.reasoningDetails;
       assistantMessage.reasoningOpen = assistantMessage.reasoningDetails
         ? isReasoningExpandedByDefault()
         : false;
@@ -3087,12 +3230,13 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
         answer.completionReason ||
         (answer.runState === "done" ? "settled" : null);
       // [webchat] Persist the ChatGPT conversation URL so refresh can navigate back
-      if (answer.remoteChatUrl) assistantMessage.webchatChatUrl = answer.remoteChatUrl;
-      if (answer.remoteChatId) assistantMessage.webchatChatId = answer.remoteChatId;
+      if (answer.remoteChatUrl)
+        assistantMessage.webchatChatUrl = answer.remoteChatUrl;
+      if (answer.remoteChatId)
+        assistantMessage.webchatChatId = answer.remoteChatId;
       assistantMessage.streaming = false;
 
       refreshChatSafely();
-      await persistAssistantOnce();
       restoreRequestUIIdle(body, conversationKey, thisRequestId);
       setStatusSafely(
         answer.runState === "incomplete"
@@ -3100,6 +3244,8 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
           : "Ready",
         answer.runState === "incomplete" ? "error" : "ready",
       );
+      await waitForUiStep();
+      void persistAssistantOnce();
     } catch (err) {
       const isCancelled =
         getCancelledRequestId(conversationKey) >= thisRequestId ||
@@ -3113,7 +3259,7 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
       const errMsg = (err as Error).message || "Error";
       const hasSnapshot = Boolean(
         sanitizeText(assistantMessage.text || "") ||
-          sanitizeText(assistantMessage.reasoningDetails || ""),
+        sanitizeText(assistantMessage.reasoningDetails || ""),
       );
       if (hasSnapshot) {
         assistantMessage.webchatRunState = "incomplete";
@@ -3125,9 +3271,10 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
       }
       assistantMessage.streaming = false;
       refreshChatSafely();
-      await persistAssistantOnce();
       restoreRequestUIIdle(body, conversationKey, thisRequestId);
       setStatusSafely(errMsg, "error");
+      await waitForUiStep();
+      void persistAssistantOnce();
     } finally {
       setAbortController(conversationKey, null);
       setPendingRequestId(conversationKey, 0);
@@ -3138,7 +3285,8 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
   try {
     const rawLLMHistory = buildLLMHistoryMessages(historyForLLM);
     // Apply auto-summary compression when the history grows long.
-    const llmHistory = applyHistoryCompression(conversationKey, rawLLMHistory) ?? rawLLMHistory;
+    const llmHistory =
+      applyHistoryCompression(conversationKey, rawLLMHistory) ?? rawLLMHistory;
     const recentPaperContexts = collectRecentPaperContexts(historyForLLM);
 
     // Create AbortController early so the signal is available during context
@@ -3166,7 +3314,8 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
     });
     let combinedContext = contextPlan.combinedContext;
     // Append collection scope context if any collections are selected
-    const selectedCollections = selectedCollectionContextCache.get(item.id) || [];
+    const selectedCollections =
+      selectedCollectionContextCache.get(item.id) || [];
     if (selectedCollections.length > 0) {
       const collectionNames = selectedCollections.map((c) => c.name).join(", ");
       combinedContext = `${combinedContext}\n\n[Selected Zotero collections as context scope: ${collectionNames}]`;
@@ -3174,10 +3323,10 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
     userMessage.paperContexts = contextPlan.paperContexts.length
       ? contextPlan.paperContexts
       : undefined;
-    userMessage.fullTextPaperContexts =
-      contextPlan.fullTextPaperContexts.length
-        ? contextPlan.fullTextPaperContexts
+    userMessage.fullTextPaperContexts = contextPlan.fullTextPaperContexts.length
+      ? contextPlan.fullTextPaperContexts
       : undefined;
+    await persistUserMessageTask;
     await updateStoredLatestUserMessage(conversationKey, {
       text: userMessage.text,
       timestamp: userMessage.timestamp,
@@ -3289,18 +3438,18 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
     assistantMessage.agentRunId = agentRunId || assistantMessage.agentRunId;
     assistantMessage.streaming = false;
     refreshChatSafely();
-    await persistAssistantOnce();
+    setStatusSafely("Ready", "ready");
+    await waitForUiStep();
+    void persistAssistantOnce();
 
-    // After the response is saved, kick off a background LLM summary of the
-    // older history so it is ready for the next request.
+    // After the response is rendered, kick off background persistence and
+    // history summarization so the UI path stays interactive.
     scheduleLLMSummary(conversationKey, rawLLMHistory, {
       model: effectiveRequestConfig.model,
       apiBase: effectiveRequestConfig.apiBase,
       apiKey: effectiveRequestConfig.apiKey,
       authMode: effectiveRequestConfig.authMode,
     });
-
-    setStatusSafely("Ready", "ready");
   } catch (err) {
     const isCancelled =
       getCancelledRequestId(conversationKey) >= thisRequestId ||
@@ -3316,9 +3465,9 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
     assistantMessage.text = `Error: ${errMsg}${retryHint}`;
     assistantMessage.streaming = false;
     refreshChatSafely();
-    await persistAssistantOnce();
-
     setStatusSafely(`Error: ${`${errMsg}${retryHint}`.slice(0, 40)}`, "error");
+    await waitForUiStep();
+    void persistAssistantOnce();
   } finally {
     restoreRequestUIIdle(body, conversationKey, thisRequestId);
     setAbortController(conversationKey, null);
@@ -3471,6 +3620,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         <div class="llm-welcome-text">Select an item or open a PDF to start.</div>
       </div>
     `;
+    chatBox.dataset.renderedConversationKey = "";
     const tokenUsageEl = body.querySelector(
       "#llm-token-usage",
     ) as HTMLElement | null;
@@ -3504,14 +3654,23 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
     );
 
   if (history.length === 0) {
+    chatBox.dataset.renderedConversationKey = `${conversationKey}`;
     // [webchat] Show webchat-specific welcome instead of generic instructions
     const effectiveConfig = resolveEffectiveRequestConfig({ item });
     if (effectiveConfig.providerProtocol === "web_sync") {
-      const { getWebChatTargetByModelName } = require("../../webchat/types") as typeof import("../../webchat/types");
-      const targetEntry = getWebChatTargetByModelName(effectiveConfig.model || "");
-      chatBox.innerHTML = getWebChatWelcomeHtml(targetEntry?.label, targetEntry?.modelName);
+      const { getWebChatTargetByModelName } =
+        require("../../webchat/types") as typeof import("../../webchat/types");
+      const targetEntry = getWebChatTargetByModelName(
+        effectiveConfig.model || "",
+      );
+      chatBox.innerHTML = getWebChatWelcomeHtml(
+        targetEntry?.label,
+        targetEntry?.modelName,
+      );
     } else {
-      const isStandalone = panelRoot?.dataset?.standalone === "true" || (body as HTMLElement).dataset?.standalone === "true";
+      const isStandalone =
+        panelRoot?.dataset?.standalone === "true" ||
+        (body as HTMLElement).dataset?.standalone === "true";
       const isNoteEditing = !!resolveActiveNoteSession(item);
       if (isNoteEditing) {
         chatBox.innerHTML = getNoteEditingStartPageHtml();
@@ -3539,16 +3698,136 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       }, 450);
     }
   }
-  chatBox.innerHTML = "";
-
   const latestRetryPair = findLatestRetryPair(history);
   const latestAssistantIndex = latestRetryPair
     ? latestRetryPair.userIndex + 1
     : -1;
   // [webchat] Resolve provider protocol once for editability checks
-  const renderProviderProtocol = resolveEffectiveRequestConfig({ item }).providerProtocol;
+  const renderProviderProtocol = resolveEffectiveRequestConfig({
+    item,
+  }).providerProtocol;
   const conversationIsIdle = !history.some((m) => m.streaming);
+  const plannedRenderStates: ChatRenderedMessageState[] = history.map(
+    (msg, index) => {
+      const isUser = msg.role === "user";
+      const assistantPairMsg = history[index + 1];
+      const previousUserMessage =
+        index > 0 && history[index - 1]?.role === "user"
+          ? history[index - 1]
+          : null;
+      const canEditUserPrompt = canEditUserPromptTurn({
+        isUser,
+        hasItem: Boolean(item),
+        conversationIsIdle,
+        assistantPair: assistantPairMsg,
+        providerProtocol: renderProviderProtocol,
+      });
+      const isInlineEditBubble = Boolean(
+        canEditUserPrompt &&
+        inlineEditTarget?.conversationKey === conversationKey &&
+        inlineEditTarget.userTimestamp === msg.timestamp,
+      );
+      const agentTraceSnapshot =
+        msg.runMode === "agent"
+          ? getCachedAgentRunEvents(msg.agentRunId?.trim()).map((event) => [
+              event.seq,
+              event.eventType,
+              event.createdAt,
+            ])
+          : [];
+      return {
+        domKey: buildChatMessageDomKey(index, msg),
+        renderKey: JSON.stringify({
+          text: msg.text,
+          runMode: msg.runMode || "",
+          agentRunId: msg.agentRunId || "",
+          streaming: Boolean(msg.streaming),
+          selectedText: msg.selectedText || "",
+          selectedTexts: msg.selectedTexts || [],
+          selectedTextSources: msg.selectedTextSources || [],
+          selectedTextPaperContexts: msg.selectedTextPaperContexts || [],
+          selectedTextNoteContexts: msg.selectedTextNoteContexts || [],
+          selectedTextExpandedIndex: getMessageSelectedTextExpandedIndex(
+            msg,
+            getMessageSelectedTexts(msg).length,
+          ),
+          screenshotImages: msg.screenshotImages || [],
+          screenshotExpanded: Boolean(msg.screenshotExpanded),
+          screenshotActiveIndex: Number(msg.screenshotActiveIndex || 0),
+          paperContexts: msg.paperContexts || [],
+          fullTextPaperContexts: msg.fullTextPaperContexts || [],
+          paperContextsExpanded: Boolean(msg.paperContextsExpanded),
+          attachments: msg.attachments || [],
+          attachmentsExpanded: Boolean(msg.attachmentsExpanded),
+          modelName: msg.modelName || "",
+          modelEntryId: msg.modelEntryId || "",
+          modelProviderLabel: msg.modelProviderLabel || "",
+          reasoningSummary: msg.reasoningSummary || "",
+          reasoningDetails: msg.reasoningDetails || "",
+          reasoningOpen: Boolean(msg.reasoningOpen),
+          webchatRunState: msg.webchatRunState || "",
+          webchatCompletionReason: msg.webchatCompletionReason || "",
+          isLatestAssistant: index === latestAssistantIndex,
+          canEditUserPrompt,
+          isInlineEditBubble,
+          inlineEditDraft:
+            isInlineEditBubble && inlineEditTarget
+              ? inlineEditTarget.currentText
+              : "",
+          hasPromptTurnPair: Boolean(
+            isUser && assistantPairMsg?.role === "assistant",
+          ),
+          canDeletePromptTurn: Boolean(
+            isUser &&
+            assistantPairMsg?.role === "assistant" &&
+            !assistantPairMsg.streaming,
+          ),
+          canDeleteResponseTurn: Boolean(
+            !isUser && previousUserMessage?.role === "user" && !msg.streaming,
+          ),
+          pairedUserPaperContexts: previousUserMessage?.paperContexts || [],
+          pairedUserSelectedTextPaperContexts:
+            previousUserMessage?.selectedTextPaperContexts || [],
+          agentTraceSnapshot,
+        }),
+      };
+    },
+  );
+  const existingConversationKey = Number(
+    chatBox.dataset.renderedConversationKey || 0,
+  );
+  const existingRenderStates =
+    existingConversationKey === conversationKey
+      ? Array.from(chatBox.children).reduce<ChatRenderedMessageState[]>(
+          (out, child) => {
+            const childEl = child as Element & {
+              dataset?: DOMStringMap;
+            };
+            if (!childEl.classList.contains("llm-message-wrapper")) return out;
+            const domKey = childEl.dataset?.messageDomKey || "";
+            const renderKey = childEl.dataset?.messageRenderKey || "";
+            if (!domKey || !renderKey) return out;
+            out.push({ domKey, renderKey });
+            return out;
+          },
+          [],
+        )
+      : [];
+  const reusablePrefix = countReusableChatMessagePrefix(
+    existingRenderStates,
+    plannedRenderStates,
+  );
+  if (reusablePrefix === 0) {
+    chatBox.innerHTML = "";
+  } else {
+    while (chatBox.childElementCount > reusablePrefix) {
+      chatBox.lastElementChild?.remove();
+    }
+  }
+  chatBox.dataset.renderedConversationKey = `${conversationKey}`;
+
   for (const [index, msg] of history.entries()) {
+    if (index < reusablePrefix) continue;
     const isUser = msg.role === "user";
     const assistantPairMsg = history[index + 1];
     const hasAssistantPair = isUser && assistantPairMsg?.role === "assistant";
@@ -3579,7 +3858,8 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
 
       const screenshotImages = Array.isArray(msg.screenshotImages)
         ? msg.screenshotImages.filter(
-            (entry) => Boolean(entry) && !entry.startsWith("data:application/pdf"),
+            (entry) =>
+              Boolean(entry) && !entry.startsWith("data:application/pdf"),
           )
         : [];
       let screenshotExpanded: HTMLDivElement | null = null;
@@ -3729,7 +4009,9 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       // Determine which papers were sent in PDF mode (have pdf-paper-* attachments)
       const pdfPaperContextItemIds = new Set(
         (Array.isArray(msg.attachments) ? msg.attachments : [])
-          .filter((a) => typeof a?.id === "string" && a.id.startsWith("pdf-paper-"))
+          .filter(
+            (a) => typeof a?.id === "string" && a.id.startsWith("pdf-paper-"),
+          )
           .map((a) => {
             const m = a.id.match(/^pdf-paper-(\d+)-/);
             return m ? Number(m[1]) : 0;
@@ -3784,7 +4066,9 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
 
           // Content source mode badge
           const isPdf = pdfPaperContextItemIds.has(paperContext.contextItemId);
-          const isFullText = fullTextPaperKeys.has(`${paperContext.itemId}:${paperContext.contextItemId}`);
+          const isFullText = fullTextPaperKeys.has(
+            `${paperContext.itemId}:${paperContext.contextItemId}`,
+          );
           if (isPdf || isFullText) {
             const badge = doc.createElement("span") as HTMLSpanElement;
             badge.className = `llm-user-papers-item-badge llm-user-papers-item-badge-${isPdf ? "pdf" : "text"}`;
@@ -3840,7 +4124,10 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
               entry.category !== "image" &&
               typeof entry.name === "string" &&
               // Exclude PDF-paper attachments (shown under paper context instead)
-              !(typeof entry.id === "string" && entry.id.startsWith("pdf-paper-")),
+              !(
+                typeof entry.id === "string" &&
+                entry.id.startsWith("pdf-paper-")
+              ),
           )
         : [];
       hasUserContext = hasUserContext || fileAttachments.length > 0;
@@ -4177,9 +4464,10 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           const contextSource = resolveContextSourceItem(item);
           const ctxItem = contextSource.contextItem;
           const pdfCtx = ctxItem ? pdfTextCache.get(ctxItem.id) : null;
-          const resolveImage = pdfCtx?.sourceType === "mineru" && ctxItem
-            ? buildImageResolver(ctxItem.id)
-            : undefined;
+          const resolveImage =
+            pdfCtx?.sourceType === "mineru" && ctxItem
+              ? buildImageResolver(ctxItem.id)
+              : undefined;
           bubble.innerHTML = renderMarkdown(safeText, { resolveImage });
         } catch (err) {
           ztoolkit.log("LLM render error:", err);
@@ -4420,8 +4708,10 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         refreshBtn.addEventListener("click", async () => {
           refreshBtn.disabled = true;
           try {
-            const { refreshCurrentConversation } = await import("../../webchat/client");
-            const { getRelayBaseUrl } = await import("../../webchat/relayServer");
+            const { refreshCurrentConversation } =
+              await import("../../webchat/client");
+            const { getRelayBaseUrl } =
+              await import("../../webchat/relayServer");
             const scraped = await refreshCurrentConversation(
               getRelayBaseUrl(),
               msg.webchatChatUrl || null,
@@ -4429,22 +4719,32 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
             );
             if (scraped.length > 0) {
               const refreshed: Message[] = scraped.map((m) => ({
-                role: (m.kind === "user" ? "user" : "assistant") as "user" | "assistant",
+                role: (m.kind === "user" ? "user" : "assistant") as
+                  | "user"
+                  | "assistant",
                 text: m.text || "",
                 timestamp: Date.now(),
-                modelName: m.kind === "bot" ? (msg.modelName || "chatgpt.com") : undefined,
+                modelName:
+                  m.kind === "bot" ? msg.modelName || "chatgpt.com" : undefined,
                 modelProviderLabel: m.kind === "bot" ? "WebChat" : undefined,
                 reasoningDetails: m.thinking || undefined,
               }));
               chatHistory.set(conversationKey, refreshed);
               refreshChat(body, item);
             } else {
-              refreshBtn.title = "No messages found — chat site may be on a different page";
-              setTimeout(() => { refreshBtn.title = "Re-fetch this conversation from webchat"; refreshBtn.disabled = false; }, 2000);
+              refreshBtn.title =
+                "No messages found — chat site may be on a different page";
+              setTimeout(() => {
+                refreshBtn.title = "Re-fetch this conversation from webchat";
+                refreshBtn.disabled = false;
+              }, 2000);
             }
           } catch {
             refreshBtn.title = "Refresh failed";
-            setTimeout(() => { refreshBtn.title = "Re-fetch this conversation from webchat"; refreshBtn.disabled = false; }, 2000);
+            setTimeout(() => {
+              refreshBtn.title = "Re-fetch this conversation from webchat";
+              refreshBtn.disabled = false;
+            }, 2000);
           }
         });
         webchatStatusRow.appendChild(refreshBtn);
@@ -4458,6 +4758,9 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
     }
     wrapper.appendChild(meta);
     if (webchatStatusRow) wrapper.appendChild(webchatStatusRow);
+    wrapper.dataset.messageDomKey = plannedRenderStates[index]?.domKey || "";
+    wrapper.dataset.messageRenderKey =
+      plannedRenderStates[index]?.renderKey || "";
     chatBox.appendChild(wrapper);
     if (isUser && hasUserContext) {
       wrapper.classList.add("llm-user-context-aligned");

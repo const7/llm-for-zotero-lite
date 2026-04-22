@@ -104,7 +104,10 @@ export type AgentEngineDeps = {
   // Request lifecycle (per-conversation)
   cancelledRequestId: (conversationKey: number) => number;
   currentAbortController: (conversationKey: number) => AbortController | null;
-  setCurrentAbortController: (conversationKey: number, ctrl: AbortController | null) => void;
+  setCurrentAbortController: (
+    conversationKey: number,
+    ctrl: AbortController | null,
+  ) => void;
   getAbortControllerCtor: () => new () => AbortController;
   nextRequestId: () => number;
   setPendingRequestId: (conversationKey: number, id: number) => void;
@@ -165,7 +168,10 @@ export type AgentEngineDeps = {
     item: Zotero.Item,
     paperContexts?: PaperContextRef[],
     fullTextPaperContexts?: PaperContextRef[],
-  ) => { paperContexts: PaperContextRef[]; fullTextPaperContexts: PaperContextRef[] };
+  ) => {
+    paperContexts: PaperContextRef[];
+    fullTextPaperContexts: PaperContextRef[];
+  };
   findLatestRetryPair: (history: Message[]) => LatestRetryPairShape | null;
   reconstructRetryPayload: (userMessage: Message) => ReconstructedRetryPayload;
   isReasoningExpandedByDefault: () => boolean;
@@ -192,7 +198,9 @@ export type AgentEngineDeps = {
   ) => Promise<void>;
 
   // Chat fallback (when model does not support tool calls)
-  sendChatFallback: (opts: import("../types").SendQuestionOptions) => Promise<void>;
+  sendChatFallback: (
+    opts: import("../types").SendQuestionOptions,
+  ) => Promise<void>;
 
   // Agent runtime
   getAgentRuntime: () => AgentRuntime;
@@ -229,9 +237,23 @@ export async function sendAgentTurn(
   deps: AgentEngineDeps,
 ): Promise<void> {
   const {
-    body, item, question, images, model, apiBase, apiKey, reasoning, advanced,
-    displayQuestion, selectedTexts, selectedTextSources, selectedTextPaperContexts,
-    selectedTextNoteContexts, paperContexts, fullTextPaperContexts, attachments,
+    body,
+    item,
+    question,
+    images,
+    model,
+    apiBase,
+    apiKey,
+    reasoning,
+    advanced,
+    displayQuestion,
+    selectedTexts,
+    selectedTextSources,
+    selectedTextPaperContexts,
+    selectedTextNoteContexts,
+    paperContexts,
+    fullTextPaperContexts,
+    attachments,
     forcedSkillIds,
   } = opts;
   await deps.ensureConversationLoaded(item);
@@ -252,8 +274,9 @@ export async function sendAgentTurn(
     selectedTextsForMessage.length,
   );
   const normalizedPaperContexts = deps.normalizePaperContexts(paperContexts);
-  const normalizedFullTextPaperContexts =
-    deps.normalizePaperContexts(fullTextPaperContexts);
+  const normalizedFullTextPaperContexts = deps.normalizePaperContexts(
+    fullTextPaperContexts,
+  );
   const {
     paperContexts: paperContextsForMessage,
     fullTextPaperContexts: fullTextPaperContextsForMessage,
@@ -284,9 +307,23 @@ export async function sendAgentTurn(
     });
     if (fallback.kind === "fallback") {
       await deps.sendChatFallback({
-        body, item, question, images, model, apiBase, apiKey, reasoning, advanced,
-        displayQuestion, selectedTexts, selectedTextSources, selectedTextPaperContexts,
-        selectedTextNoteContexts, paperContexts, fullTextPaperContexts, attachments,
+        body,
+        item,
+        question,
+        images,
+        model,
+        apiBase,
+        apiKey,
+        reasoning,
+        advanced,
+        displayQuestion,
+        selectedTexts,
+        selectedTextSources,
+        selectedTextPaperContexts,
+        selectedTextNoteContexts,
+        paperContexts,
+        fullTextPaperContexts,
+        attachments,
         runtimeMode: "agent",
         agentRunId: fallback.runId,
         skipAgentDispatch: true,
@@ -338,8 +375,8 @@ export async function sendAgentTurn(
     )
       ? selectedTextPaperContextsForMessage
       : undefined,
-    selectedTextNoteContexts: selectedTextNoteContextsForMessage.some(
-      (entry) => Boolean(entry),
+    selectedTextNoteContexts: selectedTextNoteContextsForMessage.some((entry) =>
+      Boolean(entry),
     )
       ? selectedTextNoteContextsForMessage
       : undefined,
@@ -359,20 +396,6 @@ export async function sendAgentTurn(
     attachments: attachments?.length ? attachments : undefined,
   };
   historyForRun.push(userMessage);
-  await deps.persistConversationMessage(conversationKey, {
-    role: "user",
-    text: userMessage.text,
-    timestamp: userMessage.timestamp,
-    runMode: "agent",
-    selectedText: userMessage.selectedText,
-    selectedTexts: userMessage.selectedTexts,
-    selectedTextSources: userMessage.selectedTextSources,
-    selectedTextPaperContexts: userMessage.selectedTextPaperContexts,
-    paperContexts: userMessage.paperContexts,
-    fullTextPaperContexts: userMessage.fullTextPaperContexts,
-    screenshotImages: userMessage.screenshotImages,
-    attachments: userMessage.attachments,
-  });
 
   const assistantMessage: Message = {
     role: "assistant",
@@ -386,14 +409,38 @@ export async function sendAgentTurn(
     reasoningOpen: false,
   };
   historyForRun.push(assistantMessage);
-  const { refreshChatSafely, setStatusSafely } =
-    deps.createPanelUpdateHelpers(body, item, conversationKey, ui);
+  const { refreshChatSafely, setStatusSafely } = deps.createPanelUpdateHelpers(
+    body,
+    item,
+    conversationKey,
+    ui,
+  );
   refreshChatSafely();
+  await deps.waitForUiStep();
+
+  const persistUserMessageTask = deps.persistConversationMessage(
+    conversationKey,
+    {
+      role: "user",
+      text: userMessage.text,
+      timestamp: userMessage.timestamp,
+      runMode: "agent",
+      selectedText: userMessage.selectedText,
+      selectedTexts: userMessage.selectedTexts,
+      selectedTextSources: userMessage.selectedTextSources,
+      selectedTextPaperContexts: userMessage.selectedTextPaperContexts,
+      paperContexts: userMessage.paperContexts,
+      fullTextPaperContexts: userMessage.fullTextPaperContexts,
+      screenshotImages: userMessage.screenshotImages,
+      attachments: userMessage.attachments,
+    },
+  );
 
   let assistantPersisted = false;
   const persistAssistantOnce = async () => {
     if (assistantPersisted) return;
     assistantPersisted = true;
+    await persistUserMessageTask;
     await deps.persistConversationMessage(conversationKey, {
       role: "assistant",
       text: assistantMessage.text,
@@ -408,8 +455,9 @@ export async function sendAgentTurn(
   const markCancelled = async () => {
     deps.finalizeCancelledAssistantMessage(assistantMessage);
     refreshChatSafely();
-    await persistAssistantOnce();
     setStatusSafely("Cancelled", "ready");
+    await deps.waitForUiStep();
+    void persistAssistantOnce();
   };
 
   try {
@@ -440,6 +488,7 @@ export async function sendAgentTurn(
         userMessage.agentRunId = runId;
         deps.agentRunTraceCache.set(runId, []);
         refreshChatSafely();
+        await persistUserMessageTask;
         await deps.updateStoredLatestUserMessage(conversationKey, {
           text: userMessage.text,
           timestamp: userMessage.timestamp,
@@ -486,7 +535,10 @@ export async function sendAgentTurn(
           default:
             break;
         }
-        if (event.type === "message_delta" || event.type === "message_rollback") {
+        if (
+          event.type === "message_delta" ||
+          event.type === "message_rollback"
+        ) {
           queueRefresh();
           return;
         }
@@ -513,8 +565,9 @@ export async function sendAgentTurn(
       "No response.";
     assistantMessage.streaming = false;
     refreshChatSafely();
-    await persistAssistantOnce();
     setStatusSafely("Ready", "ready");
+    await deps.waitForUiStep();
+    void persistAssistantOnce();
   } catch (err) {
     const isCancelled =
       deps.cancelledRequestId(conversationKey) >= thisRequestId ||
@@ -528,8 +581,9 @@ export async function sendAgentTurn(
     assistantMessage.text = `Error: ${errMsg}`;
     assistantMessage.streaming = false;
     refreshChatSafely();
-    await persistAssistantOnce();
     setStatusSafely(`Error: ${errMsg.slice(0, 40)}`, "error");
+    await deps.waitForUiStep();
+    void persistAssistantOnce();
   } finally {
     deps.restoreRequestUIIdle(body, conversationKey, thisRequestId);
     deps.setCurrentAbortController(conversationKey, null);
@@ -589,7 +643,8 @@ export async function retryAgentTurn(
   });
   assistantMessage.modelName = effectiveRequestConfig.model;
   assistantMessage.modelEntryId = effectiveRequestConfig.modelEntryId;
-  assistantMessage.modelProviderLabel = effectiveRequestConfig.modelProviderLabel;
+  assistantMessage.modelProviderLabel =
+    effectiveRequestConfig.modelProviderLabel;
 
   const { refreshChatSafely, setStatusSafely } = deps.createPanelUpdateHelpers(
     body,
@@ -654,8 +709,9 @@ export async function retryAgentTurn(
   const markCancelled = async () => {
     deps.finalizeCancelledAssistantMessage(assistantMessage);
     refreshChatSafely();
-    await persistAssistantOnce();
     setStatusSafely("Cancelled", "ready");
+    await deps.waitForUiStep();
+    void persistAssistantOnce();
   };
 
   const agentRuntime = deps.getAgentRuntime();
@@ -733,7 +789,10 @@ export async function retryAgentTurn(
           default:
             break;
         }
-        if (event.type === "message_delta" || event.type === "message_rollback") {
+        if (
+          event.type === "message_delta" ||
+          event.type === "message_rollback"
+        ) {
           queueRefresh();
           return;
         }
@@ -760,8 +819,9 @@ export async function retryAgentTurn(
       "No response.";
     assistantMessage.streaming = false;
     refreshChatSafely();
-    await persistAssistantOnce();
     setStatusSafely("Ready", "ready");
+    await deps.waitForUiStep();
+    void persistAssistantOnce();
   } catch (err) {
     const isCancelled =
       deps.cancelledRequestId(conversationKey) >= thisRequestId ||
@@ -775,8 +835,9 @@ export async function retryAgentTurn(
     assistantMessage.text = `Error: ${errMsg}`;
     assistantMessage.streaming = false;
     refreshChatSafely();
-    await persistAssistantOnce();
     setStatusSafely(`Error: ${errMsg.slice(0, 40)}`, "error");
+    await deps.waitForUiStep();
+    void persistAssistantOnce();
   } finally {
     deps.restoreRequestUIIdle(body, conversationKey, thisRequestId);
     deps.setCurrentAbortController(conversationKey, null);
