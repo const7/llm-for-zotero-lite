@@ -16,7 +16,7 @@ export function logCatch(context: string, err: unknown): void {
     // If ztoolkit isn't available (e.g. early init), fall back to console
     try {
       // eslint-disable-next-line no-console
-      console.warn(`[llm-for-zotero] ${context}`, err);
+      console.warn(`[llm-for-zotero-lite] ${context}`, err);
     } catch {
       // truly nothing we can do
     }

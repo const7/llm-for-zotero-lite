@@ -82,7 +82,7 @@ describe("paperConversationSessionStore", function () {
       ),
     );
     assert.deepInclude(prefWrites, {
-      key: "extensions.zotero.llmforzotero.lastUsedPaperConversationMap",
+      key: "extensions.zotero.llmforzoterolite.lastUsedPaperConversationMap",
       value: "",
       global: true,
     });

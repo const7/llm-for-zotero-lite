@@ -1,6 +1,6 @@
 import { getLocalParentPath, joinLocalPath } from "../../utils/localPath";
 
-const MINERU_CACHE_DIR_NAME = "llm-for-zotero-mineru";
+const MINERU_CACHE_DIR_NAME = "llm-for-zotero-lite-mineru";
 
 export type MineruCacheFile = {
   relativePath: string;

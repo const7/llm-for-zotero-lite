@@ -89,7 +89,7 @@ const MIN_COLUMN_WIDTHS = {
 
 export async function registerMineruManagerScript(
   win: Window,
-  idPrefix = "llmforzotero",
+  idPrefix = "llmforzoterolite",
 ): Promise<void> {
   const doc = win.document;
   const $ = (suffix: string) =>

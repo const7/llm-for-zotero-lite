@@ -1,11 +1,11 @@
 /**
- * MCP (Model Context Protocol) server for the llm-for-zotero plugin.
+ * MCP (Model Context Protocol) server for the llm-for-zotero-lite plugin.
  *
  * Registers a JSON-RPC 2.0 endpoint on Zotero's built-in HTTP server
- * (default port 23119) at the path "/llm-for-zotero/mcp".
+ * (default port 23119) at the path "/llm-for-zotero-lite/mcp".
  *
  * External AI agents can connect to:
- *   POST http://localhost:23119/llm-for-zotero/mcp
+ *   POST http://localhost:23119/llm-for-zotero-lite/mcp
  *   Content-Type: application/json
  *   Body: JSON-RPC 2.0 request
  *
@@ -31,7 +31,7 @@ import {
   type McpToolsListResult,
 } from "./protocol";
 
-const ENDPOINT_PATH = "/llm-for-zotero/mcp";
+const ENDPOINT_PATH = "/llm-for-zotero-lite/mcp";
 const SERVER_VERSION = "1.0.0";
 
 type McpServerDeps = {
@@ -54,7 +54,7 @@ async function handleInitialize(): Promise<McpServerInfo> {
   return {
     protocolVersion: "2024-11-05",
     serverInfo: {
-      name: "llm-for-zotero",
+      name: "llm-for-zotero-lite",
       version: SERVER_VERSION,
     },
     capabilities: {
@@ -182,7 +182,7 @@ async function handleRequest(
  * Call this after the agent subsystem is initialized.
  *
  * The endpoint is accessible at:
- *   POST http://localhost:23119/llm-for-zotero/mcp
+ *   POST http://localhost:23119/llm-for-zotero-lite/mcp
  */
 export function registerMcpServer(deps: McpServerDeps): void {
   const capturedDeps = deps;

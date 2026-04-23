@@ -139,7 +139,7 @@ export function createFileIOTool(): AgentToolDefinition<FileIOInput, unknown> {
           const fileName = filePath.split(/[\\/]/).pop() || "file";
 
           if (action === "read") {
-            if (fileName === "manifest.json" && filePath.includes("llm-for-zotero-mineru")) {
+            if (fileName === "manifest.json" && filePath.includes("llm-for-zotero-lite-mineru")) {
               return "Reading paper structure";
             }
             if (fileName === "full.md" && typeof a.offset === "number") {
@@ -166,7 +166,7 @@ export function createFileIOTool(): AgentToolDefinition<FileIOInput, unknown> {
           if (r.imageFile) return "Figure loaded";
           const filePath = typeof r.filePath === "string" ? r.filePath : "";
           const fileName = filePath.split(/[\\/]/).pop() || "";
-          if (fileName === "manifest.json" && filePath.includes("llm-for-zotero-mineru")) {
+          if (fileName === "manifest.json" && filePath.includes("llm-for-zotero-lite-mineru")) {
             return "Paper structure loaded";
           }
           if (fileName === "full.md" && typeof r.offset === "number") {

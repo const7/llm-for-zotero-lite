@@ -64,7 +64,7 @@ function registerPrefsPane() {
     pluginID: addon.data.config.addonID,
     id: PREFERENCES_PANE_ID,
     src: `chrome://${addon.data.config.addonRef}/content/preferences.xhtml`,
-    label: "llm-for-zotero",
+    label: "llm-for-zotero-lite",
     image: `chrome://${addon.data.config.addonRef}/content/icons/icon-20.png`,
   });
 }
@@ -73,8 +73,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
   addon.data.standaloneWindow?.close();
-  win.document.getElementById("llmforzotero-open-standalone")?.remove();
-  win.document.getElementById("llmforzotero-key-standalone")?.remove();
+  win.document.getElementById("llmforzoterolite-open-standalone")?.remove();
+  win.document.getElementById("llmforzoterolite-key-standalone")?.remove();
 }
 
 function onShutdown(): void {

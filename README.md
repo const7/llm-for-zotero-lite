@@ -1,27 +1,27 @@
-# llm-for-zotero: Your Right-Hand Side AI Research Assistant
+# llm-for-zotero-lite: Your Right-Hand Side AI Research Assistant
 
 [![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![zotero target version](https://img.shields.io/badge/Zotero-8-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![zotero target version](https://img.shields.io/badge/Zotero-9-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=flat-square)](https://www.gnu.org/licenses/agpl-3.0)
-[![Latest release](https://img.shields.io/github/v/release/yilewang/llm-for-zotero?style=flat-square)](https://github.com/yilewang/llm-for-zotero/releases)
-[![GitHub Stars](https://img.shields.io/github/stars/yilewang/llm-for-zotero?style=flat-square)](https://github.com/yilewang/llm-for-zotero/stargazers)
-[![GitHub Downloads](https://img.shields.io/github/downloads/yilewang/llm-for-zotero/total?style=flat-square)](https://github.com/yilewang/llm-for-zotero/releases)
+[![Latest release](https://img.shields.io/github/v/release/kun/llm-for-zotero-lite?style=flat-square)](https://github.com/kun/llm-for-zotero-lite/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/kun/llm-for-zotero-lite?style=flat-square)](https://github.com/kun/llm-for-zotero-lite/stargazers)
+[![GitHub Downloads](https://img.shields.io/github/downloads/kun/llm-for-zotero-lite/total?style=flat-square)](https://github.com/kun/llm-for-zotero-lite/releases)
 
 <p align="center">
   <img src="./assets/label.png" alt="LLM for Zotero logo — a brain icon merged with the Zotero shield" width="512" />
 </p>
 
-**llm-for-zotero** is a plugin for [Zotero](https://www.zotero.org/) that integrates Large Language Models directly into the Zotero PDF reader. Unlike tools that require uploading PDFs to a web portal, this plugin lets you chat with your papers without leaving Zotero. It sits quietly in the reader sidebar — your standby research assistant, ready whenever you need it.
+**llm-for-zotero-lite** is a plugin for [Zotero](https://www.zotero.org/) that integrates Large Language Models directly into the Zotero PDF reader. Unlike tools that require uploading PDFs to a web portal, this plugin lets you chat with your papers without leaving Zotero. It sits quietly in the reader sidebar — your standby research assistant, ready whenever you need it.
 
 Documentation:
 
-- [English](https://yilewang.github.io/llm-for-zotero)
-- [Chinese](https://yilewang.github.io/llm-for-zotero/zh/)
+- [English](https://kun.github.io/llm-for-zotero-lite)
+- [Chinese](https://kun.github.io/llm-for-zotero-lite/zh/)
 
 <p align="center">
-  <img src="./assets/demo.png" alt="Screenshot of the llm-for-zotero sidebar inside the Zotero PDF reader" width="1024" />
+  <img src="./assets/demo.png" alt="Screenshot of the llm-for-zotero-lite sidebar inside the Zotero PDF reader" width="1024" />
 </p>
 
 <p align="center">
@@ -62,7 +62,7 @@ Documentation:
 
 ### Step 1 — Download the latest `.xpi` release
 
-Download the latest `.xpi` file from the [Releases Page](https://github.com/yilewang/llm-for-zotero/releases).
+Download the latest `.xpi` file from the [Releases Page](https://github.com/kun/llm-for-zotero-lite/releases).
 
 ### Step 2 — Install the add-on
 
@@ -76,7 +76,7 @@ Restart Zotero to complete the installation. The plugin will automatically check
 
 ## Configuration
 
-Open `Preferences` → navigate to the `llm-for-zotero` tab.
+Open `Preferences` → navigate to the `llm-for-zotero-lite` tab.
 
 1. Select your **Provider** (e.g. OpenAI, Gemini, Deepseek).
 2. Paste your **API Base URL**, **secret key**, and **model name**.
@@ -220,7 +220,7 @@ Beyond Zotero's built-in notes, the agent can save research notes as Markdown fi
 
 ### Configuration
 
-Open `Preferences` → `llm-for-zotero` and scroll to the **Notes Directory** section.
+Open `Preferences` → `llm-for-zotero-lite` and scroll to the **Notes Directory** section.
 
 <p align="center">
   <img src="./assets/outside_notes.png" alt="Screenshot of the Notes Directory settings panel" width="512" />
@@ -380,7 +380,7 @@ The plugin ships with **8 built-in skills** covering common research workflows:
 3. Edit the `id`, regex `match` patterns, and instruction body in your text editor.
 4. Save — the skill loads immediately, no restart needed.
 
-Skills are stored as Markdown files in `{ZoteroDataDir}/llm-for-zotero/skills/`. Left-click any skill to edit it; right-click for *Show in file system* or *Delete*.
+Skills are stored as Markdown files in `{ZoteroDataDir}/llm-for-zotero-lite/skills/`. Left-click any skill to edit it; right-click for *Show in file system* or *Delete*.
 
 ---
 
@@ -411,7 +411,7 @@ Skills are stored as Markdown files in `{ZoteroDataDir}/llm-for-zotero/skills/`.
    - The "Sync for Zotero" extension should now appear in your extensions list
 
 3. **Configure the plugin:**
-   - Open Zotero → `Preferences` → `llm-for-zotero`
+   - Open Zotero → `Preferences` → `llm-for-zotero-lite`
    - Set **Auth Mode** → `WebChat`
    - The model is automatically set to `chatgpt.com`
 
@@ -454,7 +454,7 @@ _Special thanks to [@jianghao-zhang](https://github.com/jianghao-zhang) for cont
 
    A browser window opens — sign in with your ChatGPT Plus account. Credentials are saved to `~/.codex/auth.json`.
 
-3. **Configure the plugin** (Zotero → Preferences → llm-for-zotero):
+3. **Configure the plugin** (Zotero → Preferences → llm-for-zotero-lite):
    - **Auth Mode** → `codex auth`
    - **API URL** → `https://chatgpt.com/backend-api/codex/responses`
    - **Model** → a Codex model (e.g. `gpt-5.4`)
@@ -484,7 +484,7 @@ _Special thanks to [@jianghao-zhang](https://github.com/jianghao-zhang) for cont
 
 ### How to enable MinerU
 
-1. Open Zotero → `Preferences` → `llm-for-zotero` tab.
+1. Open Zotero → `Preferences` → `llm-for-zotero-lite` tab.
 2. Find the **MinerU** section and check **Enable MinerU**.
 3. (Optional) Enter your own MinerU API key — see below.
 4. Open any PDF and start chatting. The plugin will automatically parse the PDF with MinerU on first use and cache the result for future conversations.
@@ -495,7 +495,7 @@ The plugin provides a shared community proxy so MinerU works out of the box with
 
 1. Go to [mineru.net](https://mineru.net) and create an account.
 2. Navigate to your account settings and generate an API key.
-3. In Zotero → `Preferences` → `llm-for-zotero` → **MinerU** section, paste your API key.
+3. In Zotero → `Preferences` → `llm-for-zotero-lite` → **MinerU** section, paste your API key.
 4. Click **Test Connection** to verify.
 
 When a personal API key is provided, the plugin calls the MinerU API directly (`https://mineru.net/api/v4`). Without a key, it uses the community proxy.
@@ -508,7 +508,7 @@ When a personal API key is provided, the plugin calls the MinerU API directly (`
 - [x] MinerU PDF parsing
 - [x] GitHub Copilot auth
 - [x] WebChat mode (ChatGPT web sync)
-- [x] Standalone window mode ([#78](https://github.com/yilewang/llm-for-zotero/issues/78))
+- [x] Standalone window mode ([#78](https://github.com/kun/llm-for-zotero-lite/issues/78))
 - [x] File-based notes (Obsidian, Logseq, any Markdown directory)
 - [ ] Local MinerU support
 - [x] Customized skills
@@ -536,16 +536,16 @@ When a personal API key is provided, the plugin calls the MinerU API directly (`
 
 > **Q: How do I report a bug or ask a question?**
 >
-> Please [open an issue](https://github.com/yilewang/llm-for-zotero/issues) on GitHub. I'll do my best to help!
+> Please [open an issue](https://github.com/kun/llm-for-zotero-lite/issues) on GitHub. I'll do my best to help!
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Whether it's bug reports, feature requests, or pull requests — feel free to [open an issue](https://github.com/yilewang/llm-for-zotero/issues) or submit a PR.
+Contributions are welcome! Whether it's bug reports, feature requests, or pull requests — feel free to [open an issue](https://github.com/kun/llm-for-zotero-lite/issues) or submit a PR.
 
 ---
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/image?repos=yilewang/llm-for-zotero&type=date&legend=top-left)](https://www.star-history.com/?repos=yilewang%2Fllm-for-zotero&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/image?repos=kun/llm-for-zotero-lite&type=date&legend=top-left)](https://www.star-history.com/?repos=kun%2Fllm-for-zotero-lite&type=date&legend=top-left)

@@ -11,7 +11,7 @@
  * truth — the agent reads only from there.
  *
  * Users can create, edit, or delete skills by managing `.md` files in:
- *   {Zotero data directory}/llm-for-zotero/skills/
+ *   {Zotero data directory}/llm-for-zotero-lite/skills/
  */
 import { matchesSkill, parseSkill } from "./skillLoader";
 import type { AgentSkill } from "./skillLoader";

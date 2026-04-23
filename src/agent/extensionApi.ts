@@ -1,9 +1,9 @@
 /**
- * llm-for-zotero — Public Extension API
+ * llm-for-zotero-lite — Public Extension API
  * ======================================
  *
  * This module is the single entry point for third-party Zotero plugin authors
- * who want to register custom tools with the llm-for-zotero agent.
+ * who want to register custom tools with the llm-for-zotero-lite agent.
  *
  * ## Quick start
  *
@@ -17,9 +17,9 @@
  *
  *    ```ts
  *    import type { AgentToolDefinition, AgentToolContext } from
- *      "path/to/llm-for-zotero/src/agent/extensionApi";
+ *      "path/to/llm-for-zotero-lite/src/agent/extensionApi";
  *    import { ok, fail } from
- *      "path/to/llm-for-zotero/src/agent/extensionApi";
+ *      "path/to/llm-for-zotero-lite/src/agent/extensionApi";
  *    ```
  *
  * 3. Register your tool:

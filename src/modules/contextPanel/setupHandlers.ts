@@ -7758,7 +7758,7 @@ export function setupHandlers(
     },
     getWebChatHost: () => {
       const port = Zotero.Prefs.get("httpServer.port") || 23119;
-      return `http://127.0.0.1:${port}/llm-for-zotero/webchat`;
+      return `http://127.0.0.1:${port}/llm-for-zotero-lite/webchat`;
     },
     markNextWebChatSendAsNewChat,
   });
@@ -8210,7 +8210,7 @@ export function setupHandlers(
       if (!panel) return null;
       // In standalone window, accept events from anywhere in the document
       const standaloneRoot = panelDoc.getElementById(
-        "llmforzotero-standalone-chat-root",
+        "llmforzoterolite-standalone-chat-root",
       ) as HTMLElement | null;
       if (standaloneRoot) return panel;
       const target = event.target as Node | null;
@@ -8245,7 +8245,7 @@ export function setupHandlers(
       applyPanelFontScale(panel);
       // Also scale the standalone root so sidebar/tabs/title scale together
       const standaloneRoot = panelDoc.getElementById(
-        "llmforzotero-standalone-chat-root",
+        "llmforzoterolite-standalone-chat-root",
       ) as HTMLElement | null;
       if (standaloneRoot) applyPanelFontScale(standaloneRoot);
     };

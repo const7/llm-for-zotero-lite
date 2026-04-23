@@ -8,21 +8,21 @@
  * post streaming partials, and submit final responses.
  *
  * Endpoints:
- *   POST /llm-for-zotero/webchat/submit_query
- *   GET  /llm-for-zotero/webchat/poll_query
- *   GET  /llm-for-zotero/webchat/poll_response
- *   POST /llm-for-zotero/webchat/update_partial
- *   POST /llm-for-zotero/webchat/submit_response
- *   GET  /llm-for-zotero/webchat/poll_command
- *   POST /llm-for-zotero/webchat/new_chat
- *   GET  /llm-for-zotero/webchat/chat_history
- *   POST /llm-for-zotero/webchat/chat_history
- *   POST /llm-for-zotero/webchat/update_chat_history
- *   POST /llm-for-zotero/webchat/update_chat_url
- *   POST /llm-for-zotero/webchat/load_chat
+ *   POST /llm-for-zotero-lite/webchat/submit_query
+ *   GET  /llm-for-zotero-lite/webchat/poll_query
+ *   GET  /llm-for-zotero-lite/webchat/poll_response
+ *   POST /llm-for-zotero-lite/webchat/update_partial
+ *   POST /llm-for-zotero-lite/webchat/submit_response
+ *   GET  /llm-for-zotero-lite/webchat/poll_command
+ *   POST /llm-for-zotero-lite/webchat/new_chat
+ *   GET  /llm-for-zotero-lite/webchat/chat_history
+ *   POST /llm-for-zotero-lite/webchat/chat_history
+ *   POST /llm-for-zotero-lite/webchat/update_chat_history
+ *   POST /llm-for-zotero-lite/webchat/update_chat_url
+ *   POST /llm-for-zotero-lite/webchat/load_chat
  */
 
-const PREFIX = "/llm-for-zotero/webchat";
+const PREFIX = "/llm-for-zotero-lite/webchat";
 const PRE_SUBMIT_RECLAIM_MS = 120_000;
 const PIPELINE_TIMEOUT_MS = 180_000;
 

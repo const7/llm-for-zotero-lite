@@ -40,7 +40,7 @@ export { patchSkillFrontmatter } from "./frontmatterPatcher";
 // ---------------------------------------------------------------------------
 
 const BODY_HASH_PREF_KEY =
-  "extensions.zotero.llmForZotero.skillBodyHashes";
+  "extensions.zotero.llmForZoteroLite.skillBodyHashes";
 
 function getBodyHashes(): Record<string, string> {
   try {
@@ -165,14 +165,14 @@ function getBaseDir(): string {
 
 /** Returns the directory path where user skill files are stored. */
 export function getUserSkillsDir(): string {
-  return joinLocalPath(getBaseDir(), "llm-for-zotero", "skills");
+  return joinLocalPath(getBaseDir(), "llm-for-zotero-lite", "skills");
 }
 
 // ---------------------------------------------------------------------------
 // Seeded tracking — remember which files we've copied so user deletions stick
 // ---------------------------------------------------------------------------
 
-const SEEDED_PREF_KEY = "extensions.zotero.llmForZotero.seededBuiltinSkills";
+const SEEDED_PREF_KEY = "extensions.zotero.llmForZoteroLite.seededBuiltinSkills";
 
 function getSeededSkills(): Set<string> {
   try {
