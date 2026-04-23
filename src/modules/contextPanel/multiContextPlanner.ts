@@ -96,7 +96,7 @@ export function clearRetrievalCandidateCache(contextItemId?: number): void {
  * recent assistant response.  This helps semantic search find chunks that are
  * relevant to the evolving discussion rather than just the literal question.
  */
-function buildEnrichedRetrievalQuery(
+export function buildEnrichedRetrievalQuery(
   question: string,
   history: ChatMessage[] | undefined,
 ): string {
@@ -637,7 +637,7 @@ function questionNeedsPaperCapabilityReminder(question: string): boolean {
   );
 }
 
-function buildPaperFollowupAssistantInstruction(
+export function buildPaperFollowupAssistantInstruction(
   question: string,
 ): string | undefined {
   if (!questionNeedsPaperCapabilityReminder(question)) return undefined;

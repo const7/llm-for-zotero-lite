@@ -1,10 +1,8 @@
 import { renderMarkdown, renderMarkdownForNote } from "../../utils/markdown";
+import { getFeatureProfile } from "../../featureProfile";
 import {
-  getWelcomeHtml,
   getWebChatWelcomeHtml,
-  getStandaloneLibraryChatStartPageHtml,
   getPaperChatStartPageHtml,
-  getNoteEditingStartPageHtml,
 } from "../../utils/i18n";
 import {
   appendMessage as appendStoredMessage,
@@ -84,7 +82,6 @@ import {
   inlineEditSavedDraft,
   setInlineEditInputSection,
   setInlineEditSavedDraft,
-  selectedRuntimeModeCache,
   pdfTextCache,
 } from "./state";
 import { agentRunTraceCache, agentRunTraceLoadingTasks } from "./agentState";
@@ -118,14 +115,23 @@ import {
   getStringPref,
   setLastReasoningExpanded,
 } from "./prefHelpers";
-import { resolveMultiContextPlan } from "./multiContextPlanner";
+import {
+  resolveMultiContextPlan,
+} from "./multiContextPlanner";
 import { resolveContextImages, buildImageResolver } from "./mineruImages";
 import {
   formatPaperCitationLabel,
   resolvePaperContextRefFromAttachment,
   resolvePaperContextRefFromItem,
 } from "./paperAttribution";
-import { buildPaperKey } from "./pdfContext";
+import {
+  buildPaperKey,
+  buildPaperRetrievalCandidates,
+  buildTruncatedFullPaperContext,
+  ensurePDFTextCached,
+  renderEvidencePack,
+} from "./pdfContext";
+import { buildLeanPaperContextPlanForRequest } from "./leanPaperContextPlanner";
 import { isTextOnlyModel } from "../../providers/modelChecks";
 import {
   getActiveContextAttachmentFromTabs,
@@ -137,7 +143,6 @@ import {
   resolveActiveNoteSession,
   resolveDisplayConversationKind,
 } from "./portalScope";
-import { buildChatHistoryNotePayload, readNoteSnapshot } from "./notes";
 import { extractManagedBlobHash } from "./attachmentStorage";
 import { buildContextPlanSystemMessages } from "./requestSystemMessages";
 import { canEditUserPromptTurn } from "./editability";
@@ -150,12 +155,9 @@ import {
   getNextBackfillStartIndex,
   resolveChatRenderStartIndex,
 } from "./chatRenderWindow";
-import { renderAgentTrace } from "./agentTrace/render";
 import { toFileUrl } from "../../utils/pathFileUrl";
 import { replaceOwnerAttachmentRefs } from "../../utils/attachmentRefStore";
 import { decorateAssistantCitationLinks } from "./assistantCitationLinks";
-import { getAgentRuntime } from "../../agent";
-import { getAgentRunTrace } from "../../agent/store/traceStore";
 import {
   applyHistoryCompression,
   scheduleLLMSummary,
@@ -165,11 +167,7 @@ import type {
   AgentRunEventRecord,
   AgentRuntimeRequest,
 } from "../../agent/types";
-import {
-  sendAgentTurn,
-  retryAgentTurn,
-  type AgentEngineDeps,
-} from "./agentMode/agentEngine";
+import type { AgentEngineDeps } from "./agentMode/agentEngine";
 
 /** Get AbortController constructor from global scope */
 function getAbortControllerCtor(): new () => AbortController {
@@ -181,6 +179,14 @@ function getAbortControllerCtor(): new () => AbortController {
       }
     ).AbortController
   );
+}
+
+function getNotesModule(): typeof import("./notes") {
+  return require("./notes") as typeof import("./notes");
+}
+
+function getAgentModule(): typeof import("../../agent") {
+  return require("../../agent") as typeof import("../../agent");
 }
 
 function appendReasoningPart(base: string | undefined, next?: string): string {
@@ -215,12 +221,6 @@ function setHistoryControlsDisabled(body: Element, disabled: boolean): void {
     }
   }
   if (disabled) {
-    const historyNewMenu = body.querySelector(
-      "#llm-history-new-menu",
-    ) as HTMLDivElement | null;
-    if (historyNewMenu) {
-      historyNewMenu.style.display = "none";
-    }
     const historyMenu = body.querySelector(
       "#llm-history-menu",
     ) as HTMLDivElement | null;
@@ -365,6 +365,9 @@ function resolveAutoLoadedPaperContextForItem(
 function buildActiveNoteContextBlock(
   item: Zotero.Item | null | undefined,
 ): string {
+  if (!getFeatureProfile().startup.registerNoteEditingTracking) {
+    return "";
+  }
   // Inject whenever a note session is active — regardless of whether the user
   // has selected any text in the editor. The note-edit selection entries are
   // still shown as individual "Editing" snippets; this block always provides
@@ -372,7 +375,7 @@ function buildActiveNoteContextBlock(
   if (!resolveActiveNoteSession(item)) {
     return "";
   }
-  const snapshot = readNoteSnapshot(item);
+  const snapshot = getNotesModule().readNoteSnapshot(item);
   if (!snapshot || !snapshot.text.trim()) {
     return snapshot
       ? [
@@ -919,6 +922,7 @@ async function ensureAgentRunTraceLoaded(
   }
   const task = (async () => {
     try {
+      const { getAgentRunTrace } = await import("../../agent/store/traceStore");
       const trace = await getAgentRunTrace(normalizedRunId);
       agentRunTraceCache.set(normalizedRunId, trace.events);
     } catch (err) {
@@ -1325,6 +1329,44 @@ async function buildContextPlanForRequest(params: {
   recentPaperContexts: PaperContextRef[];
   mineruImages: string[];
 }> {
+  if (
+    getFeatureProfile().sendFlow.useLeanPaperChatFastPath &&
+    resolveDisplayConversationKind(params.item) !== "global"
+  ) {
+    return buildLeanPaperContextPlanForRequest(
+      {
+        item: params.item,
+        question: params.question,
+        paperContexts: params.paperContexts,
+        fullTextPaperContexts: params.fullTextPaperContexts,
+        recentPaperContexts: params.recentPaperContexts,
+        history: params.history,
+        effectiveModel: params.effectiveRequestConfig.model || "",
+        pdfModePaperKeys: params.pdfModePaperKeys,
+        pdfUploadSystemMessages: params.pdfUploadSystemMessages,
+        signal: params.signal,
+        setStatusSafely: params.setStatusSafely,
+      },
+      {
+        resolveContextSourceItem,
+        resolvePaperContextRefFromAttachment,
+        ensurePaperContextsCached: async (paperContexts, signal) => {
+          for (const paperContext of paperContexts) {
+            if (signal?.aborted) break;
+            const attachment = Zotero.Items.get(paperContext.contextItemId) || null;
+            if (attachment?.attachmentContentType === "application/pdf") {
+              await ensurePDFTextCached(attachment);
+            }
+          }
+        },
+        getPdfContext: (contextItemId) => pdfTextCache.get(contextItemId),
+        buildTruncatedFullPaperContext,
+        buildPaperRetrievalCandidates,
+        renderEvidencePack,
+        resolveContextPlanMineruImages,
+      },
+    );
+  }
   const contextSource = resolveContextSourceItem(params.item);
   params.setStatusSafely(contextSource.statusText, "sending");
   const rawActiveContextItem = contextSource.contextItem;
@@ -1408,49 +1450,13 @@ async function buildContextPlanForRequest(params: {
     .filter(Boolean)
     .join("\n\n");
 
-  // Extract MinerU figure images from the context (if applicable).
-  // Skip for text-only models (e.g. DeepSeek) that reject image_url content.
-  const effectiveModel = params.effectiveRequestConfig.model || "";
-  let mineruImages: string[] = [];
-  if (planContext && !isTextOnlyModel(effectiveModel)) {
-    // Collect all MinerU-cached attachment IDs from context papers
-    const mineruAttachmentIds: number[] = [];
-    if (activeContextItem) {
-      const activePdfCtx = pdfTextCache.get(activeContextItem.id);
-      if (activePdfCtx?.sourceType === "mineru") {
-        mineruAttachmentIds.push(activeContextItem.id);
-      }
-    }
-    // Also include @-referenced papers with MinerU cache
-    for (const paper of [
-      ...params.paperContexts,
-      ...params.fullTextPaperContexts,
-    ]) {
-      if (
-        paper.contextItemId &&
-        !mineruAttachmentIds.includes(paper.contextItemId)
-      ) {
-        const pdfCtx = pdfTextCache.get(paper.contextItemId);
-        if (pdfCtx?.sourceType === "mineru") {
-          mineruAttachmentIds.push(paper.contextItemId);
-        }
-      }
-    }
-    // Resolve images from all MinerU papers (cap total at 5)
-    for (const attachmentId of mineruAttachmentIds) {
-      if (mineruImages.length >= 5) break;
-      try {
-        const images = await resolveContextImages({
-          contextText: planContext,
-          attachmentId,
-          maxImages: 5 - mineruImages.length,
-        });
-        mineruImages.push(...images);
-      } catch (err) {
-        ztoolkit.log("LLM: MinerU figure resolution failed (best-effort)", err);
-      }
-    }
-  }
+  const mineruImages = await resolveContextPlanMineruImages({
+    contextText: planContext,
+    effectiveModel: params.effectiveRequestConfig.model || "",
+    activeContextItemId: activeContextItem?.id,
+    paperContexts: params.paperContexts,
+    fullTextPaperContexts: params.fullTextPaperContexts,
+  });
 
   return {
     combinedContext,
@@ -1461,6 +1467,52 @@ async function buildContextPlanForRequest(params: {
     recentPaperContexts: params.recentPaperContexts,
     mineruImages,
   };
+}
+
+async function resolveContextPlanMineruImages(params: {
+  contextText: string;
+  effectiveModel: string;
+  activeContextItemId?: number | null;
+  paperContexts: PaperContextRef[];
+  fullTextPaperContexts: PaperContextRef[];
+}): Promise<string[]> {
+  if (!params.contextText || isTextOnlyModel(params.effectiveModel)) {
+    return [];
+  }
+
+  const mineruAttachmentIds: number[] = [];
+  const registerAttachmentId = (attachmentId?: number | null) => {
+    if (!attachmentId || mineruAttachmentIds.includes(attachmentId)) return;
+    const pdfContext = pdfTextCache.get(attachmentId);
+    if (pdfContext?.sourceType === "mineru") {
+      mineruAttachmentIds.push(attachmentId);
+    }
+  };
+
+  registerAttachmentId(params.activeContextItemId);
+  for (const paperContext of [
+    ...params.paperContexts,
+    ...params.fullTextPaperContexts,
+  ]) {
+    registerAttachmentId(paperContext.contextItemId);
+  }
+
+  const mineruImages: string[] = [];
+  for (const attachmentId of mineruAttachmentIds) {
+    if (mineruImages.length >= 5) break;
+    try {
+      const images = await resolveContextImages({
+        contextText: params.contextText,
+        attachmentId,
+        maxImages: 5 - mineruImages.length,
+      });
+      mineruImages.push(...images);
+    } catch (err) {
+      ztoolkit.log("LLM: MinerU figure resolution failed (best-effort)", err);
+    }
+  }
+
+  return mineruImages;
 }
 
 function createQueuedRefresh(refresh: () => void): () => void {
@@ -2754,9 +2806,12 @@ export type BuildAgentRuntimeRequestParams = {
 function buildActiveNoteRuntimeContext(
   item: Zotero.Item,
 ): AgentRuntimeRequest["activeNoteContext"] {
+  if (!getFeatureProfile().startup.registerNoteEditingTracking) {
+    return undefined;
+  }
   const noteSession = resolveActiveNoteSession(item);
   if (!noteSession) return undefined;
-  const snapshot = readNoteSnapshot(item);
+  const snapshot = getNotesModule().readNoteSnapshot(item);
   if (!snapshot) return undefined;
   // Only send raw HTML when the note is a styled template (has inline
   // style= attributes).  Plain notes don't need it — noteText suffices.
@@ -2873,7 +2928,7 @@ function buildAgentEngineDeps(): AgentEngineDeps {
     updateStoredLatestAssistantMessage:
       updateStoredLatestAssistantMessage as AgentEngineDeps["updateStoredLatestAssistantMessage"],
     sendChatFallback: sendQuestion,
-    getAgentRuntime,
+    getAgentRuntime: getAgentModule().getAgentRuntime,
     maxSelectedImages: MAX_SELECTED_IMAGES,
   };
 }
@@ -2894,6 +2949,7 @@ async function retryLatestAgentResponse(
   reasoning?: LLMReasoningConfig,
   advanced?: AdvancedModelParams,
 ): Promise<void> {
+  const { retryAgentTurn } = await import("./agentMode/agentEngine");
   await retryAgentTurn(
     body,
     item,
@@ -2928,6 +2984,7 @@ async function sendAgentQuestion(opts: {
   forcedSkillIds?: string[];
   pdfUploadSystemMessages?: string[];
 }): Promise<void> {
+  const { sendAgentTurn } = await import("./agentMode/agentEngine");
   await sendAgentTurn(opts, buildAgentEngineDeps());
 }
 
@@ -3186,7 +3243,10 @@ export async function sendQuestion(
 
       // [webchat] Send PDF only when the caller explicitly requests it via chip state.
       // Always use dynamic port for the embedded relay server
-      const { getRelayBaseUrl } = await import("../../webchat/relayServer");
+      const { getRelayBaseUrl, registerWebChatRelay } = await import(
+        "../../webchat/relayServer"
+      );
+      registerWebChatRelay();
       const answer = await sendWebChatQuestion({
         item,
         question,
@@ -3674,20 +3734,8 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         targetEntry?.modelName,
       );
     } else {
-      const isStandalone =
-        panelRoot?.dataset?.standalone === "true" ||
-        (body as HTMLElement).dataset?.standalone === "true";
-      const isNoteEditing = !!resolveActiveNoteSession(item);
-      if (isNoteEditing) {
-        chatBox.innerHTML = getNoteEditingStartPageHtml();
-        if (panelRoot) panelRoot.dataset.startPageActive = "true";
-      } else if (isStandalone && isGlobalConversation) {
-        chatBox.innerHTML = getStandaloneLibraryChatStartPageHtml();
-        if (panelRoot) panelRoot.dataset.startPageActive = "true";
-      } else {
-        chatBox.innerHTML = getPaperChatStartPageHtml();
-        if (panelRoot) panelRoot.dataset.startPageActive = "true";
-      }
+      chatBox.innerHTML = getPaperChatStartPageHtml();
+      if (panelRoot) panelRoot.dataset.startPageActive = "true";
     }
     return;
   }
@@ -4475,8 +4523,10 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           : null;
       const agentRunId = msg.agentRunId?.trim();
       const agentTraceEl =
-        msg.runMode === "agent"
-          ? renderAgentTrace({
+        msg.runMode === "agent" && getFeatureProfile().panel.showRuntimeModeToggle
+          ? (
+              require("./agentTrace/render") as typeof import("./agentTrace/render")
+            ).renderAgentTrace({
               doc,
               message: msg,
               userMessage: previousUserMessage,
