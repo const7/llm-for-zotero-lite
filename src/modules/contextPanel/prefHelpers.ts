@@ -52,10 +52,6 @@ export function getBoolPref(key: string, defaultValue = false): boolean {
   return defaultValue;
 }
 
-export function getAgentModeEnabled(): boolean {
-  return getBoolPref("enableAgentMode", false);
-}
-
 const LAST_REASONING_LEVEL_PREF_KEY = "lastUsedReasoningLevel";
 const LAST_REASONING_EXPANDED_PREF_KEY = "lastReasoningExpanded";
 const PANEL_FONT_SCALE_PREF_KEY = "panelFontScale";

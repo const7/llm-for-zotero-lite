@@ -8,7 +8,6 @@ import type {
   PaperContextRef,
   OtherContextRef,
   CollectionContextRef,
-  ChatRuntimeMode,
   PaperContextSendMode,
   PaperContentSourceMode,
 } from "./types";
@@ -25,7 +24,6 @@ export const selectedReasoningCache = new Map<
   number,
   ReasoningLevelSelection
 >();
-export const selectedRuntimeModeCache = new Map<number, ChatRuntimeMode>();
 
 // 30-minute TTL, max 20 entries — PDF text can be re-extracted on demand.
 export const pdfTextCache = new TTLMap<number, PdfContext>(30 * 60 * 1000, 20);
@@ -152,10 +150,6 @@ export const paperContentSourceOverrides = new Map<string, PaperContentSourceMod
 // Stores the contextItemId of the currently expanded (sticky) paper chip, or false/undefined if none
 export const selectedPaperPreviewExpandedCache = new Map<number, number | false>();
 export const activeGlobalConversationByLibrary = new Map<number, number>();
-export const activeConversationModeByLibrary = new Map<
-  number,
-  "paper" | "global"
->();
 // Draft text per conversation — capped to prevent unbounded growth (24h TTL, max 100).
 export const draftInputCache = new TTLMap<number, string>(24 * 60 * 60 * 1000, 100);
 export const selectedTextCache = new Map<number, SelectedTextContext[]>();
@@ -171,19 +165,6 @@ export const pinnedPaperKeys = new Map<number, Set<string>>();
 export const recentReaderSelectionCache = new TTLMap<number, string>(5 * 60 * 1000, 50);
 
 export const activePaperConversationByPaper = new Map<string, number>();
-
-// ── Auto-lock state (open chat locks during generation) ─────────────────────
-// Multiple conversations can be auto-locked simultaneously.
-const autoLockedGlobalConversationKeys = new Set<number>();
-export function addAutoLockedGlobalConversationKey(key: number): void {
-  autoLockedGlobalConversationKeys.add(key);
-}
-export function removeAutoLockedGlobalConversationKey(key: number): void {
-  autoLockedGlobalConversationKeys.delete(key);
-}
-export function isAutoLockedGlobalConversation(key: number): boolean {
-  return autoLockedGlobalConversationKeys.has(key);
-}
 
 // ── Inline edit state ───────────────────────────────────────────────────────
 
@@ -247,7 +228,6 @@ export function clearAllState(): void {
   loadingConversationTasks.clear();
   selectedModelCache.clear();
   selectedReasoningCache.clear();
-  selectedRuntimeModeCache.clear();
   pdfTextCache.clear();
   pdfTextLoadingTasks.clear();
   shortcutTextCache.clear();
@@ -264,7 +244,6 @@ export function clearAllState(): void {
   paperContentSourceOverrides.clear();
   selectedPaperPreviewExpandedCache.clear();
   activeGlobalConversationByLibrary.clear();
-  activeConversationModeByLibrary.clear();
   draftInputCache.clear();
   selectedTextCache.clear();
   selectedTextPreviewExpandedCache.clear();
@@ -280,5 +259,4 @@ export function clearAllState(): void {
   pendingRequestIds.clear();
   cancelledRequestIds.clear();
   abortControllers.clear();
-  autoLockedGlobalConversationKeys.clear();
 }

@@ -25,7 +25,10 @@ describe("sendFlowController", function () {
   ];
 
   function createBaseDeps(overrides: Record<string, unknown> = {}) {
-    const inputBox = { value: "ask question" } as HTMLTextAreaElement;
+    const inputBox = {
+      value: "ask question",
+      dataset: {},
+    } as HTMLTextAreaElement;
     let draftValue = inputBox.value;
     let sendCalled = 0;
     let editCalled = 0;
@@ -40,6 +43,9 @@ describe("sendFlowController", function () {
     let lastRuntimeMode = "";
     let lastEditRuntimeMode = "";
     let lastEditPdfUploadSystemMessages: string[] | undefined;
+    let resolvePdfPaperAttachmentsCalls = 0;
+    let renderPdfPagesAsImagesCalls = 0;
+    let uploadPdfForProviderCalls = 0;
 
     const deps = {
       body: {} as Element,
@@ -51,10 +57,19 @@ describe("sendFlowController", function () {
       getSelectedPaperContexts: () => [selectedPaper],
       getFullTextPaperContexts: () => [selectedPaper],
       getPdfModePaperContexts: () => [],
-      resolvePdfPaperAttachments: async () => [],
-      renderPdfPagesAsImages: async () => [],
+      resolvePdfPaperAttachments: async () => {
+        resolvePdfPaperAttachmentsCalls += 1;
+        return [];
+      },
+      renderPdfPagesAsImages: async () => {
+        renderPdfPagesAsImagesCalls += 1;
+        return [];
+      },
       getModelPdfSupport: () => "none" as const,
-      uploadPdfForProvider: async () => null,
+      uploadPdfForProvider: async () => {
+        uploadPdfForProviderCalls += 1;
+        return null;
+      },
       resolvePdfBytes: async () => new Uint8Array(),
       encodeBytesBase64: () => "",
       getSelectedFiles: () => [selectedFile],
@@ -142,6 +157,9 @@ describe("sendFlowController", function () {
         retainTextCalled,
         persistDraftInputCalls,
         setActiveEditSessionCalls,
+        resolvePdfPaperAttachmentsCalls,
+        renderPdfPagesAsImagesCalls,
+        uploadPdfForProviderCalls,
       }),
       getDraftValue: () => draftValue,
       getLastSend: () => ({
@@ -334,5 +352,32 @@ describe("sendFlowController", function () {
 
     assert.equal(lastSend.lastSentQuestion, "ask question");
     assert.equal(lastSend.lastRuntimeMode, "agent");
+  });
+
+  it("keeps normal paper chat on the lean fast path", async function () {
+    const { controller, getCounts, getLastSend } = createBaseDeps({
+      getSelectedFiles: () => [],
+      getPdfModePaperContexts: () => [selectedPaper],
+      getSelectedProfile: () => ({
+        entryId: "entry-1",
+        model: "gpt-5",
+        apiBase: "https://chatgpt.com/backend-api/codex/responses",
+        apiKey: "test-key",
+        providerLabel: "OpenAI (codex auth)",
+        authMode: "codex_auth",
+        providerProtocol: "responses",
+      }),
+      resolvePromptText: () => "summarize the paper",
+    });
+
+    await controller.doSend();
+
+    const counts = getCounts();
+    const lastSend = getLastSend();
+    assert.equal(counts.resolvePdfPaperAttachmentsCalls, 0);
+    assert.equal(counts.renderPdfPagesAsImagesCalls, 0);
+    assert.equal(counts.uploadPdfForProviderCalls, 0);
+    assert.equal(lastSend.lastSentQuestion, "summarize the paper (with selected text) [files=0]");
+    assert.equal(lastSend.lastRuntimeMode, "chat");
   });
 });

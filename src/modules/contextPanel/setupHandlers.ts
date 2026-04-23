@@ -1,7 +1,6 @@
 import { createElement } from "../../utils/domHelpers";
 import { t } from "../../utils/i18n";
-import { getAllSkills } from "../../agent/skills";
-import type { AgentSkill } from "../../agent/skills/skillLoader";
+import { getFeatureProfile } from "../../featureProfile";
 import type { RuntimeModelEntry } from "../../utils/modelProviders";
 import {
   getLastUsedModelEntryId,
@@ -37,7 +36,6 @@ import {
 import {
   selectedModelCache,
   selectedReasoningCache,
-  selectedRuntimeModeCache,
   selectedImageCache,
   selectedFileAttachmentCache,
   selectedImagePreviewExpandedCache,
@@ -65,8 +63,6 @@ import {
   chatHistory,
   loadedConversationKeys,
   currentRequestId,
-  activeGlobalConversationByLibrary,
-  activeConversationModeByLibrary,
   activePaperConversationByPaper,
   draftInputCache,
   activeContextPanels,
@@ -79,9 +75,6 @@ import {
   setInlineEditInputSection,
   setInlineEditSavedDraft,
   pdfTextCache,
-  addAutoLockedGlobalConversationKey,
-  removeAutoLockedGlobalConversationKey,
-  isAutoLockedGlobalConversation,
 } from "./state";
 import {
   sanitizeText,
@@ -105,7 +98,6 @@ import {
 import {
   getAvailableModelEntries,
   getStringPref,
-  getAgentModeEnabled,
   getSelectedModelEntryForItem,
   applyPanelFontScale,
   getAdvancedModelParamsForEntry,
@@ -115,8 +107,6 @@ import {
   getLastUsedPaperConversationKey,
   setLastUsedPaperConversationKey,
   removeLastUsedPaperConversationKey,
-  getLockedGlobalConversationKey,
-  setLockedGlobalConversationKey,
   buildPaperStateKey,
 } from "./prefHelpers";
 import {
@@ -129,7 +119,6 @@ import {
   persistChatScrollSnapshot,
   isScrollUpdateSuspended,
   withScrollGuard,
-  copyTextToClipboard,
   copyRenderedMarkdownToClipboard,
   refreshConversationPanels,
   detectReasoningProvider,
@@ -199,14 +188,6 @@ import {
 import { captureScreenshotSelection, optimizeImageDataUrl } from "./screenshot";
 import { captureCurrentPdfPage } from "./pdfPageCapture";
 import {
-  createNoteFromAssistantText,
-  createStandaloneNoteFromAssistantText,
-  createNoteFromChatHistory,
-  createStandaloneNoteFromChatHistory,
-  buildChatHistoryNotePayload,
-  readNoteSnapshot,
-} from "./notes";
-import {
   persistAttachmentBlob,
   readAttachmentBytes,
   extractManagedBlobHash,
@@ -218,23 +199,15 @@ import { clearConversationSummary as clearConversationSummaryFromCache } from ".
 import {
   clearConversation as clearStoredConversation,
   clearConversationTitle,
-  createGlobalConversation,
   createPaperConversation,
   deleteTurnMessages,
-  deleteGlobalConversation,
   deletePaperConversation,
-  ensureGlobalConversationExists,
-  getGlobalConversationUserTurnCount,
-  getLatestEmptyGlobalConversation,
   loadConversation,
   getPaperConversation,
-  listGlobalConversations,
   listPaperConversations,
   ensurePaperV1Conversation,
-  setGlobalConversationTitle,
   setPaperConversationTitle,
   touchPaperConversationTitle,
-  touchGlobalConversationTitle,
 } from "../../utils/chatStore";
 import {
   ATTACHMENT_GC_MIN_AGE_MS,
@@ -244,7 +217,6 @@ import {
 } from "../../utils/attachmentRefStore";
 import type {
   Message,
-  ChatRuntimeMode,
   ReasoningLevelSelection,
   ReasoningOption,
   AdvancedModelParams,
@@ -263,21 +235,13 @@ import {
   searchCollectionCandidates,
   ZOTERO_NOTE_CONTENT_TYPE,
   normalizePaperSearchText,
-  parsePaperSearchSlashToken,
   parseAtSearchToken,
   type PaperBrowseCollectionCandidate,
   type PaperSearchAttachmentCandidate,
   type PaperSearchGroupCandidate,
   type PaperSearchSlashToken,
 } from "./paperSearch";
-import { getAgentApi, initAgentSubsystem } from "../../agent/index";
-import { renderPendingActionCard } from "./agentTrace/render";
-import type {
-  AgentPendingAction,
-  AgentConfirmationResolution,
-} from "../../agent/types";
 import {
-  createGlobalPortalItem,
   createPaperPortalItem,
   isGlobalPortalItem,
   resolveActiveNoteSession,
@@ -341,7 +305,6 @@ import {
 } from "./setupHandlers/controllers/fileIntakeController";
 import { createSendFlowController } from "./setupHandlers/controllers/sendFlowController";
 import { createClearConversationController } from "./setupHandlers/controllers/clearConversationController";
-import { clearAllAgentToolCaches } from "../../agent/tools";
 import { loadConversationHistoryScope } from "./historyLoader";
 import {
   shouldNotifyConversationHistoryConsumers,
@@ -351,6 +314,10 @@ import {
 
 /** Monotonic counter incremented every time setupHandlers rebuilds a panel. */
 let setupHandlersGeneration = 0;
+
+function getNotesModule(): typeof import("./notes") {
+  return require("./notes") as typeof import("./notes");
+}
 
 export type SetupHandlersHooks = {
   onConversationHistoryChanged?: () => void;
@@ -366,6 +333,12 @@ export function setupHandlers(
   initialItem?: Zotero.Item | null,
   hooks?: SetupHandlersHooks,
 ) {
+  const featureProfile = getFeatureProfile();
+  const noteEditingEnabled =
+    featureProfile.startup.registerNoteEditingTracking;
+  const standalonePanelEnabled =
+    featureProfile.panel.enableStandaloneWindow &&
+    (body as HTMLElement).dataset?.standalone === "true";
   const resolvedInitialState = resolveInitialPanelItemState(initialItem);
   let item = resolvedInitialState.item;
   let basePaperItem = resolvedInitialState.basePaperItem;
@@ -386,28 +359,19 @@ export function setupHandlers(
     modelSlot,
     modelMenu,
     reasoningBtn,
-    runtimeModeBtn,
     reasoningSlot,
     reasoningMenu,
     actionsRow,
     actionsLeft,
     actionsRight,
-    popoutBtn,
     settingsBtn,
-    exportBtn,
     clearBtn,
     titleStatic,
     historyBar,
     historyNewBtn,
-    historyNewMenu,
-    historyNewOpenBtn,
-    historyNewPaperBtn,
     historyToggleBtn,
     historyModeIndicator,
     historyMenu,
-    modeCapsule,
-    modeChipBtn,
-    modeLockBtn,
     historyRowMenu,
     historyRowRenameBtn,
     historyUndo,
@@ -439,18 +403,11 @@ export function setupHandlers(
     paperPreviewList,
     paperPicker,
     paperPickerList,
-    actionPicker,
-    actionPickerList,
-    actionHitlPanel,
     responseMenu,
     responseMenuCopyBtn,
-    responseMenuNoteBtn,
     responseMenuDeleteBtn,
     promptMenu,
     promptMenuDeleteBtn,
-    exportMenu,
-    exportMenuCopyBtn,
-    exportMenuNoteBtn,
     retryModelMenu,
     status,
     chatBox,
@@ -518,7 +475,8 @@ export function setupHandlers(
   panelRoot.tabIndex = 0;
   applyPanelFontScale(panelRoot);
 
-  const resolveCurrentNoteSession = () => resolveActiveNoteSession(item);
+  const resolveCurrentNoteSession = () =>
+    noteEditingEnabled ? resolveActiveNoteSession(item) : null;
   const isNoteSession = () => Boolean(resolveCurrentNoteSession());
   const notifyConversationHistoryChanged = () => {
     try {
@@ -527,7 +485,6 @@ export function setupHandlers(
       ztoolkit.log("LLM: standalone history hook failed", err);
     }
   };
-  const isGlobalMode = () => resolveDisplayConversationKind(item) === "global";
   const isPaperMode = () => resolveDisplayConversationKind(item) === "paper";
   const getCurrentLibraryID = (): number => {
     const fromItem =
@@ -537,55 +494,7 @@ export function setupHandlers(
     if (fromItem > 0) return fromItem;
     return resolveActiveLibraryID() || 0;
   };
-  const getCurrentRuntimeMode = (): ChatRuntimeMode => {
-    if (!item) return "chat";
-    const key = getConversationKey(item);
-    return selectedRuntimeModeCache.get(key) || "chat";
-  };
-  const updateRuntimeModeButton = () => {
-    if (!runtimeModeBtn) return;
-    const agentFeatureEnabled = getAgentModeEnabled();
-    // [webchat] Agent mode not available in webchat — hide toggle
-    let webChatActive = false;
-    try {
-      webChatActive = isWebChatMode();
-    } catch {
-      /* not ready */
-    }
-    // Hide the entire toggle when agent feature is disabled or in webchat mode.
-    const shouldHide = !agentFeatureEnabled || webChatActive;
-    runtimeModeBtn.style.display = shouldHide ? "none" : "";
-    if (shouldHide) {
-      // Force chat mode when the feature is hidden so state stays consistent.
-      if (item) selectedRuntimeModeCache.set(getConversationKey(item), "chat");
-      panelRoot.dataset.runtimeMode = "chat";
-      return;
-    }
-    const mode = getCurrentRuntimeMode();
-    const enabled = mode === "agent";
-    const label = runtimeModeBtn.querySelector(
-      ".llm-agent-toggle-label",
-    ) as HTMLSpanElement | null;
-    if (label) {
-      label.textContent = t("Agent (beta)");
-    }
-    runtimeModeBtn.classList.toggle("llm-agent-toggle-enabled", enabled);
-    runtimeModeBtn.dataset.mode = mode;
-    runtimeModeBtn.title = enabled
-      ? t("Agent mode ON. Click to switch to Chat mode")
-      : t("Agent mode OFF. Click to switch to Agent mode");
-    runtimeModeBtn.setAttribute(
-      "aria-label",
-      mode === "agent" ? t("Switch to Chat mode") : t("Switch to Agent mode"),
-    );
-    runtimeModeBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
-    panelRoot.dataset.runtimeMode = mode;
-  };
-  const setCurrentRuntimeMode = (mode: ChatRuntimeMode) => {
-    if (!item) return;
-    selectedRuntimeModeCache.set(getConversationKey(item), mode);
-    updateRuntimeModeButton();
-  };
+  const getCurrentRuntimeMode = () => "chat" as const;
   const resolveCurrentNoteParentItem = (): Zotero.Item | null => {
     const noteSession = resolveCurrentNoteSession();
     if (!noteSession?.parentItemId) return null;
@@ -659,140 +568,36 @@ export function setupHandlers(
     if (historyToggleBtn) {
       historyToggleBtn.style.display = noteSession ? "none" : "";
     }
-    if (item && libraryID > 0 && mode && !noteSession) {
-      activeConversationModeByLibrary.set(libraryID, mode);
-      if (mode === "global") {
-        activeGlobalConversationByLibrary.set(libraryID, item.id);
-      } else if (
-        Number.isFinite(conversationKey) &&
-        (conversationKey as number) > 0 &&
-        Number.isFinite(currentBasePaperItemID) &&
-        currentBasePaperItemID > 0
-      ) {
-        const normalizedConversationKey = Math.floor(conversationKey as number);
-        const paperStateKey = buildPaperStateKey(
-          libraryID,
-          Math.floor(currentBasePaperItemID),
-        );
-        activePaperConversationByPaper.set(
-          paperStateKey,
-          normalizedConversationKey,
-        );
-        setLastUsedPaperConversationKey(
-          libraryID,
-          Math.floor(currentBasePaperItemID),
-          normalizedConversationKey,
-        );
-      }
+    if (
+      item &&
+      libraryID > 0 &&
+      !noteSession &&
+      Number.isFinite(conversationKey) &&
+      (conversationKey as number) > 0 &&
+      Number.isFinite(currentBasePaperItemID) &&
+      currentBasePaperItemID > 0
+    ) {
+      const normalizedConversationKey = Math.floor(conversationKey as number);
+      const paperStateKey = buildPaperStateKey(
+        libraryID,
+        Math.floor(currentBasePaperItemID),
+      );
+      activePaperConversationByPaper.set(
+        paperStateKey,
+        normalizedConversationKey,
+      );
+      setLastUsedPaperConversationKey(
+        libraryID,
+        Math.floor(currentBasePaperItemID),
+        normalizedConversationKey,
+      );
     }
     if (historyModeIndicator) {
       // Keep historyModeIndicator (which is the clock history button) accessible.
       // Its label is static "Conversation history" — no text update needed.
     }
-    // Update mode capsule data-active state
-    if (modeCapsule) {
-      modeCapsule.dataset.mode = mode || "";
-    }
-    if (modeChipBtn) {
-      // [webchat] Don't overwrite — applyWebChatModeUI manages the chip in webchat mode
-      if (!modeChipBtn.querySelector(".llm-webchat-dot")) {
-        const currentLabel = noteSession
-          ? "Note editing"
-          : mode === "global"
-            ? "Library chat"
-            : "Paper chat";
-        modeChipBtn.textContent = currentLabel;
-        modeChipBtn.title = noteSession
-          ? currentLabel
-          : mode === "global"
-            ? "Switch to paper chat"
-            : "Switch to library chat";
-        modeChipBtn.setAttribute(
-          "aria-label",
-          noteSession
-            ? currentLabel
-            : mode === "global"
-              ? "Switch to paper chat"
-              : "Switch to library chat",
-        );
-      }
-    }
-    // Lock button: visible only in open-chat mode; reflect lock state
-    if (modeLockBtn) {
-      modeLockBtn.style.display =
-        mode === "global" && !noteSession ? "flex" : "none";
-      const libraryID = getCurrentLibraryID();
-      const lockedKey =
-        libraryID > 0 ? getLockedGlobalConversationKey(libraryID) : null;
-      const currentKey =
-        conversationKey !== null ? Math.floor(conversationKey as number) : null;
-      const isLocked =
-        lockedKey !== null && currentKey !== null && lockedKey === currentKey;
-      modeLockBtn.dataset.locked = isLocked ? "true" : "false";
-      modeLockBtn.title = isLocked
-        ? "Unlock library chat default"
-        : "Lock library chat as default";
-      modeLockBtn.setAttribute(
-        "aria-label",
-        isLocked
-          ? "Unlock library chat default"
-          : "Lock library chat as default",
-      );
-    }
-    updateRuntimeModeButton();
   };
   syncConversationIdentity();
-
-  // Keep the agent mode toggle in sync when the preference is changed in the
-  // Preferences window (which runs in a separate window context).
-  {
-    const agentPrefKey = `${config.prefsPrefix}.enableAgentMode`;
-    let observerId: symbol | undefined;
-    const onAgentPrefChange = () => {
-      if (!(body as Element).isConnected) {
-        // Panel is gone – clean up the observer.
-        try {
-          if (observerId !== undefined)
-            (Zotero as any).Prefs.unregisterObserver(observerId);
-        } catch {
-          // no-op
-        }
-        return;
-      }
-      updateRuntimeModeButton();
-    };
-    try {
-      observerId = (Zotero as any).Prefs.registerObserver(
-        agentPrefKey,
-        onAgentPrefChange,
-        true,
-      );
-    } catch {
-      // Zotero.Prefs.registerObserver not available – no live sync
-    }
-  }
-
-  // Auto-activate agent mode in standalone library chat
-  {
-    const isStandalone = (body as HTMLElement).dataset?.standalone === "true";
-    if (isStandalone && isGlobalMode()) {
-      const agentEnabled = getAgentModeEnabled();
-      const key = item ? getConversationKey(item) : null;
-      if (key && !selectedRuntimeModeCache.has(key)) {
-        if (agentEnabled) {
-          setCurrentRuntimeMode("agent");
-        } else if (status) {
-          setStatus(
-            status,
-            t(
-              "Tip: Enable Agent mode in Preferences for a better library chat experience.",
-            ),
-            "ready",
-          );
-        }
-      }
-    }
-  }
 
   let activeEditSession: EditLatestTurnMarker | null = null;
   let attachmentGcTimer: number | null = null;
@@ -949,11 +754,8 @@ export function setupHandlers(
     if (promptMenu) promptMenu.style.display = "none";
     setPromptMenuTarget(null);
   };
-  const closeExportMenu = () => {
-    if (exportMenu) exportMenu.style.display = "none";
-  };
+  const closeExportMenu = () => {};
   let historyRowMenuTarget: {
-    kind: "paper" | "global";
     conversationKey: number;
   } | null = null;
   const closeHistoryRowMenu = () => {
@@ -961,7 +763,6 @@ export function setupHandlers(
     historyRowMenuTarget = null;
   };
   const closeHistoryNewMenu = () => {
-    if (historyNewMenu) historyNewMenu.style.display = "none";
     if (historyNewBtn) {
       historyNewBtn.setAttribute("aria-expanded", "false");
     }
@@ -984,7 +785,6 @@ export function setupHandlers(
   };
   const closeSlashMenu = () => {
     slashMenuActiveIndex = -1;
-    clearAgentSlashItems();
     if (slashMenu) {
       Array.from(slashMenu.querySelectorAll(".llm-action-picker-item")).forEach(
         (el) => (el as HTMLButtonElement).removeAttribute("aria-selected"),
@@ -997,8 +797,6 @@ export function setupHandlers(
   };
   const isHistoryMenuOpen = () =>
     Boolean(historyMenu && historyMenu.style.display !== "none");
-  const isHistoryNewMenuOpen = () =>
-    Boolean(historyNewMenu && historyNewMenu.style.display !== "none");
   const closeRetryModelMenu = () => {
     setFloatingMenuOpen(retryModelMenu, RETRY_MODEL_MENU_OPEN_CLASS, false);
     retryMenuAnchor = null;
@@ -1296,7 +1094,7 @@ export function setupHandlers(
   };
   popupHost.__llmSelectionPopupCleanup = disposeSelectionPopup;
 
-  if (responseMenu && responseMenuCopyBtn && responseMenuNoteBtn) {
+  if (responseMenu && responseMenuCopyBtn) {
     if (!responseMenu.dataset.listenerAttached) {
       responseMenu.dataset.listenerAttached = "true";
       // Stop propagation for both pointer and mouse events so that the
@@ -1323,68 +1121,6 @@ export function setupHandlers(
         // otherwise the full response.
         await copyRenderedMarkdownToClipboard(body, target.contentText);
         if (status) setStatus(status, t("Copied response"), "ready");
-      });
-      responseMenuNoteBtn.addEventListener("click", async (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        // Capture all needed values immediately before any async work,
-        // so that even if responseMenuTarget is cleared we still have them.
-        const target = responseMenuTarget;
-        closeResponseMenu();
-        if (!target) {
-          ztoolkit.log("LLM: Note save – no responseMenuTarget");
-          return;
-        }
-        const {
-          item: targetItem,
-          contentText,
-          modelName,
-          paperContexts,
-        } = target;
-        if (!targetItem || !contentText) {
-          ztoolkit.log("LLM: Note save – missing item or contentText");
-          return;
-        }
-        try {
-          const targetNoteSession = resolveActiveNoteSession(targetItem);
-          if (
-            isGlobalPortalItem(targetItem) ||
-            targetNoteSession?.noteKind === "standalone"
-          ) {
-            const libraryID =
-              Number.isFinite(targetItem.libraryID) && targetItem.libraryID > 0
-                ? Math.floor(targetItem.libraryID)
-                : getCurrentLibraryID();
-            await createStandaloneNoteFromAssistantText(
-              libraryID,
-              contentText,
-              modelName,
-              paperContexts,
-            );
-            if (status) {
-              setStatus(status, t("Created a new note"), "ready");
-            }
-            return;
-          }
-          const saveResult = await createNoteFromAssistantText(
-            targetItem,
-            contentText,
-            modelName,
-            paperContexts,
-          );
-          if (status) {
-            setStatus(
-              status,
-              saveResult === "appended"
-                ? t("Appended to existing note")
-                : t("Created a new note"),
-              "ready",
-            );
-          }
-        } catch (err) {
-          ztoolkit.log("Create note failed:", err);
-          if (status) setStatus(status, t("Failed to create note"), "error");
-        }
       });
       if (responseMenuDeleteBtn) {
         responseMenuDeleteBtn.addEventListener("click", async (e: Event) => {
@@ -1456,117 +1192,6 @@ export function setupHandlers(
         });
       }
     }
-  }
-
-  if (exportMenu && exportMenuCopyBtn && exportMenuNoteBtn) {
-    if (!exportMenu.dataset.listenerAttached) {
-      exportMenu.dataset.listenerAttached = "true";
-      exportMenu.addEventListener("pointerdown", (e: Event) => {
-        e.stopPropagation();
-      });
-      exportMenu.addEventListener("mousedown", (e: Event) => {
-        e.stopPropagation();
-      });
-      exportMenu.addEventListener("contextmenu", (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-      });
-      exportMenuCopyBtn.addEventListener("click", async (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!item) return;
-        await ensureConversationLoaded(item);
-        const conversationKey = getConversationKey(item);
-        const history = chatHistory.get(conversationKey) || [];
-        const payload = buildChatHistoryNotePayload(history);
-        if (!payload.noteText) {
-          if (status)
-            setStatus(status, t("No chat history detected."), "ready");
-          closeExportMenu();
-          return;
-        }
-        // Match single-response "copy as md": copy markdown/plain text only.
-        await copyTextToClipboard(body, payload.noteText);
-        if (status) setStatus(status, t("Copied chat as md"), "ready");
-        closeExportMenu();
-      });
-      exportMenuNoteBtn.addEventListener("click", async (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const currentItem = item;
-        const currentLibraryID = getCurrentLibraryID();
-        closeExportMenu();
-        if (!currentItem) return;
-        try {
-          await ensureConversationLoaded(currentItem);
-          const conversationKey = getConversationKey(currentItem);
-          const history = chatHistory.get(conversationKey) || [];
-          const payload = buildChatHistoryNotePayload(history);
-          if (!payload.noteText) {
-            if (status)
-              setStatus(status, t("No chat history detected."), "ready");
-            return;
-          }
-          if (isGlobalMode()) {
-            await createStandaloneNoteFromChatHistory(
-              currentLibraryID,
-              history,
-            );
-          } else {
-            await createNoteFromChatHistory(currentItem, history);
-          }
-          if (status)
-            setStatus(status, t("Saved chat history to new note"), "ready");
-        } catch (err) {
-          ztoolkit.log("Save chat history note failed:", err);
-          if (status)
-            setStatus(status, t("Failed to save chat history"), "error");
-        }
-      });
-    }
-  }
-
-  if (exportBtn) {
-    exportBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (exportBtn.disabled || !exportMenu || !item) return;
-      closeRetryModelMenu();
-      closeSlashMenu();
-      closeResponseMenu();
-      closePromptMenu();
-      closeHistoryNewMenu();
-      closeHistoryMenu();
-      if (exportMenu.style.display !== "none") {
-        closeExportMenu();
-        return;
-      }
-      positionMenuBelowButton(body, exportMenu, exportBtn);
-    });
-  }
-
-  if (popoutBtn) {
-    popoutBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      try {
-        const {
-          isStandaloneWindowActive,
-          openStandaloneChat,
-        } = require("./standaloneWindow");
-        if (isStandaloneWindowActive()) {
-          // Toggle off: close the standalone window
-          addon.data.standaloneWindow?.close();
-        } else {
-          openStandaloneChat({
-            initialItem: item,
-            sourceBody: body,
-          });
-        }
-      } catch (err) {
-        ztoolkit.log("LLM: Failed to toggle standalone window", err);
-      }
-    });
   }
 
   if (settingsBtn) {
@@ -1908,7 +1533,7 @@ export function setupHandlers(
       }
       return resolvePaperContextRefFromItem(parentItem);
     }
-    if (isGlobalMode()) return null;
+    if (item && isGlobalPortalItem(item)) return null;
     const contextSource = resolveContextSourceItem(item);
     return (
       resolvePaperContextRefFromAttachment(contextSource.contextItem) ||
@@ -3107,14 +2732,7 @@ export function setupHandlers(
 
   const isHistoryEntryActive = (entry: ConversationHistoryEntry): boolean => {
     if (!item) return false;
-    const activeConversationKey = getConversationKey(item);
-    if (entry.kind === "paper" && !isGlobalMode()) {
-      return !isGlobalMode() && activeConversationKey === entry.conversationKey;
-    }
-    if (entry.kind === "global" && isGlobalMode()) {
-      return activeConversationKey === entry.conversationKey;
-    }
-    return false;
+    return getConversationKey(item) === entry.conversationKey;
   };
 
   const normalizeHistorySearchQuery = (value: string): string =>
@@ -3565,8 +3183,6 @@ export function setupHandlers(
         item.setAttribute("role", "button");
         item.setAttribute("tabindex", "0");
         item.dataset.conversationKey = `${entry.conversationKey}`;
-        item.dataset.historyKind = entry.kind;
-        item.dataset.historySection = entry.section;
         if (isHistoryEntryActive(entry)) {
           item.classList.add("active");
         }
@@ -3826,7 +3442,6 @@ export function setupHandlers(
     const libraryID = getCurrentLibraryID();
     const requestId = ++globalHistoryLoadSeq;
     const paperEntries: ConversationHistoryEntry[] = [];
-    const globalEntries: ConversationHistoryEntry[] = [];
     const paperItem = resolveCurrentPaperBaseItem();
 
     if (libraryID && paperItem) {
@@ -3870,9 +3485,6 @@ export function setupHandlers(
           );
           const isDraft = Boolean(summary.isDraft);
           paperEntries.push({
-            kind: "paper",
-            section: "paper",
-            sectionTitle: "Paper Chat",
             conversationKey: normalizedKey,
             title: summary.title,
             timestampText: isDraft
@@ -3896,129 +3508,10 @@ export function setupHandlers(
         });
       }
     }
-
-    if (libraryID) {
-      let activeGlobalKey = 0;
-      if (isGlobalMode() && item && Number.isFinite(item.id) && item.id > 0) {
-        activeGlobalKey = Math.floor(item.id);
-      } else {
-        const remembered = Number(
-          activeGlobalConversationByLibrary.get(libraryID),
-        );
-        if (Number.isFinite(remembered) && remembered > 0) {
-          activeGlobalKey = Math.floor(remembered);
-        }
-      }
-      if (activeGlobalKey > 0) {
-        try {
-          await ensureGlobalConversationExists(libraryID, activeGlobalKey);
-        } catch (err) {
-          ztoolkit.log("LLM: Failed to ensure active global history row", err);
-        }
-      }
-      if (requestId !== globalHistoryLoadSeq) return;
-
-      let historyEntries: Awaited<
-        ReturnType<typeof loadConversationHistoryScope>
-      > = [];
-      try {
-        historyEntries = await loadConversationHistoryScope({
-          mode: "open",
-          libraryID,
-          limit: GLOBAL_HISTORY_LIMIT,
-        });
-      } catch (err) {
-        ztoolkit.log("LLM: Failed to load global history entries", err);
-      }
-      if (requestId !== globalHistoryLoadSeq) return;
-
-      const seenGlobalKeys = new Set<number>();
-      for (const entry of historyEntries) {
-        const conversationKey = Number(entry.conversationKey);
-        if (!Number.isFinite(conversationKey) || conversationKey <= 0) continue;
-        const normalizedKey = Math.floor(conversationKey);
-        if (pendingHistoryDeletionKeys.has(normalizedKey)) continue;
-        if (seenGlobalKeys.has(normalizedKey)) continue;
-        seenGlobalKeys.add(normalizedKey);
-        const lastActivity = Number(
-          entry.lastActivityAt || entry.createdAt || 0,
-        );
-        globalEntries.push({
-          kind: "global",
-          section: "open",
-          sectionTitle: "Library Chat",
-          conversationKey: normalizedKey,
-          title: entry.title,
-          timestampText: entry.isDraft
-            ? "Draft"
-            : formatGlobalHistoryTimestamp(lastActivity) || "Standalone chat",
-          deletable: true,
-          isDraft: Boolean(entry.isDraft),
-          isPendingDelete: false,
-          lastActivityAt: Number.isFinite(lastActivity)
-            ? Math.floor(lastActivity)
-            : 0,
-        });
-      }
-
-      const dedupedGlobalEntries: ConversationHistoryEntry[] = [];
-      const seenGlobalEntryKeys = new Set<number>();
-      for (const entry of globalEntries) {
-        if (seenGlobalEntryKeys.has(entry.conversationKey)) continue;
-        seenGlobalEntryKeys.add(entry.conversationKey);
-        dedupedGlobalEntries.push(entry);
-      }
-      dedupedGlobalEntries.sort((a, b) => {
-        if (b.lastActivityAt !== a.lastActivityAt) {
-          return b.lastActivityAt - a.lastActivityAt;
-        }
-        if (a.isDraft !== b.isDraft) {
-          return a.isDraft ? 1 : -1;
-        }
-        return b.conversationKey - a.conversationKey;
-      });
-      globalEntries.splice(0, globalEntries.length, ...dedupedGlobalEntries);
-    }
-
-    // In the sidepanel, only show paper chat history — library chat is standalone-only
-    const isStandalonePanel =
-      (body as HTMLElement).dataset?.standalone === "true";
-    const allEntries = isStandalonePanel
-      ? [...paperEntries, ...globalEntries]
-      : paperEntries;
-    const visibleEntries = allEntries.filter(
+    const visibleEntries = paperEntries.filter(
       (entry) => !pendingHistoryDeletionKeys.has(entry.conversationKey),
     );
-    const visibleSections = [
-      {
-        section: "paper" as const,
-        latestActivity: paperEntries.reduce(
-          (max, entry) => Math.max(max, entry.lastActivityAt || 0),
-          0,
-        ),
-      },
-      {
-        section: "open" as const,
-        latestActivity: globalEntries.reduce(
-          (max, entry) => Math.max(max, entry.lastActivityAt || 0),
-          0,
-        ),
-      },
-    ]
-      .filter((entry) =>
-        visibleEntries.some((row) => row.section === entry.section),
-      )
-      .sort((a, b) => {
-        if (b.latestActivity !== a.latestActivity) {
-          return b.latestActivity - a.latestActivity;
-        }
-        if (a.section === b.section) return 0;
-        return a.section === "paper" ? -1 : 1;
-      });
-    latestConversationHistory = visibleSections.flatMap((section) =>
-      visibleEntries.filter((entry) => entry.section === section.section),
-    );
-
+    latestConversationHistory = visibleEntries;
     renderGlobalHistoryMenu();
     if (shouldNotifyHistoryConsumers) {
       notifyConversationHistoryChanged();
@@ -4030,42 +3523,6 @@ export function setupHandlers(
     updateFilePreviewPreservingScroll();
     updateImagePreviewPreservingScroll();
     updateSelectedTextPreviewPreservingScroll();
-  };
-
-  const switchGlobalConversation = async (nextConversationKey: number) => {
-    if (!item || isNoteSession()) return;
-    persistDraftInputForCurrentConversation();
-    const libraryID = getCurrentLibraryID();
-    if (!libraryID) return;
-    const normalizedConversationKey = Number.isFinite(nextConversationKey)
-      ? Math.floor(nextConversationKey)
-      : 0;
-    if (normalizedConversationKey <= 0) return;
-    const nextItem = createGlobalPortalItem(
-      libraryID,
-      normalizedConversationKey,
-    );
-    item = nextItem;
-    syncConversationIdentity();
-    activeEditSession = null;
-    inlineEditCleanup?.();
-    setInlineEditCleanup(null);
-    setInlineEditTarget(null);
-    clearForcedSkill();
-    closePaperPicker();
-    closePromptMenu();
-    closeResponseMenu();
-    closeRetryModelMenu();
-    closeExportMenu();
-    closeHistoryNewMenu();
-    closeHistoryMenu();
-    await ensureConversationLoaded(item);
-    restoreDraftInputForCurrentConversation();
-    refreshChatPreservingScroll();
-    resetComposePreviewUI();
-    updateModelButton();
-    updateReasoningButton();
-    void refreshGlobalHistoryHeader("selection");
   };
 
   const switchPaperConversation = async (nextConversationKey?: number) => {
@@ -4129,7 +3586,6 @@ export function setupHandlers(
     inlineEditCleanup?.();
     setInlineEditCleanup(null);
     setInlineEditTarget(null);
-    clearForcedSkill();
     closePaperPicker();
     closePromptMenu();
     closeResponseMenu();
@@ -4150,11 +3606,7 @@ export function setupHandlers(
     target: HistorySwitchTarget,
   ): Promise<void> => {
     if (!target) return;
-    if (target.kind === "paper") {
-      await switchPaperConversation(target.conversationKey);
-      return;
-    }
-    await switchGlobalConversation(target.conversationKey);
+    await switchPaperConversation(target.conversationKey);
   };
 
   const resolveFallbackAfterPaperDelete = async (
@@ -4182,7 +3634,7 @@ export function setupHandlers(
       const normalizedKey = Math.floor(candidateKey);
       if (normalizedKey === deletedConversationKey) continue;
       if (pendingHistoryDeletionKeys.has(normalizedKey)) continue;
-      return { kind: "paper", conversationKey: normalizedKey };
+      return { conversationKey: normalizedKey };
     }
     let createdSummary: Awaited<ReturnType<typeof createPaperConversation>> =
       null;
@@ -4192,10 +3644,7 @@ export function setupHandlers(
       ztoolkit.log("LLM: Failed to create fallback paper conversation", err);
     }
     if (createdSummary?.conversationKey) {
-      return {
-        kind: "paper",
-        conversationKey: Math.floor(createdSummary.conversationKey),
-      };
+      return { conversationKey: Math.floor(createdSummary.conversationKey) };
     }
     const ensured = await ensurePaperV1Conversation(libraryID, paperItemID);
     if (ensured?.conversationKey) {
@@ -4206,107 +3655,7 @@ export function setupHandlers(
       ) {
         return null;
       }
-      return {
-        kind: "paper",
-        conversationKey: normalizedKey,
-      };
-    }
-    return null;
-  };
-
-  const resolveFallbackAfterGlobalDelete = async (
-    libraryID: number,
-    deletedConversationKey: number,
-  ): Promise<HistorySwitchTarget> => {
-    let remainingHistorical: Awaited<
-      ReturnType<typeof listGlobalConversations>
-    > = [];
-    try {
-      remainingHistorical = await listGlobalConversations(
-        libraryID,
-        GLOBAL_HISTORY_LIMIT,
-        false,
-      );
-    } catch (err) {
-      ztoolkit.log(
-        "LLM: Failed to load fallback global history candidates",
-        err,
-      );
-    }
-    for (const entry of remainingHistorical) {
-      const candidateKey = Number(entry.conversationKey);
-      if (!Number.isFinite(candidateKey) || candidateKey <= 0) continue;
-      const normalizedKey = Math.floor(candidateKey);
-      if (normalizedKey === deletedConversationKey) continue;
-      if (pendingHistoryDeletionKeys.has(normalizedKey)) continue;
-      return { kind: "global", conversationKey: normalizedKey };
-    }
-    const paperItem = resolveCurrentPaperBaseItem();
-    const paperItemID = Number(paperItem?.id || 0);
-    if (paperItemID > 0) {
-      const paperTarget = await resolveFallbackAfterPaperDelete(
-        libraryID,
-        paperItemID,
-        deletedConversationKey,
-      );
-      if (paperTarget) return paperTarget;
-    }
-
-    const isEmptyDraft = async (conversationKey: number): Promise<boolean> => {
-      if (!Number.isFinite(conversationKey) || conversationKey <= 0)
-        return false;
-      const normalizedKey = Math.floor(conversationKey);
-      if (normalizedKey === deletedConversationKey) return false;
-      if (pendingHistoryDeletionKeys.has(normalizedKey)) return false;
-      try {
-        const count = await getGlobalConversationUserTurnCount(normalizedKey);
-        return count === 0;
-      } catch (err) {
-        ztoolkit.log(
-          "LLM: Failed to inspect draft candidate user turn count",
-          err,
-        );
-        return false;
-      }
-    };
-
-    let candidateDraftKey = Number(
-      activeGlobalConversationByLibrary.get(libraryID),
-    );
-    if (!(await isEmptyDraft(candidateDraftKey))) {
-      candidateDraftKey = 0;
-      try {
-        const latestEmpty = await getLatestEmptyGlobalConversation(libraryID);
-        const latestEmptyKey = Number(latestEmpty?.conversationKey || 0);
-        if (await isEmptyDraft(latestEmptyKey)) {
-          candidateDraftKey = Math.floor(latestEmptyKey);
-        }
-      } catch (err) {
-        ztoolkit.log("LLM: Failed to load latest empty draft candidate", err);
-      }
-    }
-    if (candidateDraftKey > 0) {
-      return {
-        kind: "global",
-        conversationKey: Math.floor(candidateDraftKey),
-      };
-    }
-
-    let createdDraftKey = 0;
-    try {
-      createdDraftKey = await createGlobalConversation(libraryID);
-    } catch (err) {
-      ztoolkit.log("LLM: Failed to create fallback draft conversation", err);
-    }
-    if (createdDraftKey > 0) {
-      ztoolkit.log("LLM: Fallback target created new draft", {
-        libraryID,
-        conversationKey: createdDraftKey,
-      });
-      return {
-        kind: "global",
-        conversationKey: Math.floor(createdDraftKey),
-      };
+      return { conversationKey: normalizedKey };
     }
     return null;
   };
@@ -4318,58 +3667,6 @@ export function setupHandlers(
     selectedReasoningCache.delete(conversationKey);
     clearTransientComposeStateForItem(conversationKey);
     clearConversationSummaryFromCache(conversationKey);
-  };
-
-  const finalizeGlobalConversationDeletion = async (
-    pending: PendingHistoryDeletion,
-  ): Promise<void> => {
-    const conversationKey = pending.conversationKey;
-    const rememberedKey = Number(
-      activeGlobalConversationByLibrary.get(pending.libraryID),
-    );
-    if (
-      Number.isFinite(rememberedKey) &&
-      Math.floor(rememberedKey) === conversationKey
-    ) {
-      activeGlobalConversationByLibrary.delete(pending.libraryID);
-    }
-    clearPendingDeletionCaches(conversationKey);
-    let hasError = false;
-    try {
-      await clearStoredConversation(conversationKey);
-    } catch (err) {
-      hasError = true;
-      ztoolkit.log("LLM: Failed to clear deleted history conversation", err);
-    }
-    try {
-      await clearOwnerAttachmentRefs("conversation", conversationKey);
-    } catch (err) {
-      hasError = true;
-      ztoolkit.log("LLM: Failed to clear deleted history attachment refs", err);
-    }
-    try {
-      await removeConversationAttachmentFiles(conversationKey);
-    } catch (err) {
-      hasError = true;
-      ztoolkit.log(
-        "LLM: Failed to remove deleted history attachment files",
-        err,
-      );
-    }
-    try {
-      await deleteGlobalConversation(conversationKey);
-    } catch (err) {
-      hasError = true;
-      ztoolkit.log("LLM: Failed to delete global history conversation", err);
-    }
-    scheduleAttachmentGc();
-    if (hasError && status) {
-      setStatus(
-        status,
-        t("Failed to fully delete conversation. Check logs."),
-        "error",
-      );
-    }
   };
 
   const finalizePaperConversationDeletion = async (
@@ -4602,16 +3899,11 @@ export function setupHandlers(
     if (!pending) return;
     ztoolkit.log("LLM: Finalizing pending history deletion", {
       reason,
-      kind: pending.kind,
       conversationKey: pending.conversationKey,
       libraryID: pending.libraryID,
       title: pending.title,
     });
-    if (pending.kind === "global") {
-      await finalizeGlobalConversationDeletion(pending);
-    } else {
-      await finalizePaperConversationDeletion(pending);
-    }
+    await finalizePaperConversationDeletion(pending);
     pendingHistoryDeletionKeys.delete(pending.conversationKey);
     await refreshGlobalHistoryHeader("mutation");
   };
@@ -4620,16 +3912,12 @@ export function setupHandlers(
     const pending = clearPendingHistoryDeletion(true);
     if (!pending) return;
     ztoolkit.log("LLM: Restoring pending history deletion", {
-      kind: pending.kind,
       conversationKey: pending.conversationKey,
       libraryID: pending.libraryID,
       title: pending.title,
     });
     if (pending.wasActive) {
-      await switchToHistoryTarget({
-        kind: pending.kind,
-        conversationKey: pending.conversationKey,
-      });
+      await switchToHistoryTarget({ conversationKey: pending.conversationKey });
       if (status) setStatus(status, t("Conversation restored"), "ready");
       return;
     }
@@ -4638,24 +3926,18 @@ export function setupHandlers(
   };
 
   const findHistoryEntryByKey = (
-    historyKind: "paper" | "global",
     conversationKey: number,
   ): ConversationHistoryEntry | null => {
     return (
       latestConversationHistory.find(
-        (entry) =>
-          entry.kind === historyKind &&
-          entry.conversationKey === conversationKey,
+        (entry) => entry.conversationKey === conversationKey,
       ) || null
     );
   };
 
   const getHistoryRowMenuEntry = (): ConversationHistoryEntry | null => {
     if (!historyRowMenuTarget) return null;
-    return findHistoryEntryByKey(
-      historyRowMenuTarget.kind,
-      historyRowMenuTarget.conversationKey,
-    );
+    return findHistoryEntryByKey(historyRowMenuTarget.conversationKey);
   };
 
   const promptConversationRename = (
@@ -4699,11 +3981,7 @@ export function setupHandlers(
     const nextTitle = promptConversationRename(entry);
     if (!nextTitle) return;
     try {
-      if (entry.kind === "paper") {
-        await setPaperConversationTitle(entry.conversationKey, nextTitle);
-      } else {
-        await setGlobalConversationTitle(entry.conversationKey, nextTitle);
-      }
+      await setPaperConversationTitle(entry.conversationKey, nextTitle);
       await refreshGlobalHistoryHeader("mutation");
       if (status) setStatus(status, t("Conversation renamed"), "ready");
     } catch (err) {
@@ -4736,29 +4014,18 @@ export function setupHandlers(
     const wasActive = isHistoryEntryActive(entry);
     let fallbackTarget: HistorySwitchTarget = null;
     if (wasActive) {
-      if (entry.kind === "paper") {
-        const paperItemID = Number(entry.paperItemID || 0);
-        if (!paperItemID) {
-          if (status) {
-            setStatus(
-              status,
-              t("Cannot resolve active paper session"),
-              "error",
-            );
-          }
-          return;
+      const paperItemID = Number(entry.paperItemID || 0);
+      if (!paperItemID) {
+        if (status) {
+          setStatus(status, t("Cannot resolve active paper session"), "error");
         }
-        fallbackTarget = await resolveFallbackAfterPaperDelete(
-          libraryID,
-          paperItemID,
-          entry.conversationKey,
-        );
-      } else {
-        fallbackTarget = await resolveFallbackAfterGlobalDelete(
-          libraryID,
-          entry.conversationKey,
-        );
+        return;
       }
+      fallbackTarget = await resolveFallbackAfterPaperDelete(
+        libraryID,
+        paperItemID,
+        entry.conversationKey,
+      );
       if (!fallbackTarget) {
         if (status) {
           setStatus(
@@ -4770,14 +4037,10 @@ export function setupHandlers(
         return;
       }
       await switchToHistoryTarget(fallbackTarget);
-      if (fallbackTarget.kind === "paper") {
-        activeGlobalConversationByLibrary.delete(libraryID);
-      }
     }
 
     pendingHistoryDeletionKeys.add(entry.conversationKey);
     const pending: PendingHistoryDeletion = {
-      kind: entry.kind,
       conversationKey: entry.conversationKey,
       libraryID,
       paperItemID: entry.paperItemID,
@@ -4793,7 +4056,6 @@ export function setupHandlers(
     pendingHistoryDeletion = pending;
 
     ztoolkit.log("LLM: Queued history deletion", {
-      kind: entry.kind,
       conversationKey: entry.conversationKey,
       libraryID,
       wasActive,
@@ -4804,100 +4066,6 @@ export function setupHandlers(
     renderGlobalHistoryMenuIfOpen();
     if (status)
       setStatus(status, t("Conversation deleted. Undo available."), "ready");
-  };
-
-  const createAndSwitchGlobalConversation = async () => {
-    if (!item || isNoteSession()) return;
-    // Allow creating new conversations even if another is generating.
-    // The user wants to start a fresh conversation while the other runs.
-    closeHistoryNewMenu();
-    const libraryID = getCurrentLibraryID();
-    if (!libraryID) {
-      if (status) {
-        setStatus(
-          status,
-          t("No active library for global conversation"),
-          "error",
-        );
-      }
-      return;
-    }
-
-    let targetConversationKey = 0;
-    let reuseReason: "active-draft" | "latest-draft" | null = null;
-
-    const currentCandidate = isGlobalMode()
-      ? getConversationKey(item)
-      : Number(activeGlobalConversationByLibrary.get(libraryID) || 0);
-    const normalizedCurrentCandidate = Number.isFinite(currentCandidate)
-      ? Math.floor(currentCandidate)
-      : 0;
-    if (normalizedCurrentCandidate > 0) {
-      try {
-        const turnCount = await getGlobalConversationUserTurnCount(
-          normalizedCurrentCandidate,
-        );
-        if (turnCount === 0) {
-          targetConversationKey = normalizedCurrentCandidate;
-          reuseReason = "active-draft";
-        }
-      } catch (err) {
-        ztoolkit.log(
-          "LLM: Failed to inspect active candidate for draft reuse",
-          err,
-        );
-      }
-    }
-
-    if (targetConversationKey <= 0) {
-      try {
-        const latestEmpty = await getLatestEmptyGlobalConversation(libraryID);
-        const latestEmptyKey = Number(latestEmpty?.conversationKey || 0);
-        if (Number.isFinite(latestEmptyKey) && latestEmptyKey > 0) {
-          targetConversationKey = Math.floor(latestEmptyKey);
-          reuseReason = "latest-draft";
-        }
-      } catch (err) {
-        ztoolkit.log(
-          "LLM: Failed to load latest empty global conversation",
-          err,
-        );
-      }
-    }
-
-    if (targetConversationKey <= 0) {
-      try {
-        targetConversationKey = await createGlobalConversation(libraryID);
-      } catch (err) {
-        ztoolkit.log("LLM: Failed to create new global conversation", err);
-      }
-      reuseReason = null;
-    }
-    if (!targetConversationKey) {
-      if (status)
-        setStatus(status, t("Failed to create conversation"), "error");
-      return;
-    }
-
-    ztoolkit.log("LLM: + conversation action", {
-      libraryID,
-      targetConversationKey,
-      action: reuseReason ? "reuse" : "create",
-      reason: reuseReason || "new",
-    });
-    activeGlobalConversationByLibrary.set(libraryID, targetConversationKey);
-    await switchGlobalConversation(targetConversationKey);
-    await refreshGlobalHistoryHeader("mutation");
-    if (status) {
-      setStatus(
-        status,
-        reuseReason
-          ? t("Reused existing new conversation")
-          : t("Started new conversation"),
-        "ready",
-      );
-    }
-    inputBox.focus({ preventScroll: true });
   };
 
   const createAndSwitchPaperConversation = async () => {
@@ -5008,10 +4176,7 @@ export function setupHandlers(
     clientY: number,
   ) => {
     if (!historyRowMenu || !historyRowRenameBtn) return;
-    historyRowMenuTarget = {
-      kind: entry.kind,
-      conversationKey: entry.conversationKey,
-    };
+    historyRowMenuTarget = { conversationKey: entry.conversationKey };
     const renameDisabled = entry.isPendingDelete;
     historyRowRenameBtn.disabled = renameDisabled;
     historyRowRenameBtn.setAttribute(
@@ -5072,32 +4237,6 @@ export function setupHandlers(
         return;
       }
 
-      // Create new session directly in whichever mode is currently active
-      if (isGlobalMode()) {
-        void createAndSwitchGlobalConversation();
-      } else {
-        void createAndSwitchPaperConversation();
-      }
-    });
-  }
-
-  if (historyNewOpenBtn) {
-    historyNewOpenBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (isNoteSession()) return;
-      closeHistoryNewMenu();
-      void createAndSwitchGlobalConversation();
-    });
-  }
-
-  if (historyNewPaperBtn) {
-    historyNewPaperBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (isNoteSession()) return;
-      if (historyNewPaperBtn.disabled) return;
-      closeHistoryNewMenu();
       void createAndSwitchPaperConversation();
     });
   }
@@ -5111,72 +4250,6 @@ export function setupHandlers(
         return;
       }
       void undoPendingHistoryDeletion();
-    });
-  }
-
-  // --- Mode chip + lock button handlers ---
-  if (modeChipBtn) {
-    modeChipBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      // Mode chip is non-clickable — sidepanels are paper-only,
-      // standalone is open-chat-only. No mode switching anywhere.
-    });
-  }
-
-  // Sync lock state to ALL other registered panels so they switch
-  // to/from global chat immediately (not just when the user visits them).
-  const syncLockStateToOtherPanels = () => {
-    for (const [otherBody] of activeContextPanels) {
-      if (otherBody === body) continue;
-      if (!(otherBody as Element).isConnected) {
-        activeContextPanels.delete(otherBody);
-        activeContextPanelStateSync.delete(otherBody);
-        continue;
-      }
-      // Use the raw Zotero item (stored on every onRender) to re-resolve
-      // the panel state.  This correctly handles lock→unlock transitions
-      // because resolveInitialPanelItemState re-checks the lock preference.
-      const rawItem =
-        activeContextPanelRawItems.get(otherBody as Element) || null;
-      const resolved = resolveInitialPanelItemState(rawItem);
-      buildUI(otherBody as Element, resolved.item);
-      activeContextPanels.set(otherBody, () => resolved.item);
-      // buildUI creates fresh DOM elements, so handlers must be re-attached.
-      // The P4 handlersAttached guard prevents truly redundant calls.
-      setupHandlers(otherBody as Element, rawItem);
-      void (async () => {
-        try {
-          if (resolved.item) await ensureConversationLoaded(resolved.item);
-          refreshChat(otherBody as Element, resolved.item);
-        } catch (err) {
-          ztoolkit.log("LLM: lock sync panel rebuild failed", err);
-        }
-      })();
-    }
-  };
-
-  if (modeLockBtn) {
-    modeLockBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item || isNoteSession() || !isGlobalMode()) return;
-      const libraryID = getCurrentLibraryID();
-      if (!libraryID) return;
-      const currentKey =
-        conversationKey !== null ? Math.floor(conversationKey as number) : null;
-      if (!currentKey) return;
-      const lockedKey = getLockedGlobalConversationKey(libraryID);
-      const isLocked = lockedKey !== null && lockedKey === currentKey;
-      // Manual lock/unlock overrides any auto-lock on this conversation
-      if (currentKey) removeAutoLockedGlobalConversationKey(currentKey);
-      if (isLocked) {
-        setLockedGlobalConversationKey(libraryID, null);
-      } else {
-        setLockedGlobalConversationKey(libraryID, currentKey);
-      }
-      syncConversationIdentity();
-      syncLockStateToOtherPanels();
     });
   }
 
@@ -5290,9 +4363,7 @@ export function setupHandlers(
         ) {
           return;
         }
-        const historyKind =
-          row.dataset.historyKind === "paper" ? "paper" : "global";
-        const entry = findHistoryEntryByKey(historyKind, parsedConversationKey);
+        const entry = findHistoryEntryByKey(parsedConversationKey);
         if (!entry || !entry.deletable) return;
         void queueHistoryDeletion(entry);
         return;
@@ -5315,14 +4386,8 @@ export function setupHandlers(
       ) {
         return;
       }
-      const historyKind =
-        row.dataset.historyKind === "paper" ? "paper" : "global";
       void (async () => {
-        if (historyKind === "paper") {
-          await switchPaperConversation(parsedConversationKey);
-        } else {
-          await switchGlobalConversation(parsedConversationKey);
-        }
+        await switchPaperConversation(parsedConversationKey);
         if (status) setStatus(status, t("Conversation loaded"), "ready");
       })();
     });
@@ -5349,9 +4414,7 @@ export function setupHandlers(
         closeHistoryRowMenu();
         return;
       }
-      const historyKind =
-        row.dataset.historyKind === "paper" ? "paper" : "global";
-      const entry = findHistoryEntryByKey(historyKind, parsedConversationKey);
+      const entry = findHistoryEntryByKey(parsedConversationKey);
       if (!entry) {
         closeHistoryRowMenu();
         return;
@@ -6115,11 +5178,7 @@ export function setupHandlers(
             // Apply webchat UI immediately so model button is disabled during preload
             applyWebChatModeUI();
             void (async () => {
-              if (isGlobalMode()) {
-                await createAndSwitchGlobalConversation();
-              } else {
-                await createAndSwitchPaperConversation();
-              }
+              await createAndSwitchPaperConversation();
 
               // Show preloading screen to verify connectivity before enabling webchat
               const chatShellEl = body.querySelector(
@@ -6594,57 +5653,7 @@ export function setupHandlers(
       }
     }
 
-    // Mode chip: show target site name with connection dot, or restore original
-    if (modeChipBtn) {
-      if (isWebChat) {
-        // Resolve the target label from the current model name
-        let webchatChipLabel = "chatgpt.com";
-        let webchatChipTitle = "WebChat Sync";
-        try {
-          const { currentModel } = getSelectedModelInfo();
-          const { getWebChatTargetByModelName } =
-            require("../../webchat/types") as typeof import("../../webchat/types");
-          const entry = getWebChatTargetByModelName(currentModel || "");
-          if (entry) {
-            webchatChipLabel = entry.modelName;
-            webchatChipTitle = `${entry.label} Web Sync`;
-          }
-        } catch {
-          /* fallback to defaults */
-        }
-
-        let dot = modeChipBtn.querySelector(
-          ".llm-webchat-dot",
-        ) as HTMLElement | null;
-        if (!dot) {
-          dot = (modeChipBtn.ownerDocument as Document).createElement("span");
-          dot.className = "llm-webchat-dot llm-webchat-dot-disconnected";
-        }
-        modeChipBtn.textContent = "";
-        modeChipBtn.appendChild(dot);
-        modeChipBtn.appendChild(
-          (modeChipBtn.ownerDocument as Document).createTextNode(
-            ` ${webchatChipLabel}`,
-          ),
-        );
-        modeChipBtn.title = webchatChipTitle;
-        modeChipBtn.style.cursor = "default";
-        startWebChatConnectionCheck(dot);
-      } else {
-        const oldDot = modeChipBtn.querySelector(".llm-webchat-dot");
-        if (oldDot) {
-          oldDot.remove();
-          // Restore mode chip text — the normal render sync skips it while the dot is present
-          const chipLabel = isGlobalMode() ? "Library chat" : "Paper chat";
-          modeChipBtn.textContent = chipLabel;
-          modeChipBtn.title = isGlobalMode()
-            ? "Switch to paper chat"
-            : "Switch to library chat";
-        }
-        stopWebChatConnectionCheck();
-        modeChipBtn.style.cursor = "";
-      }
-    }
+    stopWebChatConnectionCheck();
 
     // Model dropdown: fully disabled in webchat (model is ChatGPT, use Exit to change)
     if (modelBtn) {
@@ -6656,6 +5665,12 @@ export function setupHandlers(
 
     // [webchat] Pre-fetch history in background so it's ready when user clicks
     if (isWebChat) {
+      const statusDot = body.querySelector(
+        ".llm-webchat-dot",
+      ) as HTMLElement | null;
+      if (statusDot) {
+        startWebChatConnectionCheck(statusDot);
+      }
       void warmUpWebChatHistory();
     }
 
@@ -6681,8 +5696,6 @@ export function setupHandlers(
     if (isWebChat) {
       updatePaperPreviewPreservingScroll();
     }
-
-    updateRuntimeModeButton();
 
     // Notify standalone window (or other listeners) of webchat mode change
     hooks?.onWebChatModeChanged?.(isWebChat);
@@ -7312,13 +6325,6 @@ export function setupHandlers(
     return parseAtSearchToken(inputBox.value, caretEnd);
   };
   const getActiveSlashToken = (): ActiveSlashToken | null => getActiveAtToken();
-  const getActiveActionToken = (): ActiveSlashToken | null => {
-    const caretEnd =
-      typeof inputBox.selectionStart === "number"
-        ? inputBox.selectionStart
-        : inputBox.value.length;
-    return parsePaperSearchSlashToken(inputBox.value, caretEnd);
-  };
   const isPaperPickerOpen = () =>
     Boolean(paperPicker && paperPicker.style.display !== "none");
   const closePaperPicker = () => {
@@ -7335,12 +6341,6 @@ export function setupHandlers(
   };
   // ── Slash menu keyboard navigation ────────────────────────────────────────
   let slashMenuActiveIndex = -1;
-  const clearAgentSlashItems = () => {
-    if (!slashMenu) return;
-    Array.from(slashMenu.querySelectorAll("[data-slash-agent-item]")).forEach(
-      (el) => (el as Element).remove(),
-    );
-  };
   const getVisibleSlashItems = (): HTMLButtonElement[] => {
     if (!slashMenu) return [];
     const win = body.ownerDocument?.defaultView;
@@ -7386,989 +6386,6 @@ export function setupHandlers(
     if (slashMenuActiveIndex >= 0 && items[slashMenuActiveIndex]) {
       items[slashMenuActiveIndex].click();
     }
-  };
-
-  // ── Action picker ─────────────────────────────────────────────────────────
-  type ActionPickerItem = {
-    name: string;
-    description: string;
-    inputSchema: object;
-  };
-  let actionPickerItems: ActionPickerItem[] = [];
-  let actionPickerActiveIndex = 0;
-  const isActionPickerOpen = () =>
-    Boolean(actionPicker && actionPicker.style.display !== "none");
-  const closeActionPicker = () => {
-    if (actionPicker) actionPicker.style.display = "none";
-    if (actionPickerList) actionPickerList.innerHTML = "";
-    actionPickerItems = [];
-    actionPickerActiveIndex = 0;
-  };
-  const formatActionLabel = (name: string): string =>
-    name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-
-  /** Renders the action picker dropdown. */
-  const renderActionPicker = () => {
-    if (!actionPicker || !actionPickerList) return;
-    const ownerDoc = body.ownerDocument;
-    if (!ownerDoc) return;
-    actionPickerList.innerHTML = "";
-    if (!actionPickerItems.length) {
-      const empty = createElement(ownerDoc, "div", "llm-action-picker-empty", {
-        textContent: "No actions matched.",
-      });
-      actionPickerList.appendChild(empty);
-      actionPicker.style.display = "block";
-      return;
-    }
-    actionPickerItems.forEach((action, idx) => {
-      const option = createElement(
-        ownerDoc,
-        "div",
-        "llm-action-picker-item",
-        {},
-      );
-      option.setAttribute("role", "option");
-      option.setAttribute(
-        "aria-selected",
-        idx === actionPickerActiveIndex ? "true" : "false",
-      );
-      option.tabIndex = -1;
-      const titleEl = createElement(
-        ownerDoc,
-        "div",
-        "llm-action-picker-title",
-        {
-          textContent: action.name,
-        },
-      );
-      const descEl = createElement(
-        ownerDoc,
-        "div",
-        "llm-action-picker-description",
-        {
-          textContent: action.description,
-        },
-      );
-      option.append(titleEl, descEl);
-      option.addEventListener("mousedown", (e: Event) => {
-        e.preventDefault();
-        actionPickerActiveIndex = idx;
-        void selectActionPickerItem(idx);
-      });
-      actionPickerList.appendChild(option);
-    });
-    actionPicker.style.display = "block";
-  };
-
-  /** Populates the slash menu (and, in agent mode, appends agent actions). */
-  const scheduleActionPickerTrigger = () => {
-    if (!item) {
-      closeActionPicker();
-      return;
-    }
-    // [webchat] Slash menu not available in webchat mode
-    try {
-      if (isWebChatMode()) {
-        closeActionPicker();
-        closeSlashMenu();
-        return;
-      }
-    } catch {
-      /* */
-    }
-    closeActionPicker();
-    const token = getActiveActionToken();
-    if (!token) {
-      closeSlashMenu();
-      return;
-    }
-    // Agent mode: render agent actions first (creates section labels),
-    // then skills (inserts between agent actions and base actions)
-    if (getCurrentRuntimeMode() === "agent") {
-      const query = token.query.toLowerCase().trim();
-      renderAgentActionsInSlashMenu(query);
-      renderSkillsInSlashMenu(query);
-    }
-    if (!isFloatingMenuOpen(slashMenu)) {
-      closeRetryModelMenu();
-      closeModelMenu();
-      closeReasoningMenu();
-      closeHistoryNewMenu();
-      closeHistoryMenu();
-      closeResponseMenu();
-      closePromptMenu();
-      closeExportMenu();
-      openSlashMenuWithSelection();
-    } else {
-      // Already open — re-render selection after agent items may have changed
-      slashMenuActiveIndex = 0;
-      updateSlashMenuSelection();
-    }
-  };
-
-  // ── Action HITL panel ──────────────────────────────────────────────────────
-  /**
-   * Refreshes the `data-has-action-card` attribute on the panel root so CSS
-   * can restore chat-mode shell sizing when a card is present on the start
-   * page. Called whenever a card is added or removed.
-   */
-  const syncHasActionCardAttr = () => {
-    if (!panelRoot) return;
-    const hasCard = !!chatBox?.querySelector(
-      ".llm-action-inline-card, .llm-action-progress-card",
-    );
-    if (hasCard) {
-      panelRoot.dataset.hasActionCard = "true";
-    } else {
-      delete panelRoot.dataset.hasActionCard;
-    }
-  };
-
-  const closeActionHitlPanel = () => {
-    if (actionHitlPanel) {
-      actionHitlPanel.style.display = "none";
-      actionHitlPanel.innerHTML = "";
-    }
-    chatBox?.querySelector(".llm-action-inline-card")?.remove();
-    syncHasActionCardAttr();
-  };
-
-  const showActionHitlCard = (
-    requestId: string,
-    action: AgentPendingAction,
-  ): Promise<AgentConfirmationResolution> => {
-    return new Promise((resolve) => {
-      getAgentApi().registerPendingConfirmation(requestId, (resolution) => {
-        closeActionHitlPanel();
-        resolve(resolution);
-      });
-      const ownerDoc = body.ownerDocument;
-      if (ownerDoc && chatBox) {
-        chatBox.querySelector(".llm-action-inline-card")?.remove();
-        const wrapper = ownerDoc.createElement("div");
-        wrapper.className = "llm-action-inline-card";
-        const card = renderPendingActionCard(ownerDoc, { requestId, action });
-        wrapper.appendChild(card);
-        chatBox.appendChild(wrapper);
-        chatBox.scrollTop = chatBox.scrollHeight;
-        syncHasActionCardAttr();
-      }
-    });
-  };
-
-  /**
-   * Returns a controller for a persistent "action in progress" indicator
-   * rendered inside the chat thread.  The indicator surfaces the current
-   * action's step label + the bouncing-dots animation used during assistant
-   * streaming, so users can see that work is happening during long
-   * network-bound steps (e.g. audit_library's per-item metadata fetch).
-   */
-  const createActionProgressIndicator = (actionName: string) => {
-    const ownerDoc = body.ownerDocument;
-    let element: HTMLDivElement | null = null;
-    let stepText: HTMLDivElement | null = null;
-    let summaryText: HTMLDivElement | null = null;
-
-    const ensureMounted = () => {
-      if (!ownerDoc || !chatBox) return;
-      if (element && element.isConnected) return;
-      chatBox.querySelector(".llm-action-progress-card")?.remove();
-      const wrapper = ownerDoc.createElement("div");
-      wrapper.className = "llm-action-progress-card";
-
-      const header = ownerDoc.createElement("div");
-      header.className = "llm-action-progress-header";
-      const title = ownerDoc.createElement("div");
-      title.className = "llm-action-progress-title";
-      title.textContent = `${formatActionLabel(actionName)}`;
-      const typing = ownerDoc.createElement("div");
-      typing.className = "llm-typing llm-action-progress-typing";
-      typing.innerHTML =
-        '<span class="llm-typing-dot"></span><span class="llm-typing-dot"></span><span class="llm-typing-dot"></span>';
-      header.append(title, typing);
-      wrapper.appendChild(header);
-
-      const step = ownerDoc.createElement("div");
-      step.className = "llm-action-progress-step";
-      step.textContent = "Starting…";
-      wrapper.appendChild(step);
-      stepText = step;
-
-      const summary = ownerDoc.createElement("div");
-      summary.className = "llm-action-progress-summary";
-      summary.textContent = "";
-      wrapper.appendChild(summary);
-      summaryText = summary;
-
-      chatBox.appendChild(wrapper);
-      chatBox.scrollTop = chatBox.scrollHeight;
-      element = wrapper;
-      syncHasActionCardAttr();
-    };
-
-    // Mount right away so the user sees feedback before the first step event.
-    ensureMounted();
-
-    return {
-      setStep(stepName: string, index: number, total: number) {
-        ensureMounted();
-        if (stepText) {
-          stepText.textContent = `${stepName} (${index}/${total})`;
-        }
-        if (summaryText) {
-          summaryText.textContent = "";
-        }
-      },
-      setSummary(summary: string) {
-        ensureMounted();
-        if (summaryText) summaryText.textContent = summary;
-      },
-      hide() {
-        if (element && element.isConnected) {
-          element.remove();
-        }
-        element = null;
-        stepText = null;
-        summaryText = null;
-        syncHasActionCardAttr();
-      },
-      remove() {
-        if (element && element.isConnected) {
-          element.remove();
-        }
-        element = null;
-        stepText = null;
-        summaryText = null;
-        syncHasActionCardAttr();
-      },
-    };
-  };
-
-  // ── Action launch form ─────────────────────────────────────────────────────
-  /**
-   * Returns the required fields that cannot be auto-filled from context.
-   * `itemId` is auto-filled from the current item. All other required fields
-   * need user input.
-   */
-  const getNeedsUserInputFields = (
-    actionName: string,
-    schema: object,
-  ): string[] => {
-    const s = schema as { required?: string[] };
-    if (!s.required?.length) return [];
-    const autoFillable = new Set(["itemId"]);
-    return s.required.filter((f) => !autoFillable.has(f));
-  };
-
-  /**
-   * Resolves the initial input for an action. Auto-fills `itemId` from context.
-   */
-  const buildActionInput = (
-    actionName: string,
-    schema: object,
-    extraFields: Record<string, string>,
-  ): Record<string, unknown> => {
-    const input: Record<string, unknown> = { ...extraFields };
-    const s = schema as { required?: string[] };
-    if (s.required?.includes("itemId")) {
-      // Portal items carry the conversation key as `id`, not the real Zotero
-      // item ID. Resolve to the base paper first so tools receive a real ID.
-      const realItem = resolveCurrentPaperBaseItem() || item;
-      if (realItem?.id) {
-        input.itemId = realItem.id;
-      }
-    }
-    return input;
-  };
-
-  /**
-   * Shows an inline launch form for actions that require user-provided fields
-   * when their required inputs cannot be derived from the current context.
-   * Returns a promise that resolves with the filled input, or null if cancelled.
-   */
-  const showActionLaunchForm = (
-    actionName: string,
-    requiredFields: string[],
-    schema: object,
-  ): Promise<Record<string, unknown> | null> => {
-    return new Promise((resolve) => {
-      const ownerDoc = body.ownerDocument;
-      if (!ownerDoc || !chatBox) {
-        resolve(null);
-        return;
-      }
-      const props =
-        (schema as { properties?: Record<string, { description?: string }> })
-          .properties || {};
-      chatBox.querySelector(".llm-action-inline-card")?.remove();
-      const wrapper = ownerDoc.createElement("div");
-      wrapper.className = "llm-action-inline-card";
-      const form = createElement(ownerDoc, "div", "llm-action-launch-form", {});
-      const header = createElement(
-        ownerDoc,
-        "div",
-        "llm-action-launch-form-header",
-        {
-          textContent: formatActionLabel(actionName),
-        },
-      );
-      form.appendChild(header);
-      const fieldEls: Array<{
-        name: string;
-        input: HTMLInputElement | HTMLTextAreaElement;
-      }> = [];
-      for (const fieldName of requiredFields) {
-        const label = createElement(
-          ownerDoc,
-          "label",
-          "llm-action-launch-form-label",
-          {
-            textContent: props[fieldName]?.description ?? fieldName,
-          },
-        );
-        const input = createElement(
-          ownerDoc,
-          "textarea",
-          "llm-action-launch-form-input llm-input",
-          {
-            placeholder: fieldName,
-          },
-        ) as HTMLTextAreaElement;
-        input.rows = 2;
-        form.append(label, input);
-        fieldEls.push({ name: fieldName, input });
-      }
-      const btns = createElement(
-        ownerDoc,
-        "div",
-        "llm-action-launch-form-btns",
-        {},
-      );
-      const runBtn = createElement(
-        ownerDoc,
-        "button",
-        "llm-action-launch-form-run-btn",
-        {
-          textContent: "Run",
-          type: "button",
-        },
-      ) as HTMLButtonElement;
-      const cancelBtn2 = createElement(
-        ownerDoc,
-        "button",
-        "llm-action-launch-form-cancel-btn",
-        {
-          textContent: "Cancel",
-          type: "button",
-        },
-      ) as HTMLButtonElement;
-      btns.append(runBtn, cancelBtn2);
-      form.appendChild(btns);
-      wrapper.appendChild(form);
-      const dismiss = () => {
-        closeActionHitlPanel();
-        inputBox.focus({ preventScroll: true });
-      };
-      runBtn.addEventListener("click", () => {
-        const filled: Record<string, unknown> = {};
-        for (const { name, input } of fieldEls) {
-          filled[name] = input.value.trim();
-        }
-        dismiss();
-        resolve(filled);
-      });
-      cancelBtn2.addEventListener("click", () => {
-        dismiss();
-        resolve(null);
-      });
-      chatBox.appendChild(wrapper);
-      chatBox.scrollTop = chatBox.scrollHeight;
-      // Focus first field
-      fieldEls[0]?.input.focus();
-    });
-  };
-
-  /** Core action execution — shared between action picker and slash menu. */
-  const executeAgentAction = async (
-    action: ActionPickerItem,
-    parsedInput?: Record<string, unknown>,
-  ): Promise<void> => {
-    inputBox.focus({ preventScroll: true });
-    // Ensure agent subsystem is initialized before running any action
-    try {
-      await initAgentSubsystem();
-    } catch (err) {
-      ztoolkit.log("LLM: failed to init agent subsystem", err);
-      if (status) setStatus(status, `Error: Agent system unavailable`, "error");
-      return;
-    }
-    let input: Record<string, unknown>;
-    if (parsedInput) {
-      // Input already parsed from inline command
-      input = parsedInput;
-      // Auto-fill itemId from context if needed
-      const s = action.inputSchema as { required?: string[] };
-      if (s.required?.includes("itemId") && !input.itemId) {
-        // Portal items carry the conversation key as `id`, not the real Zotero
-        // item ID. Resolve to the base paper first so tools receive a real ID.
-        const realItem = resolveCurrentPaperBaseItem() || item;
-        if (realItem?.id) {
-          input.itemId = realItem.id;
-        }
-      }
-    } else {
-      const needsInput = getNeedsUserInputFields(
-        action.name,
-        action.inputSchema,
-      );
-      let extraFields: Record<string, string> = {};
-      if (needsInput.length) {
-        const filled = await showActionLaunchForm(
-          action.name,
-          needsInput,
-          action.inputSchema,
-        );
-        if (!filled) return;
-        extraFields = Object.fromEntries(
-          Object.entries(filled).map(([k, v]) => [k, String(v)]),
-        );
-      }
-      input = buildActionInput(action.name, action.inputSchema, extraFields);
-    }
-    if (status)
-      setStatus(status, `Running: ${formatActionLabel(action.name)}…`, "ready");
-    const progressIndicator = createActionProgressIndicator(action.name);
-    try {
-      const agentApi = getAgentApi();
-      const selectedProfile = getSelectedProfile();
-      const actionLlmConfig = selectedProfile
-        ? {
-            model: selectedProfile.model,
-            apiBase: selectedProfile.apiBase,
-            apiKey: selectedProfile.apiKey,
-            authMode: selectedProfile.authMode,
-            providerProtocol: selectedProfile.providerProtocol,
-          }
-        : undefined;
-      const result = await agentApi.runAction(action.name, input, {
-        confirmationMode: "native_ui",
-        llm: actionLlmConfig,
-        onProgress: (event) => {
-          if (event.type === "step_start") {
-            progressIndicator.setStep(event.step, event.index, event.total);
-            if (status) {
-              setStatus(
-                status,
-                `${event.step} (${event.index}/${event.total})`,
-                "ready",
-              );
-            }
-          } else if (event.type === "step_done") {
-            if (event.summary) {
-              progressIndicator.setSummary(event.summary);
-              if (status) setStatus(status, event.summary, "ready");
-            }
-          } else if (event.type === "confirmation_required") {
-            // HITL card takes over; hide the indicator until work resumes.
-            progressIndicator.hide();
-          }
-        },
-        requestConfirmation: (requestId, pendingAction) =>
-          showActionHitlCard(requestId, pendingAction),
-      });
-      if (status) {
-        setStatus(
-          status,
-          result.ok
-            ? `${formatActionLabel(action.name)} complete`
-            : `${formatActionLabel(action.name)} failed: ${result.error}`,
-          result.ok ? "ready" : "error",
-        );
-      }
-    } catch (err) {
-      ztoolkit.log("LLM: action picker run error", err);
-      if (status) setStatus(status, `Error: ${String(err)}`, "error");
-    } finally {
-      progressIndicator.remove();
-    }
-  };
-
-  // ── Forced skill state (from slash menu skill selection) ────────────────
-  /** The skill ID force-selected from the slash menu, if any. */
-  let forcedSkillId: string | null = null;
-  /** Badge element for the forced skill, rendered in the compose area. */
-  let forcedSkillBadge: HTMLElement | null = null;
-
-  const clearForcedSkill = (): void => {
-    forcedSkillId = null;
-    forcedSkillBadge = null;
-    const row = body.querySelector("#llm-command-row");
-    if (row) {
-      row.removeAttribute("data-active");
-      row.classList.remove("llm-command-row--skill");
-    }
-    if (inputBox.dataset.originalPlaceholder !== undefined) {
-      inputBox.placeholder = inputBox.dataset.originalPlaceholder;
-      delete inputBox.dataset.originalPlaceholder;
-    }
-  };
-
-  const handleSkillSelection = (skill: AgentSkill): void => {
-    clearForcedSkill();
-    clearCommandChip();
-    forcedSkillId = skill.id;
-
-    // Ensure agent mode
-    if (getCurrentRuntimeMode() !== "agent" && getAgentModeEnabled()) {
-      setCurrentRuntimeMode("agent");
-    }
-
-    // Populate the command row above the textarea
-    const row = body.querySelector("#llm-command-row");
-    const badgeEl = body.querySelector("#llm-command-row-badge");
-    if (!row || !badgeEl) return;
-
-    badgeEl.textContent = `/${skill.id}`;
-    row.classList.add("llm-command-row--skill");
-    row.setAttribute("data-active", "");
-    forcedSkillBadge = row as HTMLElement;
-
-    if (inputBox.dataset.originalPlaceholder === undefined) {
-      inputBox.dataset.originalPlaceholder = inputBox.placeholder;
-    }
-    inputBox.placeholder = "";
-    inputBox.value = "";
-    inputBox.focus({ preventScroll: true });
-    const EvtCtor =
-      (inputBox.ownerDocument?.defaultView as any)?.Event ?? Event;
-    inputBox.dispatchEvent(new EvtCtor("input", { bubbles: true }));
-  };
-
-  // ── Inline command badge state ──────────────────────────────────────────
-  /** The currently active command action, or null if no badge is shown. */
-  let activeCommandAction: ActionPickerItem | null = null;
-  /** The DOM element for the inline badge, if currently rendered. */
-  let activeCommandBadge: HTMLElement | null = null;
-
-  /** Removes the inline command badge from the textarea and restores state. */
-  const clearCommandChip = (): void => {
-    activeCommandAction = null;
-    activeCommandBadge = null;
-    const row = body.querySelector("#llm-command-row");
-    if (row) {
-      row.removeAttribute("data-active");
-      row.classList.remove("llm-command-row--skill");
-    }
-    // Restore original placeholder
-    if (inputBox.dataset.originalPlaceholder !== undefined) {
-      inputBox.placeholder = inputBox.dataset.originalPlaceholder;
-      delete inputBox.dataset.originalPlaceholder;
-    }
-  };
-
-  /**
-   * Creates an inline command badge inside the textarea area.
-   * The badge is positioned at the textarea's first-line text start position,
-   * and the textarea's padding-left is increased to flow around it.
-   * The badge is atomic — removed entirely via its x button or Backspace.
-   */
-  const insertCommandToken = (action: ActionPickerItem): void => {
-    clearForcedSkill();
-    clearCommandChip();
-    activeCommandAction = action;
-
-    // Populate the command row above the textarea
-    const row = body.querySelector("#llm-command-row");
-    const badgeEl = body.querySelector("#llm-command-row-badge");
-    if (!row || !badgeEl) return;
-
-    badgeEl.textContent = `/${action.name}`;
-    row.classList.remove("llm-command-row--skill");
-    row.setAttribute("data-active", "");
-    activeCommandBadge = row as HTMLElement;
-
-    // Save original placeholder and update hint
-    if (inputBox.dataset.originalPlaceholder === undefined) {
-      inputBox.dataset.originalPlaceholder = inputBox.placeholder;
-    }
-    inputBox.placeholder = "";
-    inputBox.value = "";
-    inputBox.focus({ preventScroll: true });
-    const EvtCtor =
-      (inputBox.ownerDocument?.defaultView as any)?.Event ?? Event;
-    inputBox.dispatchEvent(new EvtCtor("input", { bubbles: true }));
-  };
-
-  /** Returns the active command action if a badge is present, null otherwise. */
-  const getActiveCommandAction = (): ActionPickerItem | null =>
-    activeCommandAction;
-
-  /**
-   * Parses natural-language parameters for an action command.
-   * Returns a structured input object for the action.
-   */
-  const parseCommandParams = (
-    actionName: string,
-    params: string,
-  ): Record<string, unknown> => {
-    const input: Record<string, unknown> = {};
-    if (!params) return input;
-    const lower = params.toLowerCase();
-
-    // Parse "for first N items" or "first N items"
-    const firstNMatch = /(?:for\s+)?(?:first|top)\s+(\d+)\s*items?/i.exec(
-      params,
-    );
-    if (firstNMatch) {
-      input.limit = parseInt(firstNMatch[1], 10);
-      return input;
-    }
-
-    // Parse "last N items"
-    const lastNMatch = /(?:for\s+)?last\s+(\d+)\s*items?/i.exec(params);
-    if (lastNMatch) {
-      input.limit = parseInt(lastNMatch[1], 10);
-      return input;
-    }
-
-    // Parse "for collection XXX"
-    const collectionMatch = /(?:for\s+)?collection\s+(.+)/i.exec(params);
-    if (collectionMatch) {
-      input.scope = "collection";
-      input.collectionName = collectionMatch[1].trim();
-      return input;
-    }
-
-    // Parse "for whole library" or "for all"
-    if (
-      lower.includes("whole library") ||
-      lower.includes("for all") ||
-      lower === "all"
-    ) {
-      input.scope = "all";
-      return input;
-    }
-
-    // Parse bare number as limit
-    const bareNumber = /^(\d+)$/.exec(params.trim());
-    if (bareNumber) {
-      input.limit = parseInt(bareNumber[1], 10);
-      return input;
-    }
-
-    return input;
-  };
-
-  /**
-   * Shows a HITL scope confirmation card when an action command is sent
-   * with no parameters. Returns the user's chosen scope as input.
-   */
-  const showScopeConfirmation = (
-    actionName: string,
-  ): Promise<Record<string, unknown> | null> => {
-    return new Promise((resolve) => {
-      const requestId = `scope-confirm-${actionName}-${Date.now()}`;
-      const card = {
-        toolName: actionName,
-        mode: "review" as const,
-        title: `${formatActionLabel(actionName)}`,
-        description: "What scope should this action run on?",
-        confirmLabel: "Run",
-        cancelLabel: "Cancel",
-        actions: [
-          { id: "first20", label: "First 20 items", style: "primary" as const },
-          { id: "all", label: "Whole library", style: "secondary" as const },
-          { id: "cancel", label: "Cancel", style: "secondary" as const },
-        ],
-        defaultActionId: "first20",
-        cancelActionId: "cancel",
-        fields: [],
-      };
-      getAgentApi().registerPendingConfirmation(requestId, (resolution) => {
-        closeActionHitlPanel();
-        if (!resolution.approved || resolution.actionId === "cancel") {
-          resolve(null);
-          return;
-        }
-        if (resolution.actionId === "all") {
-          resolve({ scope: "all" });
-        } else {
-          resolve({ limit: 20 });
-        }
-      });
-      const ownerDoc = body.ownerDocument;
-      if (ownerDoc && chatBox) {
-        chatBox.querySelector(".llm-action-inline-card")?.remove();
-        const wrapper = ownerDoc.createElement("div");
-        wrapper.className = "llm-action-inline-card";
-        const cardEl = renderPendingActionCard(ownerDoc, {
-          requestId,
-          action: card,
-        });
-        wrapper.appendChild(cardEl);
-        chatBox.appendChild(wrapper);
-        chatBox.scrollTop = chatBox.scrollHeight;
-      }
-    });
-  };
-
-  /**
-   * Handles execution of a command chip action with optional text params.
-   * Called from the send flow when a command chip is active.
-   */
-  const handleInlineCommand = async (
-    actionName: string,
-    params: string,
-  ): Promise<void> => {
-    // Commands that go through agent chat for full trace visibility
-    if (
-      actionName === "library_statistics" ||
-      actionName === "literature_review"
-    ) {
-      if (getCurrentRuntimeMode() !== "agent" && getAgentModeEnabled()) {
-        setCurrentRuntimeMode("agent");
-      }
-      let prompt: string;
-      if (actionName === "library_statistics") {
-        prompt = params.trim()
-          ? `Show my library statistics: ${params.trim()}`
-          : "Show my library statistics and give me a comprehensive overview.";
-      } else {
-        prompt = params.trim()
-          ? `Conduct a literature review on: ${params.trim()}`
-          : "I'd like to do a literature review.";
-      }
-      // Store command metadata for display formatting in the chat bubble
-      inputBox.dataset.commandAction = actionName;
-      inputBox.dataset.commandParams = params.trim();
-      inputBox.value = prompt;
-      await doSend();
-      return;
-    }
-
-    let allActions: ActionPickerItem[] = [];
-    try {
-      await initAgentSubsystem();
-      allActions = getAgentApi().listActions();
-    } catch {
-      if (status) setStatus(status, "Agent system unavailable", "error");
-      return;
-    }
-
-    const action = allActions.find((a) => a.name === actionName);
-    if (!action) {
-      if (status) setStatus(status, `Unknown action: ${actionName}`, "error");
-      return;
-    }
-
-    let input = parseCommandParams(actionName, params);
-
-    // For organize_unfiled, no scope confirmation needed (always unfiled items)
-    const needsScopeConfirm =
-      actionName !== "organize_unfiled" &&
-      actionName !== "discover_related" &&
-      actionName !== "complete_metadata";
-
-    // If no meaningful params and action needs scope, show HITL confirmation
-    if (needsScopeConfirm && !params.trim()) {
-      const scopeInput = await showScopeConfirmation(actionName);
-      if (!scopeInput) return; // user cancelled
-      input = { ...input, ...scopeInput };
-    }
-
-    void executeAgentAction(action, input);
-  };
-
-  /** Prepends filtered skills into the slash menu (agent mode only). */
-  const renderSkillsInSlashMenu = (query: string = "") => {
-    const list = slashMenu?.querySelector(".llm-action-picker-list");
-    if (!list) return;
-    const ownerDoc = body.ownerDocument;
-    if (!ownerDoc) return;
-
-    // Remove old skill items
-    list
-      .querySelectorAll("[data-slash-skill-item]")
-      .forEach((el: Element) => el.remove());
-
-    const allSkills = getAllSkills();
-    if (!allSkills.length) return;
-
-    const filtered = query
-      ? allSkills.filter(
-          (s: AgentSkill) =>
-            s.id.toLowerCase().includes(query) ||
-            s.description.toLowerCase().includes(query),
-        )
-      : allSkills;
-
-    if (!filtered.length) return;
-
-    // Anchor: the "Base actions" section label (inserted by renderAgentActionsInSlashMenu),
-    // or fall back to the first base item, or list end
-    const baseAnchor =
-      list.querySelector("[data-slash-section='base']") ||
-      list.querySelector("[data-slash-base-item]") ||
-      null;
-
-    const mkSkillEl = (tag: string, cls: string): HTMLElement => {
-      const el = ownerDoc.createElement(tag);
-      el.className = cls;
-      el.setAttribute("data-slash-skill-item", "true");
-      return el;
-    };
-
-    // "Skills" section label
-    const sectionLabel = mkSkillEl("div", "llm-slash-menu-section");
-    sectionLabel.setAttribute("aria-hidden", "true");
-    sectionLabel.textContent = t("Skills");
-    list.insertBefore(sectionLabel, baseAnchor);
-
-    // Skill items
-    filtered.forEach((skill: AgentSkill) => {
-      const btn = mkSkillEl(
-        "button",
-        "llm-action-picker-item",
-      ) as HTMLButtonElement;
-      btn.type = "button";
-      btn.title = skill.description || skill.id;
-
-      const titleEl = ownerDoc.createElement("span");
-      titleEl.className = "llm-action-picker-title";
-      titleEl.textContent = skill.id;
-
-      const descEl = ownerDoc.createElement("span");
-      descEl.className = "llm-action-picker-description";
-      descEl.textContent = skill.description;
-
-      const badgeLabel =
-        skill.source === "system"
-          ? "System"
-          : skill.source === "customized"
-            ? "Customized"
-            : "Personal";
-      const badgeEl = ownerDoc.createElement("span");
-      badgeEl.className = "llm-action-picker-badge";
-      badgeEl.textContent = t(badgeLabel);
-
-      btn.append(titleEl, descEl, badgeEl);
-
-      btn.addEventListener("click", (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        consumeActiveActionToken();
-        closeSlashMenu();
-        handleSkillSelection(skill);
-      });
-
-      list.insertBefore(btn, baseAnchor);
-    });
-  };
-
-  /** Prepends filtered agent actions into the slash menu (agent mode only). */
-  /**
-   * Extracts the first sentence of a description for compact slash-menu
-   * display. Falls back to the first ~80 chars if no sentence boundary is
-   * found. Preserves the full text as a tooltip (set by the caller).
-   */
-  const firstSentence = (text: string): string => {
-    const normalized = text.replace(/\s+/g, " ").trim();
-    if (!normalized) return "";
-    // Match up to and including the first sentence-terminating punctuation
-    // followed by a space or end-of-string.
-    const match = /^(.+?[.!?])(?:\s|$)/.exec(normalized);
-    if (match) return match[1];
-    if (normalized.length <= 80) return normalized;
-    return `${normalized.slice(0, 77).trimEnd()}...`;
-  };
-
-  const renderAgentActionsInSlashMenu = (query: string = "") => {
-    clearAgentSlashItems();
-    const chatMode: "paper" | "library" = isGlobalMode() ? "library" : "paper";
-    let allActions: ActionPickerItem[] = [];
-    try {
-      // initAgentSubsystem is async but listActions only needs the registry
-      // which is set synchronously during init. If not yet initialized,
-      // trigger init (fire-and-forget) and skip this render pass.
-      allActions = getAgentApi().listActions(chatMode);
-    } catch {
-      void initAgentSubsystem()
-        .then(() => {
-          // Re-render after init completes
-          renderAgentActionsInSlashMenu(query);
-        })
-        .catch(() => {});
-      return;
-    }
-    const filtered = query
-      ? allActions.filter(
-          (a) =>
-            a.name.toLowerCase().includes(query) ||
-            a.description.toLowerCase().includes(query),
-        )
-      : allActions;
-    const ownerDoc = body.ownerDocument;
-    const list = slashMenu?.querySelector(".llm-action-picker-list");
-    if (!ownerDoc || !list) return;
-    // Anchor: first static base item (marked in buildUI.ts)
-    const baseAnchor = list.querySelector("[data-slash-base-item]") || null;
-    const mkAgentEl = (tag: string, cls: string): HTMLElement => {
-      const el = ownerDoc.createElement(tag);
-      el.className = cls;
-      el.setAttribute("data-slash-agent-item", "true");
-      return el;
-    };
-    // "Base actions" section label (always shown above static base items)
-    const baseLabel = mkAgentEl("div", "llm-slash-menu-section");
-    baseLabel.setAttribute("aria-hidden", "true");
-    baseLabel.setAttribute("data-slash-section", "base");
-    baseLabel.textContent = t("Base actions");
-    list.insertBefore(baseLabel, baseAnchor);
-    // "Agent actions" section label (at the very top)
-    const agentLabel = mkAgentEl("div", "llm-slash-menu-section");
-    agentLabel.setAttribute("aria-hidden", "true");
-    agentLabel.textContent = t("Agent actions");
-    list.insertBefore(agentLabel, baseLabel);
-    // Agent action items (between agent label and base label)
-    filtered.forEach((action) => {
-      const btn = mkAgentEl(
-        "button",
-        "llm-action-picker-item",
-      ) as HTMLButtonElement;
-      btn.type = "button";
-      btn.title = action.description;
-      const titleEl = ownerDoc.createElement("span");
-      titleEl.className = "llm-action-picker-title";
-      titleEl.textContent = action.name;
-      // Inline description matching the skills menu pattern — single-line
-      // ellipsized via .llm-action-picker-description CSS; hover reveals
-      // the full description via btn.title. We show just the first sentence
-      // because action.description is typically a multi-sentence
-      // paragraph written for the LLM, and single-line truncation on the
-      // full text often cuts mid-word or reveals nothing meaningful.
-      const descEl = ownerDoc.createElement("span");
-      descEl.className = "llm-action-picker-description";
-      descEl.textContent = firstSentence(action.description);
-      btn.append(titleEl, descEl);
-      btn.addEventListener("click", (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        consumeActiveActionToken();
-        closeSlashMenu();
-        void insertCommandToken(action);
-      });
-      list.insertBefore(btn, baseLabel);
-    });
-  };
-
-  /** Selects an action from the (legacy) action picker by index. */
-  const selectActionPickerItem = async (index: number): Promise<void> => {
-    const action = actionPickerItems[index];
-    if (!action) return;
-    consumeActiveActionToken();
-    closeActionPicker();
-    await executeAgentAction(action);
   };
 
   function buildPaperMetaText(paper: {
@@ -8721,10 +6738,11 @@ export function setupHandlers(
     return true;
   };
   const upsertNoteTextContext = (contextItemId: number): boolean => {
+    if (!noteEditingEnabled) return false;
     const textContextKey = getTextContextConversationKey();
     if (!item || !textContextKey) return false;
     const noteItem = Zotero.Items.get(contextItemId) || null;
-    const snapshot = readNoteSnapshot(noteItem);
+    const snapshot = getNotesModule().readNoteSnapshot(noteItem);
     if (!snapshot?.text) {
       if (status) setStatus(status, t("Selected note is empty"), "warning");
       return false;
@@ -8824,18 +6842,6 @@ export function setupHandlers(
     inputBox.value = `${beforeQuery}${afterCaret}`;
     persistDraftInputForCurrentConversation();
     const nextCaret = token.slashStart + 1; // right after "@"
-    inputBox.setSelectionRange(nextCaret, nextCaret);
-    return true;
-  };
-  const consumeActiveSlashToken = (): boolean => consumeActiveAtToken();
-  const consumeActiveActionToken = (): boolean => {
-    const token = getActiveActionToken();
-    if (!token) return false;
-    const beforeSlash = inputBox.value.slice(0, token.slashStart);
-    const afterCaret = inputBox.value.slice(token.caretEnd);
-    inputBox.value = `${beforeSlash}${afterCaret}`;
-    persistDraftInputForCurrentConversation();
-    const nextCaret = beforeSlash.length;
     inputBox.setSelectionRange(nextCaret, nextCaret);
     return true;
   };
@@ -9500,27 +7506,10 @@ export function setupHandlers(
       autoResizeInput();
       persistDraftInputForCurrentConversation();
       schedulePaperPickerSearch();
-      scheduleActionPickerTrigger();
     });
     inputBox.addEventListener("click", () => {
       schedulePaperPickerSearch();
-      scheduleActionPickerTrigger();
     });
-
-    // Command row dismiss button (reuses .llm-paper-context-clear class)
-    const commandRowClearBtn = body.querySelector(
-      "#llm-command-row .llm-paper-context-clear",
-    );
-    if (commandRowClearBtn) {
-      commandRowClearBtn.addEventListener("click", () => {
-        if (forcedSkillId) {
-          clearForcedSkill();
-        } else if (activeCommandAction) {
-          clearCommandChip();
-        }
-        inputBox.focus({ preventScroll: true });
-      });
-    }
 
     inputBox.addEventListener("keyup", (e: Event) => {
       const key = (e as KeyboardEvent).key;
@@ -9533,7 +7522,6 @@ export function setupHandlers(
         return;
       if (key === "Enter" || key === "Tab" || key === "Escape") return;
       schedulePaperPickerSearch();
-      scheduleActionPickerTrigger();
     });
   }
 
@@ -9691,11 +7679,9 @@ export function setupHandlers(
     resolvePromptText,
     buildQuestionWithSelectedTextContexts,
     buildModelPromptWithFileContext,
-    isAgentMode: () => getCurrentRuntimeMode() === "agent",
-    isGlobalMode,
+    isAgentMode: () => false,
     normalizeConversationTitleSeed,
     getConversationKey,
-    touchGlobalConversationTitle,
     touchPaperConversationTitle,
     getSelectedProfile,
     getCurrentModelName: () => getSelectedModelInfo().currentModel,
@@ -9724,40 +7710,12 @@ export function setupHandlers(
       void refreshGlobalHistoryHeader("mutation");
     },
     persistDraftInput: persistDraftInputForCurrentConversation,
-    autoLockGlobalChat: () => {
-      if (!item || !isGlobalMode() || isNoteSession()) return;
-      const ck = conversationKey;
-      if (ck === null) return;
-      const libraryID = getCurrentLibraryID();
-      const existingLock = getLockedGlobalConversationKey(libraryID);
-      if (existingLock) return; // already manually locked — don't override
-      setLockedGlobalConversationKey(libraryID, ck);
-      addAutoLockedGlobalConversationKey(ck);
-      syncConversationIdentity();
-    },
-    autoUnlockGlobalChat: () => {
-      const ck = conversationKey;
-      if (ck === null || !isAutoLockedGlobalConversation(ck)) return;
-      removeAutoLockedGlobalConversationKey(ck);
-      const libraryID = getCurrentLibraryID();
-      const currentLock = getLockedGlobalConversationKey(libraryID);
-      if (currentLock === ck) {
-        setLockedGlobalConversationKey(libraryID, null);
-        syncConversationIdentity();
-      }
-    },
     setStatusMessage: status
       ? (message, level) => {
           setStatus(status, message, level);
         }
       : undefined,
     editStaleStatusText: EDIT_STALE_STATUS_TEXT,
-    consumeForcedSkillIds: () => {
-      if (!forcedSkillId) return undefined;
-      const ids = [forcedSkillId];
-      clearForcedSkill();
-      return ids;
-    },
   });
   const { clearCurrentConversation } = createClearConversationController({
     getConversationKey: () => (item ? getConversationKey(item) : null),
@@ -9785,7 +7743,6 @@ export function setupHandlers(
       return refreshGlobalHistoryHeader("mutation");
     },
     scheduleAttachmentGc,
-    clearAgentToolCaches: clearAllAgentToolCaches,
     setStatusMessage: status
       ? (message, level) => {
           setStatus(status, message, level);
@@ -9827,11 +7784,10 @@ export function setupHandlers(
       const allPaperContexts = normalizePaperContextEntries(
         selectedPaperContextCache.get(currentItem.id) || [],
       );
-      // Agent mode always uses text/MinerU pipeline — it fetches PDF pages on demand
-      const isAgent = getCurrentRuntimeMode() === "agent";
-      const pdfModePapers = isAgent
-        ? []
-        : getEffectivePdfModePaperContexts(currentItem, allPaperContexts);
+      const pdfModePapers = getEffectivePdfModePaperContexts(
+        currentItem,
+        allPaperContexts,
+      );
       const pdfModeKeys = new Set(
         pdfModePapers.map((p) => `${p.itemId}:${p.contextItemId}`),
       );
@@ -10065,7 +8021,7 @@ export function setupHandlers(
       ].slice(0, MAX_SELECTED_IMAGES);
       const selectedReasoning = getSelectedReasoning();
       const advancedParams = getAdvancedModelParams(selectedProfile?.entryId);
-      const targetRuntimeMode = getCurrentRuntimeMode();
+      const targetRuntimeMode = "chat";
       inlineEditCleanup?.();
       setInlineEditCleanup(null);
       setInlineEditInputSection(null, null, null);
@@ -10108,20 +8064,6 @@ export function setupHandlers(
       }
       return;
     }
-    closeActionPicker();
-    // Intercept command chip: if a command chip is active, route to action execution
-    const chipAction = getActiveCommandAction();
-    if (chipAction) {
-      const params = inputBox?.value?.trim() ?? "";
-      clearCommandChip(); // also restores placeholder
-      inputBox.value = "";
-      const EvtCtor2 =
-        (inputBox.ownerDocument?.defaultView as any)?.Event ?? Event;
-      inputBox.dispatchEvent(new EvtCtor2("input", { bubbles: true }));
-      persistDraftInputForCurrentConversation();
-      void handleInlineCommand(chipAction.name, params);
-      return;
-    }
     await doSend();
     persistDraftInputForCurrentConversation();
   };
@@ -10132,26 +8074,6 @@ export function setupHandlers(
     e.stopPropagation();
     void executeSend();
   });
-
-  if (runtimeModeBtn) {
-    runtimeModeBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item) return;
-      const nextMode: ChatRuntimeMode =
-        getCurrentRuntimeMode() === "agent" ? "chat" : "agent";
-      setCurrentRuntimeMode(nextMode);
-      if (status) {
-        setStatus(
-          status,
-          nextMode === "agent"
-            ? t("Agent mode enabled")
-            : t("Chat mode enabled"),
-          "ready",
-        );
-      }
-    });
-  }
 
   // Enter key (Shift+Enter for newline)
   inputBox.addEventListener("keydown", (e: Event) => {
@@ -10188,41 +8110,6 @@ export function setupHandlers(
         e.preventDefault();
         e.stopPropagation();
         selectActiveSlashMenuItem();
-        return;
-      }
-    }
-    if (isActionPickerOpen()) {
-      if (ke.key === "ArrowDown") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (actionPickerItems.length) {
-          actionPickerActiveIndex =
-            (actionPickerActiveIndex + 1) % actionPickerItems.length;
-          renderActionPicker();
-        }
-        return;
-      }
-      if (ke.key === "ArrowUp") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (actionPickerItems.length) {
-          actionPickerActiveIndex =
-            (actionPickerActiveIndex - 1 + actionPickerItems.length) %
-            actionPickerItems.length;
-          renderActionPicker();
-        }
-        return;
-      }
-      if (ke.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        closeActionPicker();
-        return;
-      }
-      if (ke.key === "Enter" || ke.key === "Tab") {
-        e.preventDefault();
-        e.stopPropagation();
-        void selectActionPickerItem(actionPickerActiveIndex);
         return;
       }
     }
@@ -10272,39 +8159,6 @@ export function setupHandlers(
         selectPaperPickerRowAt(paperPickerActiveRowIndex);
         return;
       }
-    }
-    // Backspace at position 0 with active badge: remove it
-    if (
-      ke.key === "Backspace" &&
-      inputBox.selectionStart === 0 &&
-      inputBox.selectionEnd === 0
-    ) {
-      if (forcedSkillId) {
-        e.preventDefault();
-        e.stopPropagation();
-        clearForcedSkill();
-        return;
-      }
-      if (activeCommandAction) {
-        e.preventDefault();
-        e.stopPropagation();
-        clearCommandChip();
-        return;
-      }
-    }
-    // Escape with active skill badge: remove the badge
-    if (ke.key === "Escape" && forcedSkillId) {
-      e.preventDefault();
-      e.stopPropagation();
-      clearForcedSkill();
-      return;
-    }
-    // Escape with active command badge: remove the badge
-    if (ke.key === "Escape" && activeCommandAction) {
-      e.preventDefault();
-      e.stopPropagation();
-      clearCommandChip();
-      return;
     }
     // Up-arrow prompt recall: when input is empty or cursor is at position 0,
     // recall the last user message from the current conversation.
@@ -10740,9 +8594,6 @@ export function setupHandlers(
       closeResponseMenu();
       closePromptMenu();
       closeExportMenu();
-      if (getCurrentRuntimeMode() === "agent") {
-        renderAgentActionsInSlashMenu();
-      }
       openSlashMenuWithSelection();
       uploadBtn.setAttribute("aria-expanded", "true");
     });
@@ -10759,7 +8610,6 @@ export function setupHandlers(
       e.preventDefault();
       e.stopPropagation();
       if (!item) return;
-      consumeActiveActionToken();
       closeSlashMenu();
       uploadInput.click();
     });
@@ -10769,7 +8619,6 @@ export function setupHandlers(
     slashReferenceOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      consumeActiveActionToken();
       closeSlashMenu();
       openReferenceSlashFromMenu();
     });
@@ -10780,7 +8629,6 @@ export function setupHandlers(
       e.preventDefault();
       e.stopPropagation();
       if (!item) return;
-      consumeActiveActionToken();
       closeSlashMenu();
       const { currentModel } = getSelectedModelInfo();
       if (isScreenshotUnsupportedModel(currentModel)) {
@@ -10848,7 +8696,6 @@ export function setupHandlers(
       e.preventDefault();
       e.stopPropagation();
       if (!item) return;
-      consumeActiveActionToken();
       closeSlashMenu();
       const { currentModel } = getSelectedModelInfo();
       if (isScreenshotUnsupportedModel(currentModel)) {
@@ -11100,15 +8947,6 @@ export function setupHandlers(
     });
   }
 
-  if (historyNewMenu) {
-    historyNewMenu.addEventListener("pointerdown", (e: Event) => {
-      e.stopPropagation();
-    });
-    historyNewMenu.addEventListener("mousedown", (e: Event) => {
-      e.stopPropagation();
-    });
-  }
-
   if (historyRowMenu) {
     historyRowMenu.addEventListener("pointerdown", (e: Event) => {
       e.stopPropagation();
@@ -11313,17 +9151,11 @@ export function setupHandlers(
       const promptMenus = Array.from(
         doc.querySelectorAll("#llm-prompt-menu"),
       ) as HTMLDivElement[];
-      const exportMenus = Array.from(
-        doc.querySelectorAll("#llm-export-menu"),
-      ) as HTMLDivElement[];
       const slashMenus = Array.from(
         doc.querySelectorAll("#llm-slash-menu"),
       ) as HTMLDivElement[];
       const historyMenus = Array.from(
         doc.querySelectorAll("#llm-history-menu"),
-      ) as HTMLDivElement[];
-      const historyNewMenus = Array.from(
-        doc.querySelectorAll("#llm-history-new-menu"),
       ) as HTMLDivElement[];
       const historyRowMenus = Array.from(
         doc.querySelectorAll("#llm-history-row-menu"),
@@ -11401,17 +9233,6 @@ export function setupHandlers(
           setPromptMenuTarget(null);
         }
 
-        for (const exportMenuEl of exportMenus) {
-          if (exportMenuEl.style.display === "none") continue;
-          if (target && exportMenuEl.contains(target)) continue;
-          const panelRoot = exportMenuEl.closest("#llm-main");
-          const exportButtonEl = panelRoot?.querySelector(
-            "#llm-export",
-          ) as HTMLButtonElement | null;
-          if (target && exportButtonEl?.contains(target)) continue;
-          exportMenuEl.style.display = "none";
-        }
-
         for (const slashMenuEl of slashMenus) {
           if (slashMenuEl.style.display === "none") continue;
           if (target && slashMenuEl.contains(target)) continue;
@@ -11438,18 +9259,6 @@ export function setupHandlers(
           if (target && historyNewEl?.contains(target)) continue;
           historyMenuEl.style.display = "none";
           historyToggleEl?.setAttribute("aria-expanded", "false");
-        }
-
-        for (const historyNewMenuEl of historyNewMenus) {
-          if (historyNewMenuEl.style.display === "none") continue;
-          if (target && historyNewMenuEl.contains(target)) continue;
-          const panelRoot = historyNewMenuEl.closest("#llm-main");
-          const historyNewEl = panelRoot?.querySelector(
-            "#llm-history-new",
-          ) as HTMLButtonElement | null;
-          if (target && historyNewEl?.contains(target)) continue;
-          historyNewMenuEl.style.display = "none";
-          historyNewEl?.setAttribute("aria-expanded", "false");
         }
 
         for (const historyRowMenuEl of historyRowMenus) {
@@ -11908,19 +9717,6 @@ export function setupHandlers(
         currentSource,
         mineruAvailable,
       );
-      // Warn (but allow) PDF mode in agent mode — Agent normally reads pages on demand
-      if (nextSource === "pdf" && getCurrentRuntimeMode() === "agent") {
-        if (status) {
-          setStatus(
-            status,
-            t(
-              "Agent mode normally reads PDF pages on demand. Forcing full PDF mode.",
-            ),
-            "warning",
-          );
-        }
-        // Fall through — allow the mode change
-      }
       // Block PDF mode for models that don't support it (e.g., Copilot)
       if (nextSource === "pdf") {
         const selectedProfile = getSelectedProfile();

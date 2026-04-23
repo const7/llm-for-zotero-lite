@@ -64,6 +64,20 @@ describe("chatRenderWindow", function () {
     );
   });
 
+  it("clamps an existing window start index when history shrinks", function () {
+    assert.equal(
+      resolveChatRenderStartIndex({
+        historyLength: 10,
+        existingConversationKey: 42,
+        conversationKey: 42,
+        existingStartIndex: 10,
+        hasExistingRenderedContent: true,
+        scrollMode: "followBottom",
+      }),
+      9,
+    );
+  });
+
   it("backfills older messages in fixed-size batches", function () {
     assert.equal(
       getNextBackfillStartIndex(60),

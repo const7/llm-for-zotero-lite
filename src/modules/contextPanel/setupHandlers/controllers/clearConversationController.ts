@@ -18,7 +18,6 @@ type ClearConversationControllerDeps = {
   refreshChatPreservingScroll: () => void;
   refreshGlobalHistoryHeader: () => void | Promise<void>;
   scheduleAttachmentGc: () => void;
-  clearAgentToolCaches?: (conversationKey: number) => void;
   setStatusMessage?: (message: string, level: StatusLevel) => void;
   logError?: (message: string, error: unknown) => void;
   isWebChatActive?: () => boolean; // [webchat]
@@ -50,7 +49,6 @@ export function createClearConversationController(
     deps.clearTransientComposeStateForItem(normalizedItemID);
     deps.resetConversationHistory(normalizedConversationKey);
     deps.markConversationLoaded(normalizedConversationKey);
-    deps.clearAgentToolCaches?.(normalizedConversationKey);
     deps.resetComposePreviewUI();
 
     try {

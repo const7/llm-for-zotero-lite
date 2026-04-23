@@ -5,8 +5,6 @@ import {
   resolveInitialPanelItemState,
 } from "../src/modules/contextPanel/portalScope";
 import {
-  activeConversationModeByLibrary,
-  activeGlobalConversationByLibrary,
   activePaperConversationByPaper,
 } from "../src/modules/contextPanel/state";
 
@@ -28,8 +26,6 @@ describe("portalScope resolveInitialPanelItemState", function () {
   });
 
   beforeEach(function () {
-    activeConversationModeByLibrary.clear();
-    activeGlobalConversationByLibrary.clear();
     activePaperConversationByPaper.clear();
     itemsById.clear();
   });
@@ -42,9 +38,6 @@ describe("portalScope resolveInitialPanelItemState", function () {
       isAttachment: () => false,
       isRegularItem: () => true,
     } as unknown as Zotero.Item;
-
-    activeConversationModeByLibrary.set(7, "global");
-    activeGlobalConversationByLibrary.set(7, 9001);
 
     const resolved = resolveInitialPanelItemState(paperItem);
 

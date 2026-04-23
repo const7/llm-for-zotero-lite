@@ -7,28 +7,19 @@ export type PanelDomRefs = {
   modelSlot: HTMLDivElement | null;
   modelMenu: HTMLDivElement | null;
   reasoningBtn: HTMLButtonElement | null;
-  runtimeModeBtn: HTMLButtonElement | null;
   reasoningSlot: HTMLDivElement | null;
   reasoningMenu: HTMLDivElement | null;
   actionsRow: HTMLDivElement | null;
   actionsLeft: HTMLDivElement | null;
   actionsRight: HTMLDivElement | null;
-  popoutBtn: HTMLButtonElement | null;
   settingsBtn: HTMLButtonElement | null;
-  exportBtn: HTMLButtonElement | null;
   clearBtn: HTMLButtonElement | null;
   titleStatic: HTMLDivElement | null;
   historyBar: HTMLDivElement | null;
   historyNewBtn: HTMLButtonElement | null;
-  historyNewMenu: HTMLDivElement | null;
-  historyNewOpenBtn: HTMLButtonElement | null;
-  historyNewPaperBtn: HTMLButtonElement | null;
   historyToggleBtn: HTMLButtonElement | null;
   historyModeIndicator: HTMLButtonElement | null;
   historyMenu: HTMLDivElement | null;
-  modeCapsule: HTMLElement | null;
-  modeChipBtn: HTMLButtonElement | null;
-  modeLockBtn: HTMLElement | null;
   historyRowMenu: HTMLDivElement | null;
   historyRowRenameBtn: HTMLButtonElement | null;
   historyUndo: HTMLDivElement | null;
@@ -60,20 +51,11 @@ export type PanelDomRefs = {
   paperPreviewList: HTMLDivElement | null;
   paperPicker: HTMLDivElement | null;
   paperPickerList: HTMLDivElement | null;
-  actionPicker: HTMLDivElement | null;
-  actionPickerList: HTMLDivElement | null;
-  actionHitlPanel: HTMLDivElement | null;
-  commandRow: HTMLDivElement | null;
-  commandRowBadge: HTMLSpanElement | null;
   responseMenu: HTMLDivElement | null;
   responseMenuCopyBtn: HTMLButtonElement | null;
-  responseMenuNoteBtn: HTMLButtonElement | null;
   responseMenuDeleteBtn: HTMLButtonElement | null;
   promptMenu: HTMLDivElement | null;
   promptMenuDeleteBtn: HTMLButtonElement | null;
-  exportMenu: HTMLDivElement | null;
-  exportMenuCopyBtn: HTMLButtonElement | null;
-  exportMenuNoteBtn: HTMLButtonElement | null;
   retryModelMenu: HTMLDivElement | null;
   status: HTMLElement | null;
   tokenUsageEl: HTMLElement | null;
@@ -99,9 +81,6 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     reasoningBtn: body.querySelector(
       "#llm-reasoning-toggle",
     ) as HTMLButtonElement | null,
-    runtimeModeBtn: body.querySelector(
-      "#llm-runtime-mode-toggle",
-    ) as HTMLButtonElement | null,
     reasoningSlot: body.querySelector(
       "#llm-reasoning-dropdown",
     ) as HTMLDivElement | null,
@@ -115,9 +94,7 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     actionsRight: body.querySelector(
       ".llm-actions-right",
     ) as HTMLDivElement | null,
-    popoutBtn: body.querySelector("#llm-popout") as HTMLButtonElement | null,
     settingsBtn: body.querySelector("#llm-settings") as HTMLButtonElement | null,
-    exportBtn: body.querySelector("#llm-export") as HTMLButtonElement | null,
     clearBtn: body.querySelector("#llm-clear") as HTMLButtonElement | null,
     titleStatic: body.querySelector(
       "#llm-title-static",
@@ -126,30 +103,12 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     historyNewBtn: body.querySelector(
       "#llm-history-new",
     ) as HTMLButtonElement | null,
-    historyNewMenu: body.querySelector(
-      "#llm-history-new-menu",
-    ) as HTMLDivElement | null,
-    historyNewOpenBtn: body.querySelector(
-      "#llm-history-new-open",
-    ) as HTMLButtonElement | null,
-    historyNewPaperBtn: body.querySelector(
-      "#llm-history-new-paper",
-    ) as HTMLButtonElement | null,
     historyToggleBtn: body.querySelector(
       "#llm-history-toggle",
     ) as HTMLButtonElement | null,
     historyModeIndicator: body.querySelector(
       "#llm-history-toggle",
     ) as HTMLButtonElement | null,
-    modeCapsule: body.querySelector(
-      "#llm-mode-capsule",
-    ) as HTMLElement | null,
-    modeChipBtn: body.querySelector(
-      "#llm-mode-chip",
-    ) as HTMLButtonElement | null,
-    modeLockBtn: body.querySelector(
-      "#llm-mode-lock",
-    ) as HTMLElement | null,
     historyMenu: body.querySelector(
       "#llm-history-menu",
     ) as HTMLDivElement | null,
@@ -244,29 +203,11 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     paperPickerList: body.querySelector(
       "#llm-paper-picker-list",
     ) as HTMLDivElement | null,
-    actionPicker: body.querySelector(
-      "#llm-action-picker",
-    ) as HTMLDivElement | null,
-    actionPickerList: body.querySelector(
-      "#llm-action-picker-list",
-    ) as HTMLDivElement | null,
-    actionHitlPanel: body.querySelector(
-      "#llm-action-hitl-panel",
-    ) as HTMLDivElement | null,
-    commandRow: body.querySelector(
-      "#llm-command-row",
-    ) as HTMLDivElement | null,
-    commandRowBadge: body.querySelector(
-      "#llm-command-row-badge",
-    ) as HTMLSpanElement | null,
     responseMenu: body.querySelector(
       "#llm-response-menu",
     ) as HTMLDivElement | null,
     responseMenuCopyBtn: body.querySelector(
       "#llm-response-menu-copy",
-    ) as HTMLButtonElement | null,
-    responseMenuNoteBtn: body.querySelector(
-      "#llm-response-menu-note",
     ) as HTMLButtonElement | null,
     responseMenuDeleteBtn: body.querySelector(
       "#llm-response-menu-delete",
@@ -274,13 +215,6 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     promptMenu: body.querySelector("#llm-prompt-menu") as HTMLDivElement | null,
     promptMenuDeleteBtn: body.querySelector(
       "#llm-prompt-menu-delete",
-    ) as HTMLButtonElement | null,
-    exportMenu: body.querySelector("#llm-export-menu") as HTMLDivElement | null,
-    exportMenuCopyBtn: body.querySelector(
-      "#llm-export-copy",
-    ) as HTMLButtonElement | null,
-    exportMenuNoteBtn: body.querySelector(
-      "#llm-export-note",
     ) as HTMLButtonElement | null,
     retryModelMenu: body.querySelector(
       "#llm-retry-model-menu",

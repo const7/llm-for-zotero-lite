@@ -16,7 +16,7 @@ export function resolveChatRenderStartIndex(params: {
 
   const existingStartIndex = Math.max(
     0,
-    Math.min(historyLength, Math.floor(params.existingStartIndex || 0)),
+    Math.min(historyLength - 1, Math.floor(params.existingStartIndex || 0)),
   );
   if (
     params.existingConversationKey === params.conversationKey &&
