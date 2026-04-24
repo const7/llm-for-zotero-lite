@@ -146,6 +146,7 @@ import {
   setSelectedTextExpandedIndex,
 } from "./contextResolution";
 import { buildUI } from "./buildUI";
+import { renderShortcuts } from "./shortcuts";
 import {
   flashPageInLivePdfReader,
   resolveCurrentSelectionPageLocationFromReader,
@@ -414,6 +415,7 @@ export function setupHandlers(
   panelRoot.dataset.handlersAttached = thisGen;
 
   activeContextPanels.set(body, () => item);
+  void renderShortcuts(body, item);
 
   // Disconnect previous ResizeObservers to prevent accumulation across
   // successive setupHandlers calls (each call creates fresh observers).

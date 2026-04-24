@@ -473,6 +473,63 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   composeArea.appendChild(paperPicker);
   composeArea.appendChild(slashMenu);
 
+  const shortcuts = createElement(doc, "div", "llm-shortcuts", {
+    id: "llm-shortcuts",
+  });
+  composeArea.appendChild(shortcuts);
+
+  const shortcutMenu = createElement(doc, "div", "llm-shortcut-menu", {
+    id: "llm-shortcut-menu",
+  });
+  shortcutMenu.style.display = "none";
+  const shortcutMenuEdit = createElement(
+    doc,
+    "button",
+    "llm-shortcut-menu-item",
+    {
+      id: "llm-shortcut-menu-edit",
+      type: "button",
+      textContent: t("Edit"),
+    },
+  );
+  const shortcutMenuDelete = createElement(
+    doc,
+    "button",
+    "llm-shortcut-menu-item",
+    {
+      id: "llm-shortcut-menu-delete",
+      type: "button",
+      textContent: t("Delete"),
+    },
+  );
+  const shortcutMenuAdd = createElement(
+    doc,
+    "button",
+    "llm-shortcut-menu-item",
+    {
+      id: "llm-shortcut-menu-add",
+      type: "button",
+      textContent: t("Add"),
+    },
+  );
+  const shortcutMenuReset = createElement(
+    doc,
+    "button",
+    "llm-shortcut-menu-item",
+    {
+      id: "llm-shortcut-menu-reset",
+      type: "button",
+      textContent: t("Reset"),
+    },
+  );
+  shortcutMenu.append(
+    shortcutMenuEdit,
+    shortcutMenuDelete,
+    shortcutMenuAdd,
+    shortcutMenuReset,
+  );
+  composeArea.appendChild(shortcutMenu);
+
   const inputBox = createElement(doc, "textarea", "llm-input", {
     id: "llm-input",
     placeholder: hasItem

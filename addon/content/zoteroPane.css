@@ -679,10 +679,6 @@
   display: none;
 }
 
-[data-start-page-active="true"][data-conversation-kind="global"] .llm-shortcuts {
-  display: none;
-}
-
 [data-start-page-active="true"] .llm-status-bar {
   display: none;
 }
@@ -880,7 +876,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 2px 0;
+  padding: 0;
+  min-height: 0;
 }
 
 .llm-shortcut-btn {
@@ -916,46 +913,6 @@
 .llm-shortcut-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.llm-shortcut-move-mode {
-  justify-content: flex-start;
-  gap: 6px;
-}
-
-.llm-shortcut-label {
-  display: inline-block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.llm-shortcut-drag-handle {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  color: var(--fill-tertiary);
-  font-weight: 700;
-  line-height: 1;
-  user-select: none;
-  cursor: grab;
-}
-
-.llm-shortcut-drag-handle:active {
-  cursor: grabbing;
-}
-
-.llm-shortcut-dragging {
-  opacity: 0.45;
-  cursor: grabbing;
-}
-
-.llm-shortcut-drop-target {
-  background: var(--color-accent10);
-  border-color: var(--color-accent);
 }
 
 .llm-shortcut-menu,
