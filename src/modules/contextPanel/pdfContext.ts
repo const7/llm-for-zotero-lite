@@ -24,7 +24,6 @@ import {
   formatPaperCitationLabel,
   formatPaperSourceLabel,
 } from "./paperAttribution";
-import { readNoteSnapshot } from "./notes";
 import { pdfTextCache, pdfTextLoadingTasks } from "./state";
 import { readCachedMineruMd, ensureManifest } from "./mineruCache";
 import type { MineruManifest, ManifestSection } from "./mineruCache";
@@ -267,70 +266,6 @@ export async function ensurePDFTextCached(item: Zotero.Item): Promise<void> {
   await task;
 }
 
-async function cacheNoteText(item: Zotero.Item) {
-  if (pdfTextCache.has(item.id)) return;
-  try {
-    const snapshot = readNoteSnapshot(item);
-    const text = snapshot?.text || "";
-    const title = sanitizePdfText(snapshot?.title || text.split("\n")[0] || "").slice(0, 120);
-    if (text) {
-      const chunks = splitIntoChunks(text, CHUNK_TARGET_LENGTH);
-      const chunkMeta = buildChunkMetadata(chunks);
-      const { chunkStats, docFreq, avgChunkLength } = buildChunkIndex(chunks);
-      pdfTextCache.set(item.id, {
-        title,
-        chunks,
-        chunkMeta,
-        chunkStats,
-        docFreq,
-        avgChunkLength,
-        fullLength: text.length,
-
-      });
-    } else {
-      pdfTextCache.set(item.id, {
-        title,
-        chunks: [],
-        chunkMeta: [],
-        chunkStats: [],
-        docFreq: {},
-        avgChunkLength: 0,
-        fullLength: 0,
-
-      });
-    }
-  } catch (e) {
-    ztoolkit.log("Error caching note:", e);
-    pdfTextCache.set(item.id, {
-      title: "",
-      chunks: [],
-      chunkMeta: [],
-      chunkStats: [],
-      docFreq: {},
-      avgChunkLength: 0,
-      fullLength: 0,
-
-    });
-  }
-}
-
-export async function ensureNoteTextCached(item: Zotero.Item): Promise<void> {
-  if (pdfTextCache.has(item.id)) return;
-  const existingTask = pdfTextLoadingTasks.get(item.id);
-  if (existingTask) {
-    await existingTask;
-    return;
-  }
-  const task = (async () => {
-    try {
-      await cacheNoteText(item);
-    } finally {
-      pdfTextLoadingTasks.delete(item.id);
-    }
-  })();
-  pdfTextLoadingTasks.set(item.id, task);
-  await task;
-}
 
 /**
  * Reset embedding failure markers on all cached PdfContexts.

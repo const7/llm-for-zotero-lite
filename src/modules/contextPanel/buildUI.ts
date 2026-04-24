@@ -11,10 +11,7 @@ import {
 import type { ActionDropdownSpec } from "./types";
 import {
   getPaperPortalBaseItemID,
-  isGlobalPortalItem,
   isPaperPortalItem,
-  resolveActiveNoteSession,
-  resolveDisplayConversationKind,
 } from "./portalScope";
 
 function createActionDropdown(doc: Document, spec: ActionDropdownSpec) {
@@ -46,11 +43,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   }
   const doc = body.ownerDocument!;
   const hasItem = Boolean(item);
-  const activeNoteSession = resolveActiveNoteSession(item);
-  const displayConversationKind = resolveDisplayConversationKind(item);
-  const isGlobalMode = displayConversationKind === "global";
-  const isPaperMode = displayConversationKind === "paper";
-  const isStandaloneBody = (body as HTMLElement).dataset?.standalone === "true";
+  const isPaperMode = hasItem;
   const conversationItemId =
     hasItem && item
       ? item.isAttachment() && item.parentID
@@ -59,14 +52,13 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       : 0;
   const basePaperItemId =
     hasItem && item
-      ? activeNoteSession?.parentItemId ||
-        (isPaperPortalItem(item)
+      ? isPaperPortalItem(item)
         ? getPaperPortalBaseItemID(item) || 0
         : item.isAttachment() && item.parentID
           ? item.parentID
           : isPaperMode
             ? item.id
-            : 0)
+            : 0
       : 0;
   const hasPaperContext = basePaperItemId > 0;
 
@@ -89,21 +81,9 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   container.dataset.itemId =
     conversationItemId > 0 ? `${conversationItemId}` : "";
   container.dataset.libraryId = hasItem && item ? `${item.libraryID}` : "";
-  container.dataset.conversationKind = hasItem
-    ? isGlobalMode
-      ? "global"
-      : "paper"
-    : "";
+  container.dataset.conversationKind = hasItem ? "paper" : "";
   container.dataset.basePaperItemId =
     basePaperItemId > 0 ? `${basePaperItemId}` : "";
-  container.dataset.noteKind = activeNoteSession?.noteKind || "";
-  container.dataset.noteId = activeNoteSession?.noteId
-    ? `${activeNoteSession.noteId}`
-    : "";
-  container.dataset.noteTitle = activeNoteSession?.title || "";
-  container.dataset.noteParentItemId = activeNoteSession?.parentItemId
-    ? `${activeNoteSession.parentItemId}`
-    : "";
 
   // Header section
   const header = createElement(doc, "div", "llm-header");
@@ -134,7 +114,6 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     title: t("Start a new chat"),
   });
   historyNewBtn.setAttribute("aria-label", t("Start a new chat"));
-  historyNewBtn.style.display = activeNoteSession ? "none" : "";
 
   // History toggle button (clock icon)
   const historyToggle = createElement(doc, "button", "llm-history-toggle", {
@@ -145,7 +124,6 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   historyToggle.setAttribute("aria-label", t("Conversation history"));
   historyToggle.setAttribute("aria-haspopup", "menu");
   historyToggle.setAttribute("aria-expanded", "false");
-  historyToggle.style.display = activeNoteSession ? "none" : "";
 
   historyBar.append(historyNewBtn, historyToggle);
 
@@ -498,9 +476,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   const inputBox = createElement(doc, "textarea", "llm-input", {
     id: "llm-input",
     placeholder: hasItem
-      ? isGlobalMode
-        ? t("Ask anything...")
-        : t("Ask about this paper...")
+      ? t("Ask about this paper...")
       : t("Open a PDF first"),
     disabled: !hasItem,
   });
@@ -624,9 +600,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   const statusLine = createElement(doc, "div", "llm-status", {
     id: "llm-status",
     textContent: hasItem
-      ? isGlobalMode
-        ? t("No active paper context. Type / to add papers.")
-        : t("Ready")
+      ? t("Ready")
       : t("Select an item or open a PDF"),
   });
   const tokenUsage = createElement(doc, "span", "llm-token-usage", {
@@ -641,11 +615,6 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     modelDropdown,
     reasoningDropdown,
   );
-  // Hide PDF-reader-specific buttons in standalone library chat
-  if (isStandaloneBody && isGlobalMode) {
-    selectTextSlot.style.display = "none";
-    screenshotSlot.style.display = "none";
-  }
   actionsRight.append(sendSlot);
   actionsRow.append(actionsLeft, actionsRight);
   composeArea.appendChild(actionsRow);

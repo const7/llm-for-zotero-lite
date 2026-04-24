@@ -17,7 +17,7 @@ describe("assistantCitationLinks", function () {
     clearCachedCitationPagesForTests();
   });
 
-  it("extracts a standalone paper source label from a citation line", function () {
+  it("extracts a paper source label from a citation line", function () {
     const extracted = extractStandalonePaperSourceLabel(
       " (Smith et al., 2024) ",
     );
@@ -41,7 +41,7 @@ describe("assistantCitationLinks", function () {
     assert.equal(mentions[0]?.extractedCitation.citationLabel, "Kossio et al");
   });
 
-  it("rejects non-standalone citation lines", function () {
+  it("rejects non-citation lines", function () {
     assert.isNull(
       extractStandalonePaperSourceLabel(
         "According to (Smith et al., 2024), the effect was strong.",

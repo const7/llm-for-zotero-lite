@@ -1,16 +1,10 @@
 import type {
-  NoteContextRef,
   SelectedTextSource,
   PaperContextRef,
-  GlobalConversationSummary,
   PaperConversationSummary,
 } from "../shared/types";
+import { PAPER_CONVERSATION_KEY_BASE } from "../modules/contextPanel/constants";
 import {
-  GLOBAL_CONVERSATION_KEY_BASE,
-  PAPER_CONVERSATION_KEY_BASE,
-} from "../modules/contextPanel/constants";
-import {
-  normalizeSelectedTextNoteContexts,
   normalizeSelectedTextPaperContexts,
   normalizeSelectedTextSource,
   normalizePaperContextRefs,
@@ -21,13 +15,10 @@ export type StoredChatMessage = {
   role: "user" | "assistant";
   text: string;
   timestamp: number;
-  runMode?: "chat" | "agent";
-  agentRunId?: string;
   selectedText?: string;
   selectedTexts?: string[];
   selectedTextSources?: SelectedTextSource[];
   selectedTextPaperContexts?: (PaperContextRef | undefined)[];
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
   paperContexts?: PaperContextRef[];
   fullTextPaperContexts?: PaperContextRef[];
   screenshotImages?: string[];
@@ -60,9 +51,6 @@ export type StoredChatMessage = {
 
 const CHAT_MESSAGES_TABLE = "llm_for_zotero_chat_messages";
 const CHAT_MESSAGES_INDEX = "llm_for_zotero_chat_messages_conversation_idx";
-const GLOBAL_CONVERSATIONS_TABLE = "llm_for_zotero_global_conversations";
-const GLOBAL_CONVERSATIONS_LIBRARY_INDEX =
-  "llm_for_zotero_global_conversations_library_idx";
 const PAPER_CONVERSATIONS_TABLE = "llm_for_zotero_paper_conversations";
 const PAPER_CONVERSATIONS_PAPER_INDEX =
   "llm_for_zotero_paper_conversations_paper_idx";
@@ -184,52 +172,6 @@ function normalizeCatalogTimestamp(value: unknown): number {
   return Math.floor(parsed);
 }
 
-async function reconcileGlobalConversationCatalog(): Promise<void> {
-  const libraryID = resolveUserLibraryID();
-  const rows = (await Zotero.DB.queryAsync(
-    `SELECT m.conversation_key AS conversationKey,
-            MIN(m.timestamp) AS createdAt,
-            (
-              SELECT m0.text
-              FROM ${CHAT_MESSAGES_TABLE} m0
-              WHERE m0.conversation_key = m.conversation_key
-                AND m0.role = 'user'
-              ORDER BY m0.timestamp ASC, m0.id ASC
-              LIMIT 1
-            ) AS title
-     FROM ${CHAT_MESSAGES_TABLE} m
-     LEFT JOIN ${GLOBAL_CONVERSATIONS_TABLE} gc
-       ON gc.conversation_key = m.conversation_key
-     WHERE m.conversation_key >= ?
-       AND gc.conversation_key IS NULL
-     GROUP BY m.conversation_key
-     ORDER BY m.conversation_key ASC`,
-    [GLOBAL_CONVERSATION_KEY_BASE],
-  )) as ConversationCatalogSeedRow[] | undefined;
-
-  for (const row of rows || []) {
-    const conversationKey = normalizeConversationKey(
-      Number(row.conversationKey),
-    );
-    if (!conversationKey) continue;
-    const title =
-      typeof row.title === "string" && row.title.trim()
-        ? normalizeConversationTitleSeed(row.title)
-        : "";
-    await Zotero.DB.queryAsync(
-      `INSERT OR IGNORE INTO ${GLOBAL_CONVERSATIONS_TABLE}
-        (conversation_key, library_id, created_at, title)
-       VALUES (?, ?, ?, ?)`,
-      [
-        conversationKey,
-        libraryID,
-        normalizeCatalogTimestamp(row.createdAt),
-        title || null,
-      ],
-    );
-  }
-}
-
 async function reconcileLegacyPaperV1ConversationCatalog(): Promise<void> {
   const rows = (await Zotero.DB.queryAsync(
     `SELECT m.conversation_key AS conversationKey,
@@ -279,11 +221,6 @@ async function reconcileLegacyPaperV1ConversationCatalog(): Promise<void> {
       ],
     );
   }
-}
-
-export async function reconcileConversationCatalogs(): Promise<void> {
-  await reconcileGlobalConversationCatalog();
-  await reconcileLegacyPaperV1ConversationCatalog();
 }
 
 export async function initChatStore(): Promise<void> {
@@ -478,20 +415,6 @@ export async function initChatStore(): Promise<void> {
     );
 
     await Zotero.DB.queryAsync(
-      `CREATE TABLE IF NOT EXISTS ${GLOBAL_CONVERSATIONS_TABLE} (
-        conversation_key INTEGER PRIMARY KEY,
-        library_id INTEGER NOT NULL,
-        created_at INTEGER NOT NULL,
-        title TEXT
-      )`,
-    );
-
-    await Zotero.DB.queryAsync(
-      `CREATE INDEX IF NOT EXISTS ${GLOBAL_CONVERSATIONS_LIBRARY_INDEX}
-       ON ${GLOBAL_CONVERSATIONS_TABLE} (library_id, created_at DESC, conversation_key DESC)`,
-    );
-
-    await Zotero.DB.queryAsync(
       `CREATE TABLE IF NOT EXISTS ${PAPER_CONVERSATIONS_TABLE} (
         conversation_key INTEGER PRIMARY KEY,
         library_id INTEGER NOT NULL,
@@ -526,7 +449,7 @@ export async function initChatStore(): Promise<void> {
        ON ${PAPER_CONVERSATIONS_TABLE} (conversation_key, paper_item_id, session_version)`,
     );
 
-    await reconcileConversationCatalogs();
+    await reconcileLegacyPaperV1ConversationCatalog();
     await initRememberedPaperConversationStore();
   });
 }
@@ -543,13 +466,10 @@ export async function loadConversation(
     `SELECT role,
             text,
             timestamp,
-            run_mode AS runMode,
-            agent_run_id AS agentRunId,
             selected_text AS selectedText,
             selected_texts_json AS selectedTextsJson,
             selected_text_sources_json AS selectedTextSourcesJson,
             selected_text_paper_contexts_json AS selectedTextPaperContextsJson,
-            selected_text_note_contexts_json AS selectedTextNoteContextsJson,
             paper_contexts_json AS paperContextsJson,
             full_text_paper_contexts_json AS fullTextPaperContextsJson,
             screenshot_images AS screenshotImages,
@@ -569,16 +489,13 @@ export async function loadConversation(
   )) as
     | Array<{
         role: unknown;
-        text: unknown;
-        timestamp: unknown;
-        selectedText?: unknown;
-        runMode?: unknown;
-        agentRunId?: unknown;
-        selectedTextsJson?: unknown;
-        selectedTextSourcesJson?: unknown;
-        selectedTextPaperContextsJson?: unknown;
-        selectedTextNoteContextsJson?: unknown;
-        paperContextsJson?: unknown;
+      text: unknown;
+      timestamp: unknown;
+      selectedText?: unknown;
+      selectedTextsJson?: unknown;
+      selectedTextSourcesJson?: unknown;
+      selectedTextPaperContextsJson?: unknown;
+      paperContextsJson?: unknown;
         fullTextPaperContextsJson?: unknown;
         screenshotImages?: unknown;
         attachmentsJson?: unknown;
@@ -659,24 +576,6 @@ export async function loadConversation(
         }
       } catch (_err) {
         selectedTextPaperContexts = undefined;
-      }
-    }
-    let selectedTextNoteContexts: (NoteContextRef | undefined)[] | undefined;
-    if (
-      typeof row.selectedTextNoteContextsJson === "string" &&
-      row.selectedTextNoteContextsJson
-    ) {
-      try {
-        const parsed = JSON.parse(row.selectedTextNoteContextsJson) as unknown;
-        const normalized = normalizeSelectedTextNoteContexts(
-          parsed,
-          normalizedTexts.length,
-        );
-        if (normalized.some((entry) => Boolean(entry))) {
-          selectedTextNoteContexts = normalized;
-        }
-      } catch (_err) {
-        selectedTextNoteContexts = undefined;
       }
     }
     let paperContexts: PaperContextRef[] | undefined;
@@ -806,16 +705,6 @@ export async function loadConversation(
       role,
       text: typeof row.text === "string" ? row.text : "",
       timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(),
-      runMode:
-        row.runMode === "agent"
-          ? "agent"
-          : row.runMode === "chat"
-            ? "chat"
-            : undefined,
-      agentRunId:
-        typeof row.agentRunId === "string" && row.agentRunId.trim()
-          ? row.agentRunId.trim()
-          : undefined,
       selectedText:
         typeof row.selectedText === "string" ? row.selectedText : undefined,
       selectedTexts: normalizedTexts.length ? normalizedTexts : undefined,
@@ -826,7 +715,6 @@ export async function loadConversation(
         );
       })(),
       selectedTextPaperContexts,
-      selectedTextNoteContexts,
       paperContexts,
       fullTextPaperContexts,
       screenshotImages,
@@ -888,10 +776,6 @@ export async function appendMessage(
     message.selectedTextPaperContexts,
     selectedTexts.length,
   );
-  const selectedTextNoteContexts = normalizeSelectedTextNoteContexts(
-    message.selectedTextNoteContexts,
-    selectedTexts.length,
-  );
   const paperContexts = normalizePaperContextRefs(message.paperContexts);
   const fullTextPaperContexts = normalizePaperContextRefs(
     message.fullTextPaperContexts,
@@ -919,23 +803,18 @@ export async function appendMessage(
     : [];
   await Zotero.DB.queryAsync(
     `INSERT INTO ${CHAT_MESSAGES_TABLE}
-      (conversation_key, role, text, timestamp, run_mode, agent_run_id, selected_text, selected_texts_json, selected_text_sources_json, selected_text_paper_contexts_json, selected_text_note_contexts_json, paper_contexts_json, full_text_paper_contexts_json, screenshot_images, attachments_json, model_name, model_entry_id, model_provider_label, webchat_run_state, webchat_completion_reason, reasoning_summary, reasoning_details)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (conversation_key, role, text, timestamp, selected_text, selected_texts_json, selected_text_sources_json, selected_text_paper_contexts_json, paper_contexts_json, full_text_paper_contexts_json, screenshot_images, attachments_json, model_name, model_entry_id, model_provider_label, webchat_run_state, webchat_completion_reason, reasoning_summary, reasoning_details)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       normalizedKey,
       message.role,
       message.text,
       Number.isFinite(timestamp) ? Math.floor(timestamp) : Date.now(),
-      message.runMode || null,
-      message.agentRunId || null,
       selectedTexts[0] || message.selectedText || null,
       selectedTexts.length ? JSON.stringify(selectedTexts) : null,
       selectedTextSources.length ? JSON.stringify(selectedTextSources) : null,
       selectedTextPaperContexts.some((entry) => Boolean(entry))
         ? JSON.stringify(selectedTextPaperContexts)
-        : null,
-      selectedTextNoteContexts.some((entry) => Boolean(entry))
-        ? JSON.stringify(selectedTextNoteContexts)
         : null,
       paperContexts.length ? JSON.stringify(paperContexts) : null,
       fullTextPaperContexts.length
@@ -960,13 +839,10 @@ export async function updateLatestUserMessage(
     StoredChatMessage,
     | "text"
     | "timestamp"
-    | "runMode"
-    | "agentRunId"
     | "selectedText"
     | "selectedTexts"
     | "selectedTextSources"
     | "selectedTextPaperContexts"
-    | "selectedTextNoteContexts"
     | "paperContexts"
     | "fullTextPaperContexts"
     | "screenshotImages"
@@ -990,10 +866,6 @@ export async function updateLatestUserMessage(
   );
   const selectedTextPaperContexts = normalizeSelectedTextPaperContexts(
     message.selectedTextPaperContexts,
-    selectedTexts.length,
-  );
-  const selectedTextNoteContexts = normalizeSelectedTextNoteContexts(
-    message.selectedTextNoteContexts,
     selectedTexts.length,
   );
   const paperContexts = normalizePaperContextRefs(message.paperContexts);
@@ -1026,13 +898,10 @@ export async function updateLatestUserMessage(
     `UPDATE ${CHAT_MESSAGES_TABLE}
      SET text = ?,
          timestamp = ?,
-         run_mode = ?,
-         agent_run_id = ?,
          selected_text = ?,
          selected_texts_json = ?,
          selected_text_sources_json = ?,
          selected_text_paper_contexts_json = ?,
-         selected_text_note_contexts_json = ?,
          paper_contexts_json = ?,
          full_text_paper_contexts_json = ?,
          screenshot_images = ?,
@@ -1047,16 +916,11 @@ export async function updateLatestUserMessage(
     [
       message.text || "",
       Number.isFinite(timestamp) ? Math.floor(timestamp) : Date.now(),
-      message.runMode || null,
-      message.agentRunId || null,
       selectedTexts[0] || message.selectedText || null,
       selectedTexts.length ? JSON.stringify(selectedTexts) : null,
       selectedTextSources.length ? JSON.stringify(selectedTextSources) : null,
       selectedTextPaperContexts.some((entry) => Boolean(entry))
         ? JSON.stringify(selectedTextPaperContexts)
-        : null,
-      selectedTextNoteContexts.some((entry) => Boolean(entry))
-        ? JSON.stringify(selectedTextNoteContexts)
         : null,
       paperContexts.length ? JSON.stringify(paperContexts) : null,
       fullTextPaperContexts.length
@@ -1075,8 +939,6 @@ export async function updateLatestAssistantMessage(
     StoredChatMessage,
     | "text"
     | "timestamp"
-    | "runMode"
-    | "agentRunId"
     | "modelName"
     | "modelEntryId"
     | "modelProviderLabel"
@@ -1094,8 +956,6 @@ export async function updateLatestAssistantMessage(
     `UPDATE ${CHAT_MESSAGES_TABLE}
      SET text = ?,
          timestamp = ?,
-         run_mode = ?,
-         agent_run_id = ?,
          model_name = ?,
          model_entry_id = ?,
          model_provider_label = ?,
@@ -1113,8 +973,6 @@ export async function updateLatestAssistantMessage(
     [
       message.text || "",
       Number.isFinite(timestamp) ? Math.floor(timestamp) : Date.now(),
-      message.runMode || null,
-      message.agentRunId || null,
       message.modelName || null,
       message.modelEntryId || null,
       message.modelProviderLabel || null,
@@ -1211,43 +1069,6 @@ export async function pruneConversation(
   );
 }
 
-type GlobalConversationSummaryRow = {
-  conversationKey?: unknown;
-  libraryID?: unknown;
-  createdAt?: unknown;
-  title?: unknown;
-  lastActivityAt?: unknown;
-  userTurnCount?: unknown;
-};
-
-function toGlobalConversationSummary(
-  row: GlobalConversationSummaryRow,
-): GlobalConversationSummary | null {
-  const conversationKey = normalizeConversationKey(Number(row.conversationKey));
-  const libraryID = normalizeLibraryID(Number(row.libraryID));
-  const createdAt = Number(row.createdAt);
-  const lastActivityAt = Number(row.lastActivityAt);
-  const userTurnCount = Number(row.userTurnCount);
-  if (!conversationKey || !libraryID || !Number.isFinite(createdAt)) {
-    return null;
-  }
-  return {
-    conversationKey,
-    libraryID,
-    createdAt: Math.floor(createdAt),
-    title:
-      typeof row.title === "string" && row.title.trim()
-        ? row.title.trim()
-        : undefined,
-    lastActivityAt: Number.isFinite(lastActivityAt)
-      ? Math.floor(lastActivityAt)
-      : Math.floor(createdAt),
-    userTurnCount: Number.isFinite(userTurnCount)
-      ? Math.max(0, Math.floor(userTurnCount))
-      : 0,
-  };
-}
-
 type PaperConversationSummaryRow = {
   conversationKey?: unknown;
   libraryID?: unknown;
@@ -1301,9 +1122,8 @@ async function resolveNextPaperConversationKey(): Promise<number> {
   const rows = (await Zotero.DB.queryAsync(
     `SELECT MAX(conversation_key) AS maxConversationKey
      FROM ${PAPER_CONVERSATIONS_TABLE}
-     WHERE conversation_key >= ?
-       AND conversation_key < ?`,
-    [PAPER_CONVERSATION_KEY_BASE, GLOBAL_CONVERSATION_KEY_BASE],
+     WHERE conversation_key >= ?`,
+    [PAPER_CONVERSATION_KEY_BASE],
   )) as Array<{ maxConversationKey?: unknown }> | undefined;
   const maxConversationKey = Number(rows?.[0]?.maxConversationKey);
   const next = Number.isFinite(maxConversationKey)
@@ -1442,58 +1262,6 @@ export async function listPaperConversations(
   return out;
 }
 
-/**
- * List all paper conversations across all papers for a given library.
- * Unlike listPaperConversations, this does NOT filter by paperItemID.
- */
-export async function listAllPaperConversationsByLibrary(
-  libraryID: number,
-  limit: number,
-): Promise<PaperConversationSummary[]> {
-  const normalizedLibraryID = normalizeLibraryID(libraryID);
-  if (!normalizedLibraryID) return [];
-  const normalizedLimit = normalizeLimit(limit, 100);
-
-  const rows = (await Zotero.DB.queryAsync(
-    `SELECT pc.conversation_key AS conversationKey,
-            pc.library_id AS libraryID,
-            pc.paper_item_id AS paperItemID,
-            pc.session_version AS sessionVersion,
-            pc.created_at AS createdAt,
-            COALESCE(
-              NULLIF(TRIM(pc.title), ''),
-              (
-                SELECT m0.text
-                FROM ${CHAT_MESSAGES_TABLE} m0
-                WHERE m0.conversation_key = pc.conversation_key
-                  AND m0.role = 'user'
-                ORDER BY m0.timestamp ASC, m0.id ASC
-                LIMIT 1
-              )
-            ) AS title,
-            COALESCE(MAX(m.timestamp), pc.created_at) AS lastActivityAt,
-            SUM(CASE WHEN m.role = 'user' THEN 1 ELSE 0 END) AS userTurnCount
-     FROM ${PAPER_CONVERSATIONS_TABLE} pc
-     LEFT JOIN ${CHAT_MESSAGES_TABLE} m
-       ON m.conversation_key = pc.conversation_key
-     WHERE pc.library_id = ?
-     GROUP BY pc.conversation_key, pc.library_id, pc.paper_item_id, pc.session_version, pc.created_at, pc.title
-     HAVING SUM(CASE WHEN m.role = 'user' THEN 1 ELSE 0 END) > 0
-     ORDER BY lastActivityAt DESC, pc.conversation_key DESC
-     LIMIT ?`,
-    [normalizedLibraryID, normalizedLimit],
-  )) as PaperConversationSummaryRow[] | undefined;
-
-  if (!rows?.length) return [];
-  const out: PaperConversationSummary[] = [];
-  for (const row of rows) {
-    const normalized = toPaperConversationSummary(row);
-    if (!normalized) continue;
-    out.push(normalized);
-  }
-  return out;
-}
-
 export async function getPaperConversation(
   conversationKey: number,
 ): Promise<PaperConversationSummary | null> {
@@ -1542,189 +1310,6 @@ export async function deletePaperConversation(
   );
 }
 
-/**
- * Ensure a global conversation row exists in the DB for the given key.
- * Uses INSERT OR IGNORE so it's safe to call repeatedly.
- */
-export async function ensureGlobalConversationExists(
-  libraryID: number,
-  conversationKey: number,
-): Promise<void> {
-  const normalizedLibraryID = normalizeLibraryID(libraryID);
-  const normalizedKey = normalizeConversationKey(conversationKey);
-  if (!normalizedLibraryID || !normalizedKey) return;
-  await Zotero.DB.queryAsync(
-    `INSERT OR IGNORE INTO ${GLOBAL_CONVERSATIONS_TABLE}
-      (conversation_key, library_id, created_at, title)
-     VALUES (?, ?, ?, NULL)`,
-    [normalizedKey, normalizedLibraryID, Date.now()],
-  );
-}
-
-export async function createGlobalConversation(
-  libraryID: number,
-): Promise<number> {
-  const normalizedLibraryID = normalizeLibraryID(libraryID);
-  if (!normalizedLibraryID) return 0;
-
-  const createdAt = Date.now();
-  return await Zotero.DB.executeTransaction(async () => {
-    const rows = (await Zotero.DB.queryAsync(
-      `SELECT MAX(conversation_key) AS maxConversationKey
-       FROM ${GLOBAL_CONVERSATIONS_TABLE}`,
-    )) as Array<{ maxConversationKey?: unknown }> | undefined;
-    const maxConversationKey = Number(rows?.[0]?.maxConversationKey);
-    const nextConversationKey = Number.isFinite(maxConversationKey)
-      ? Math.max(
-          GLOBAL_CONVERSATION_KEY_BASE,
-          Math.floor(maxConversationKey) + 1,
-        )
-      : GLOBAL_CONVERSATION_KEY_BASE;
-    await Zotero.DB.queryAsync(
-      `INSERT INTO ${GLOBAL_CONVERSATIONS_TABLE}
-        (conversation_key, library_id, created_at, title)
-       VALUES (?, ?, ?, NULL)`,
-      [nextConversationKey, normalizedLibraryID, createdAt],
-    );
-    return nextConversationKey;
-  });
-}
-
-export async function listGlobalConversations(
-  libraryID: number,
-  limit: number,
-  includeEmpty = false,
-): Promise<GlobalConversationSummary[]> {
-  const normalizedLibraryID = normalizeLibraryID(libraryID);
-  if (!normalizedLibraryID) return [];
-  const normalizedLimit = normalizeLimit(limit, 50);
-
-  const rows = (await Zotero.DB.queryAsync(
-    `SELECT gc.conversation_key AS conversationKey,
-            gc.library_id AS libraryID,
-            gc.created_at AS createdAt,
-            gc.title AS title,
-            COALESCE(MAX(m.timestamp), gc.created_at) AS lastActivityAt,
-            SUM(CASE WHEN m.role = 'user' THEN 1 ELSE 0 END) AS userTurnCount
-     FROM ${GLOBAL_CONVERSATIONS_TABLE} gc
-     LEFT JOIN ${CHAT_MESSAGES_TABLE} m
-       ON m.conversation_key = gc.conversation_key
-     WHERE gc.library_id = ?
-     GROUP BY gc.conversation_key, gc.library_id, gc.created_at, gc.title
-     ${includeEmpty ? "" : "HAVING SUM(CASE WHEN m.role = 'user' THEN 1 ELSE 0 END) > 0"}
-     ORDER BY lastActivityAt DESC, gc.conversation_key DESC
-     LIMIT ?`,
-    [normalizedLibraryID, normalizedLimit],
-  )) as GlobalConversationSummaryRow[] | undefined;
-
-  if (!rows?.length) return [];
-  const out: GlobalConversationSummary[] = [];
-  for (const row of rows) {
-    const normalized = toGlobalConversationSummary(row);
-    if (!normalized) continue;
-    out.push(normalized);
-  }
-  return out;
-}
-
-export async function getGlobalConversationUserTurnCount(
-  conversationKey: number,
-): Promise<number> {
-  const normalizedKey = normalizeConversationKey(conversationKey);
-  if (!normalizedKey) return 0;
-  const rows = (await Zotero.DB.queryAsync(
-    `SELECT SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) AS userTurnCount
-     FROM ${CHAT_MESSAGES_TABLE}
-     WHERE conversation_key = ?`,
-    [normalizedKey],
-  )) as Array<{ userTurnCount?: unknown }> | undefined;
-  const count = Number(rows?.[0]?.userTurnCount);
-  return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
-}
-
-export async function getLatestEmptyGlobalConversation(
-  libraryID: number,
-): Promise<GlobalConversationSummary | null> {
-  const normalizedLibraryID = normalizeLibraryID(libraryID);
-  if (!normalizedLibraryID) return null;
-  const rows = (await Zotero.DB.queryAsync(
-    `SELECT gc.conversation_key AS conversationKey,
-            gc.library_id AS libraryID,
-            gc.created_at AS createdAt,
-            gc.title AS title,
-            gc.created_at AS lastActivityAt,
-            SUM(CASE WHEN m.role = 'user' THEN 1 ELSE 0 END) AS userTurnCount
-     FROM ${GLOBAL_CONVERSATIONS_TABLE} gc
-     LEFT JOIN ${CHAT_MESSAGES_TABLE} m
-       ON m.conversation_key = gc.conversation_key
-     WHERE gc.library_id = ?
-     GROUP BY gc.conversation_key, gc.library_id, gc.created_at, gc.title
-     HAVING SUM(CASE WHEN m.role = 'user' THEN 1 ELSE 0 END) = 0
-     ORDER BY gc.created_at DESC, gc.conversation_key DESC
-     LIMIT 1`,
-    [normalizedLibraryID],
-  )) as GlobalConversationSummaryRow[] | undefined;
-  if (!rows?.length) return null;
-  return toGlobalConversationSummary(rows[0]);
-}
-
-export async function getGlobalConversation(
-  conversationKey: number,
-): Promise<GlobalConversationSummary | null> {
-  const normalizedKey = normalizeConversationKey(conversationKey);
-  if (!normalizedKey) return null;
-  const rows = (await Zotero.DB.queryAsync(
-    `SELECT gc.conversation_key AS conversationKey,
-            gc.library_id AS libraryID,
-            gc.created_at AS createdAt,
-            gc.title AS title,
-            COALESCE(MAX(m.timestamp), gc.created_at) AS lastActivityAt,
-            SUM(CASE WHEN m.role = 'user' THEN 1 ELSE 0 END) AS userTurnCount
-     FROM ${GLOBAL_CONVERSATIONS_TABLE} gc
-     LEFT JOIN ${CHAT_MESSAGES_TABLE} m
-       ON m.conversation_key = gc.conversation_key
-     WHERE gc.conversation_key = ?
-     GROUP BY gc.conversation_key, gc.library_id, gc.created_at, gc.title
-     LIMIT 1`,
-    [normalizedKey],
-  )) as GlobalConversationSummaryRow[] | undefined;
-  if (!rows?.length) return null;
-  return toGlobalConversationSummary(rows[0]);
-}
-
-export async function touchGlobalConversationTitle(
-  conversationKey: number,
-  titleSeed: string,
-): Promise<void> {
-  const normalizedKey = normalizeConversationKey(conversationKey);
-  if (!normalizedKey) return;
-  const title = normalizeConversationTitleSeed(titleSeed);
-  if (!title) return;
-  await Zotero.DB.queryAsync(
-    `UPDATE ${GLOBAL_CONVERSATIONS_TABLE}
-     SET title = ?
-     WHERE conversation_key = ?
-       AND (title IS NULL OR TRIM(title) = '')`,
-    [title, normalizedKey],
-  );
-}
-
-export async function setGlobalConversationTitle(
-  conversationKey: number,
-  titleSeed: string,
-): Promise<void> {
-  const normalizedKey = normalizeConversationKey(conversationKey);
-  if (!normalizedKey) return;
-  const title = normalizeConversationTitleSeed(titleSeed);
-  if (!title) return;
-  await Zotero.DB.queryAsync(
-    `UPDATE ${GLOBAL_CONVERSATIONS_TABLE}
-     SET title = ?
-     WHERE conversation_key = ?`,
-    [title, normalizedKey],
-  );
-}
-
 export async function touchPaperConversationTitle(
   conversationKey: number,
   titleSeed: string,
@@ -1763,29 +1348,9 @@ export async function clearConversationTitle(
 ): Promise<void> {
   const normalizedKey = normalizeConversationKey(conversationKey);
   if (!normalizedKey) return;
-  await Zotero.DB.executeTransaction(async () => {
-    await Zotero.DB.queryAsync(
-      `UPDATE ${GLOBAL_CONVERSATIONS_TABLE}
-       SET title = NULL
-       WHERE conversation_key = ?`,
-      [normalizedKey],
-    );
-    await Zotero.DB.queryAsync(
-      `UPDATE ${PAPER_CONVERSATIONS_TABLE}
-       SET title = NULL
-       WHERE conversation_key = ?`,
-      [normalizedKey],
-    );
-  });
-}
-
-export async function deleteGlobalConversation(
-  conversationKey: number,
-): Promise<void> {
-  const normalizedKey = normalizeConversationKey(conversationKey);
-  if (!normalizedKey) return;
   await Zotero.DB.queryAsync(
-    `DELETE FROM ${GLOBAL_CONVERSATIONS_TABLE}
+    `UPDATE ${PAPER_CONVERSATIONS_TABLE}
+     SET title = NULL
      WHERE conversation_key = ?`,
     [normalizedKey],
   );

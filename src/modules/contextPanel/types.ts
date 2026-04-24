@@ -4,12 +4,9 @@ import type {
   ChatAttachmentCategory,
   ChatAttachment,
   AdvancedModelParams,
-  ActiveNoteSession,
   PaperContextRef,
-  NoteContextRef,
   OtherContextRef,
   CollectionContextRef,
-  GlobalConversationSummary,
   PaperConversationSummary,
 } from "../../shared/types";
 
@@ -18,12 +15,9 @@ export type {
   ChatAttachmentCategory,
   ChatAttachment,
   AdvancedModelParams,
-  ActiveNoteSession,
   PaperContextRef,
-  NoteContextRef,
   OtherContextRef,
   CollectionContextRef,
-  GlobalConversationSummary,
   PaperConversationSummary,
 } from "../../shared/types";
 
@@ -31,7 +25,6 @@ export type SelectedTextContext = {
   text: string;
   source: SelectedTextSource;
   paperContext?: PaperContextRef;
-  noteContext?: NoteContextRef;
   contextItemId?: number;
   pageIndex?: number;
   pageLabel?: string;
@@ -41,14 +34,11 @@ export interface Message {
   role: "user" | "assistant";
   text: string;
   timestamp: number;
-  runMode?: "chat" | "agent";
-  agentRunId?: string;
   selectedText?: string;
   selectedTextExpanded?: boolean;
   selectedTexts?: string[];
   selectedTextSources?: SelectedTextSource[];
   selectedTextPaperContexts?: (PaperContextRef | undefined)[];
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
   selectedTextExpandedIndex?: number;
   screenshotImages?: string[];
   paperContexts?: PaperContextRef[];
@@ -72,8 +62,6 @@ export interface Message {
   webchatChatUrl?: string;
   webchatChatId?: string;
 }
-
-export type ChatRuntimeMode = "chat" | "agent";
 export type PaperContextSendMode =
   | "retrieval"
   | "full-next"
@@ -208,18 +196,6 @@ export type MultiContextPlan = {
   assistantInstruction?: string;
 };
 
-export type GlobalPortalItem = {
-  __llmGlobalPortalItem: true;
-  id: number;
-  libraryID: number;
-  parentID?: number;
-  attachmentContentType?: string;
-  isAttachment: () => boolean;
-  getAttachments: () => number[];
-  getField: (field: string) => string;
-  isRegularItem: () => boolean;
-};
-
 export type PaperPortalItem = {
   __llmPaperPortalItem: true;
   __llmPaperPortalBaseItemID: number;
@@ -265,16 +241,10 @@ export type SendQuestionOptions = {
   selectedTexts?: string[];
   selectedTextSources?: SelectedTextSource[];
   selectedTextPaperContexts?: (PaperContextRef | undefined)[];
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
   paperContexts?: PaperContextRef[];
   fullTextPaperContexts?: PaperContextRef[];
   attachments?: ChatAttachment[];
-  runtimeMode?: ChatRuntimeMode;
-  agentRunId?: string;
-  skipAgentDispatch?: boolean;
   pdfModePaperKeys?: Set<string>;
-  /** Skill IDs force-activated via slash menu selection. */
-  forcedSkillIds?: string[];
   /** System messages injected by provider-side PDF upload (Qwen fileid://, Kimi extracted text). */
   pdfUploadSystemMessages?: string[];
   /** [webchat] When true, attach the paper PDF to the ChatGPT query. */
@@ -290,13 +260,11 @@ export type EditRetryOptions = {
   selectedTexts?: string[];
   selectedTextSources?: SelectedTextSource[];
   selectedTextPaperContexts?: (PaperContextRef | undefined)[];
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
   screenshotImages?: string[];
   paperContexts?: PaperContextRef[];
   fullTextPaperContexts?: PaperContextRef[];
   attachments?: ChatAttachment[];
   pdfUploadSystemMessages?: string[];
-  targetRuntimeMode?: ChatRuntimeMode;
   expected?: { conversationKey: number; userTimestamp: number; assistantTimestamp: number };
   model?: string;
   apiBase?: string;

@@ -1775,8 +1775,7 @@ async function resolveAndNavigateAssistantCitation(params: {
       params.baseSourceLabel,
     );
     // Build effective candidates from all available sources, then rank by
-    // citation-label relevance first (so open-chat clicks don't get hijacked
-    // by whichever unrelated PDF is currently active).
+    // citation-label relevance before falling back to the active PDF.
     const staticCandidates = params.candidates.length ? params.candidates : [];
     const orderedCandidates = await buildOrderedCitationCandidates(
       params.panelItem,
@@ -2440,7 +2439,7 @@ export function decorateAssistantCitationLinks(params: {
       blockquote.textContent || "",
     );
 
-    // Primary attempt: entire element is a standalone citation label.
+    // Primary attempt: the entire element is a citation label.
     let extractedCitation = citationEl
       ? extractStandalonePaperSourceLabel(citationEl.textContent || "")
       : null;

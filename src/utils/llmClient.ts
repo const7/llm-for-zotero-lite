@@ -65,7 +65,6 @@ import {
   resolveGeminiNativeEndpoint,
   resolveProviderTransportEndpoint,
 } from "./providerTransport";
-import { parseDataUrl } from "../agent/model/shared";
 import {
   applyModelInputTokenCap,
   estimateConversationTokens,
@@ -3648,4 +3647,14 @@ async function parseResponsesStream(
   }
 
   return fullText;
+}
+function parseDataUrl(
+  url: string,
+): { mimeType: string; data: string } | null {
+  const match = /^data:([^;,]+);base64,(.+)$/i.exec(url.trim());
+  if (!match) return null;
+  return {
+    mimeType: match[1],
+    data: match[2],
+  };
 }

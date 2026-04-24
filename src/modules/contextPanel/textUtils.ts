@@ -17,36 +17,7 @@ export const DEFAULT_FILE_ANALYSIS_PROMPT = "Please analyze attached files.";
 
 export function getSelectedTextSourceIcon(source: SelectedTextSource): string {
   if (source === "model") return "🧠";
-  if (source === "note") return "📝";
-  if (source === "note-edit") return "✍🏻";
   return "📋";
-}
-
-function buildQuestionWithSelectedNoteText(
-  selectedText: string,
-  userPrompt: string,
-): string {
-  const normalizedPrompt = userPrompt.trim() || DEFAULT_SELECTED_TEXT_PROMPT;
-  return [
-    "Selected text from a Zotero note:",
-    `"""\n${selectedText}\n"""`,
-    "",
-    `User question:\n${normalizedPrompt}`,
-  ].join("\n");
-}
-
-function buildQuestionWithNoteEditingText(
-  selectedText: string,
-  userPrompt: string,
-): string {
-  const normalizedPrompt = userPrompt.trim() || DEFAULT_SELECTED_TEXT_PROMPT;
-  return [
-    "Selected text from the current Zotero note editor (editing focus):",
-    `"""\n${selectedText}\n"""`,
-    "The user selected this snippet inside the active note and wants help editing it in place.",
-    "",
-    `User question:\n${normalizedPrompt}`,
-  ].join("\n");
 }
 
 export function sanitizeText(text: string) {
@@ -194,28 +165,9 @@ export function buildQuestionWithSelectedTextContexts(
   ) {
     return buildQuestionWithSelectedText(normalizedTexts[0], normalizedPrompt);
   }
-  if (normalizedTexts.length === 1 && normalizedSources[0] === "note-edit") {
-    return buildQuestionWithNoteEditingText(
-      normalizedTexts[0],
-      normalizedPrompt,
-    );
-  }
-  if (normalizedTexts.length === 1 && normalizedSources[0] === "note") {
-    return buildQuestionWithSelectedNoteText(
-      normalizedTexts[0],
-      normalizedPrompt,
-    );
-  }
   const contextBlocks = normalizedTexts.map((text, index) => {
     const source = normalizedSources[index];
-    const sourceLabel =
-      source === "model"
-        ? "model_response 🧠"
-        : source === "note"
-          ? "zotero_note 📝"
-        : source === "note-edit"
-          ? "note_editor ✍🏻"
-          : "pdf_reader 📋";
+    const sourceLabel = source === "model" ? "model_response 🧠" : "pdf_reader 📋";
     const paperLabel =
       includePaperAttribution && source === "pdf"
         ? formatPaperCitationLabel(selectedTextPaperContexts[index])

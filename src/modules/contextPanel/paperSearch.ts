@@ -15,7 +15,6 @@ export type PaperSearchGroupCandidate = Omit<
   attachments: PaperSearchAttachmentCandidate[];
   score: number;
   modifiedAt: number;
-  itemKind?: "standalone-note";
 };
 
 export type PaperSearchSlashToken = {
@@ -47,7 +46,6 @@ type IndexedPaperCandidate = {
   attachments: IndexedPaperAttachment[];
   modifiedAt: number;
   collectionIDs: number[];
-  itemKind?: "standalone-note";
   normalized: {
     title: string;
     shortTitle: string;
@@ -855,7 +853,7 @@ export async function searchPaperCandidates(
     .map((entry) => entry.candidate);
 }
 
-// ── All-items index (non-PDF-filtered, includes standalone notes) ─────────────
+// ── All-items index (non-PDF-filtered) ────────────────────────────────────────
 
 type AllItemsLibraryIndex = {
   libraryID: number;
@@ -863,40 +861,7 @@ type AllItemsLibraryIndex = {
   collections: IndexedCollection[];
 };
 
-const ZOTERO_NOTE_CONTENT_TYPE = "application/x-zotero-note";
-
 function buildIndexedItemCandidate(item: Zotero.Item): IndexedPaperCandidate | null {
-  // Standalone notes — represent as a single synthetic attachment pointing to itself
-  if ((item as any).isNote?.() && !item.parentID) {
-    const title =
-      normalizeText(
-        (item as any).getNoteTitle?.() || item.getDisplayTitle?.() || "",
-      ) || `Note ${item.id}`;
-    return {
-      itemId: item.id,
-      title,
-      itemKind: "standalone-note",
-      attachments: [
-        {
-          contextItemId: item.id,
-          title,
-          normalizedTitle: normalizePaperSearchText(title),
-          contentType: ZOTERO_NOTE_CONTENT_TYPE,
-        },
-      ],
-      modifiedAt: toModifiedTimestamp(item.dateModified),
-      collectionIDs: getCollectionIDs(item),
-      normalized: {
-        title: normalizePaperSearchText(title),
-        shortTitle: "",
-        citationKey: "",
-        doi: "",
-        creator: "",
-        venue: "",
-        year: "",
-      },
-    };
-  }
   if (!item?.isRegularItem?.()) return null;
   // All file attachments
   const allAtts: Zotero.Item[] = [];
@@ -904,27 +869,7 @@ function buildIndexedItemCandidate(item: Zotero.Item): IndexedPaperCandidate | n
     const att = Zotero.Items.get(attachmentId);
     if (att && att.isAttachment?.()) allAtts.push(att);
   }
-  // Child notes — represented as attachment-like entries with a special content type
-  const noteAttachments: IndexedPaperAttachment[] = [];
-  const noteIds: number[] = (item as any).getNotes?.() || [];
-  for (const noteId of noteIds) {
-    const noteItem = Zotero.Items.get(noteId as number);
-    if (!noteItem || !(noteItem as any).isNote?.()) continue;
-    const noteTitle =
-      normalizeText(
-        (noteItem as any).getNoteTitle?.() ||
-          noteItem.getDisplayTitle?.() ||
-          "",
-      ) || `Note ${noteItem.id}`;
-    noteAttachments.push({
-      contextItemId: noteItem.id,
-      title: noteTitle,
-      normalizedTitle: normalizePaperSearchText(noteTitle),
-      contentType: ZOTERO_NOTE_CONTENT_TYPE,
-    });
-  }
-
-  const attachments = [...buildIndexedAttachments(allAtts), ...noteAttachments];
+  const attachments = buildIndexedAttachments(allAtts);
 
   const title = getItemFieldText(item, "title") || `Item ${item.id}`;
   const citationKey = getItemFieldText(item, "citationKey") || undefined;
@@ -1024,7 +969,6 @@ function buildVisibleItemCandidate(
     citationKey: candidate.citationKey,
     firstCreator: candidate.firstCreator,
     year: candidate.year,
-    itemKind: candidate.itemKind,
     attachments: candidate.attachments.map((att) => ({
       contextItemId: att.contextItemId,
       title: att.title,
@@ -1091,7 +1035,6 @@ export async function searchAllItemCandidates(
   return rankedCandidates.slice(0, normalizedLimit).map((e) => e.candidate);
 }
 
-export { ZOTERO_NOTE_CONTENT_TYPE };
 
 const DEFAULT_COLLECTION_SEARCH_LIMIT = 5;
 

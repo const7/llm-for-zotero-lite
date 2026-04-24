@@ -1,4 +1,9 @@
-import { getActiveReaderForSelectedTab } from "./contextResolution";
+import { persistAttachmentBlob } from "./attachmentStorage";
+import {
+  getActiveReaderForSelectedTab,
+  getLastKnownSelectedTabId,
+  selectZoteroTab,
+} from "./contextResolution";
 
 // ── Zotero reader introspection helpers ──────────────────────────────────────
 // These mirror the equivalent private helpers in agent/services/pdfPageService
@@ -297,11 +302,20 @@ export function parsePageRanges(input: string, maxPage: number): number[] {
  * Navigates the reader to a specific page index (0-based).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function navigateReaderToPage(reader: any, pageIndex: number): Promise<boolean> {
+async function navigateReaderToPage(
+  reader: any,
+  pageIndex: number,
+  pageLabel?: string,
+): Promise<boolean> {
   if (typeof reader?.navigate !== "function") return false;
   const idx = Math.max(0, Math.floor(pageIndex));
+  const normalizedPageLabel = `${pageLabel ?? ""}`.trim();
   try {
-    await reader.navigate({ pageIndex: idx, pageLabel: `${idx + 1}` });
+    await reader.navigate(
+      normalizedPageLabel
+        ? { pageIndex: idx, pageLabel: normalizedPageLabel }
+        : { pageIndex: idx, pageLabel: `${idx + 1}` },
+    );
     return true;
   } catch {
     try {
@@ -311,6 +325,139 @@ async function navigateReaderToPage(reader: any, pageIndex: number): Promise<boo
       return false;
     }
   }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getReaderItemId(reader: any): number {
+  const raw = Number(reader?._item?.id || reader?.itemID || 0);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function waitForReaderForItem(targetItemId: number): Promise<any | null> {
+  const normalizedTargetItemId = Math.floor(targetItemId);
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 2200) {
+    const activeReader = getActiveReaderForSelectedTab();
+    if (getReaderItemId(activeReader) === normalizedTargetItemId) {
+      return activeReader;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  return null;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function openReaderForItem(
+  targetItemId: number,
+  location?: { pageIndex: number; pageLabel?: string },
+): Promise<any | null> {
+  const activeReader = getActiveReaderForSelectedTab();
+  if (getReaderItemId(activeReader) === Math.floor(targetItemId)) {
+    if (location) {
+      await navigateReaderToPage(
+        activeReader,
+        location.pageIndex,
+        location.pageLabel,
+      );
+    }
+    return activeReader;
+  }
+  const readerApi = Zotero.Reader as
+    | {
+        open?: (
+          itemID: number,
+          location?: _ZoteroTypes.Reader.Location,
+        ) => Promise<void | _ZoteroTypes.ReaderInstance>;
+      }
+    | undefined;
+  if (typeof readerApi?.open === "function") {
+    const opened = await readerApi.open(
+      Math.floor(targetItemId),
+      location
+        ? {
+            pageIndex: Math.floor(location.pageIndex),
+            ...(location.pageLabel
+              ? { pageLabel: `${location.pageLabel}`.trim() }
+              : {}),
+          }
+        : undefined,
+    );
+    if (opened) return opened;
+  }
+  const waited = await waitForReaderForItem(targetItemId);
+  if (waited && location) {
+    await navigateReaderToPage(waited, location.pageIndex, location.pageLabel);
+  }
+  return waited;
+}
+
+function restoreNonReaderTab(savedTabId: string | number | null): void {
+  const targetTabId = savedTabId || "zotero-pane";
+  const doRestore = () => {
+    void selectZoteroTab(targetTabId);
+  };
+  doRestore();
+  setTimeout(doRestore, 500);
+  setTimeout(doRestore, 1500);
+  setTimeout(doRestore, 3000);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function waitForPdfDocument(reader: any, timeoutMs = 2200): Promise<any | null> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const app = getPdfViewerApplication(reader);
+    if (app?.pdfDocument) return app;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  return null;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function captureRenderedReaderPage(
+  app: any,
+  reader: any,
+  pageIndex: number,
+): Promise<Uint8Array | null> {
+  const sourceCanvas = await waitForRenderedPageCanvas(
+    app,
+    reader,
+    pageIndex + 1,
+  );
+  if (!sourceCanvas) return null;
+  try {
+    return await canvasToBytes(sourceCanvas);
+  } catch {
+    const doc = sourceCanvas.ownerDocument || getReaderDocument(reader);
+    if (!doc) return null;
+    const tempCanvas = doc.createElement("canvas") as HTMLCanvasElement;
+    tempCanvas.width = Math.max(1, sourceCanvas.width);
+    tempCanvas.height = Math.max(1, sourceCanvas.height);
+    const context = tempCanvas.getContext("2d") as CanvasRenderingContext2D | null;
+    if (!context) return null;
+    context.drawImage(sourceCanvas, 0, 0);
+    return canvasToBytes(tempCanvas);
+  }
+}
+
+async function canvasToBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
+  if (typeof canvas.toBlob === "function") {
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((value) => resolve(value), "image/png");
+    });
+    if (blob) {
+      return new Uint8Array(await blob.arrayBuffer());
+    }
+  }
+  const dataUrl = canvas.toDataURL("image/png");
+  const base64 = dataUrl.split(",")[1] || "";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 /**
@@ -440,4 +587,94 @@ export async function capturePdfPages(
     await navigateReaderToPage(reader, restoreIndex);
   }
   return results;
+}
+
+export async function renderAllPdfPages(
+  contextItemId: number,
+  opts?: { maxPages?: number },
+): Promise<{ storedPath: string; contentHash: string; pageIndex: number }[]> {
+  const maxPages = opts?.maxPages ?? 200;
+  const savedTabId = getLastKnownSelectedTabId();
+  try {
+    const reader = await openReaderForItem(contextItemId, {
+      pageIndex: 0,
+      pageLabel: "1",
+    });
+    if (!reader) throw new Error("Could not open PDF reader");
+    const app = await waitForPdfDocument(reader);
+    if (!app?.pdfDocument) {
+      throw new Error("Could not load PDF document");
+    }
+    const pdfDocument = unwrapWrappedJsObject(
+      app.pdfDocument as { numPages?: number; getPage?: (n: number) => Promise<unknown> },
+    );
+    const rawCount = Number(
+      pdfDocument?.numPages ??
+        (app as { pdfDocument?: { numPages?: number } })?.pdfDocument?.numPages ??
+        0,
+    );
+    const numPages = Math.min(
+      maxPages,
+      Number.isFinite(rawCount) && rawCount > 0 ? Math.floor(rawCount) : 0,
+    );
+    if (numPages <= 0) throw new Error("PDF has no pages");
+
+    const results: {
+      storedPath: string;
+      contentHash: string;
+      pageIndex: number;
+    }[] = [];
+    for (let i = 0; i < numPages; i += 1) {
+      await navigateReaderToPage(reader, i, `${i + 1}`);
+      let bytes = await captureRenderedReaderPage(app, reader, i);
+      if (!bytes) {
+        const canvasDoc = getReaderDocument(reader) || Zotero.getMainWindow?.()?.document;
+        if (canvasDoc && typeof pdfDocument?.getPage === "function") {
+          const pdfPage = resolveRenderablePdfPage(
+            await pdfDocument.getPage(i + 1),
+          );
+          if (pdfPage) {
+            const viewport = pdfPage.getViewport({ scale: 1.8 });
+            const canvas = canvasDoc.createElement("canvas") as HTMLCanvasElement;
+            canvas.width = Math.max(1, Math.ceil(viewport.width));
+            canvas.height = Math.max(1, Math.ceil(viewport.height));
+            const context = canvas.getContext("2d") as CanvasRenderingContext2D | null;
+            if (context) {
+              const renderTask = pdfPage.render({
+                canvasContext: context,
+                viewport,
+              });
+              if (
+                renderTask &&
+                typeof renderTask === "object" &&
+                "promise" in renderTask &&
+                renderTask.promise
+              ) {
+                await renderTask.promise;
+              } else if (
+                renderTask &&
+                (typeof renderTask === "object" ||
+                  typeof renderTask === "function") &&
+                "then" in renderTask &&
+                typeof renderTask.then === "function"
+              ) {
+                await renderTask;
+              }
+              bytes = await canvasToBytes(canvas);
+            }
+          }
+        }
+      }
+      if (!bytes) continue;
+      const persisted = await persistAttachmentBlob(`page-${i + 1}.png`, bytes);
+      results.push({
+        storedPath: persisted.storedPath,
+        contentHash: persisted.contentHash,
+        pageIndex: i,
+      });
+    }
+    return results;
+  } finally {
+    restoreNonReaderTab(savedTabId);
+  }
 }

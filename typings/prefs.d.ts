@@ -26,16 +26,7 @@ declare namespace _ZoteroTypes {
       "maxTokensTertiary": string;
       "temperatureQuaternary": string;
       "maxTokensQuaternary": string;
-      "enableAgentMode": boolean;
-      "obsidianVaultPath": string;
-      "obsidianTargetFolder": string;
-      "obsidianAttachmentsFolder": string;
-      "obsidianNoteTemplate": string;
-      "notesDirectoryNickname": string;
       "locale": string;
-      "mineruAutoWatchCollections": string;
-      "mineruGlobalAutoParse": boolean;
-      "mineruExcludePatterns": string;
     };
   }
 }

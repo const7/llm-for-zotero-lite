@@ -4,8 +4,6 @@ import type { ProviderProtocol } from "../../../../utils/providerProtocol";
 import type {
   AdvancedModelParams,
   ChatAttachment,
-  ChatRuntimeMode,
-  NoteContextRef,
   PaperContextRef,
   SelectedTextContext,
 } from "../../types";
@@ -89,7 +87,6 @@ type SendFlowControllerDeps = {
     question: string,
     attachments: ChatAttachment[],
   ) => string;
-  isAgentMode: () => boolean;
   normalizeConversationTitleSeed: (raw: unknown) => string;
   getConversationKey: (item: Zotero.Item) => number;
   touchPaperConversationTitle: (
@@ -138,10 +135,8 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
 } {
   const shouldUseLeanChatFastPath = (
     profile: SelectedProfile | null,
-    isAgentMode: boolean,
   ): boolean => {
     if (!getFeatureProfile().sendFlow.useLeanPaperChatFastPath) return false;
-    if (isAgentMode) return false;
     return profile?.authMode !== "webchat";
   };
 
@@ -162,9 +157,6 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     const selectedTextPaperContexts = selectedContexts.map(
       (entry) => entry.paperContext,
     );
-    const selectedTextNoteContexts = selectedContexts.map(
-      (entry) => entry.noteContext,
-    );
     const primarySelectedText = selectedTexts[0] || "";
     const allSelectedPaperContexts = deps.getSelectedPaperContexts(item.id);
     const pdfModePaperContexts = deps.getPdfModePaperContexts(
@@ -174,7 +166,6 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     const earlyProfile = deps.getSelectedProfile();
     const isLeanChatFastPath = shouldUseLeanChatFastPath(
       earlyProfile,
-      deps.isAgentMode(),
     ) && pdfModePaperContexts.length === 0;
     if (isLeanChatFastPath) {
       const selectedFiles = deps.getSelectedFiles(item.id);
@@ -276,14 +267,10 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
           selectedTextPaperContexts: selectedTexts.length
             ? selectedTextPaperContexts
             : undefined,
-          selectedTextNoteContexts: selectedTexts.length
-            ? selectedTextNoteContexts
-            : undefined,
           screenshotImages: images,
           paperContexts: allSelectedPaperContexts,
           fullTextPaperContexts,
           attachments: selectedFiles.length ? selectedFiles : undefined,
-          targetRuntimeMode: "chat",
           expected: activeEditSession,
           model: earlyProfile?.model,
           apiBase: earlyProfile?.apiBase,
@@ -357,13 +344,9 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         selectedTextPaperContexts: selectedTexts.length
           ? selectedTextPaperContexts
           : undefined,
-        selectedTextNoteContexts: selectedTexts.length
-          ? selectedTextNoteContexts
-          : undefined,
         paperContexts: allSelectedPaperContexts,
         fullTextPaperContexts,
         attachments: selectedFiles.length ? selectedFiles : undefined,
-        runtimeMode: "chat",
       });
       if (hasPaperComposeState) {
         deps.consumePaperModeState(item.id);
@@ -381,8 +364,6 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       return;
     }
 
-    // Agent mode uses text/MinerU pipeline by default, but if the user
-    // explicitly forced PDF mode on a paper, honour that choice.
     // Papers in PDF mode are sent as file attachments, not through the text pipeline
     const pdfModeKeySet = new Set(
       pdfModePaperContexts.map((p) => `${p.itemId}:${p.contextItemId}`),
@@ -528,13 +509,10 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         )
       : resolvedPromptText;
 
-    const composedQuestion = deps.isAgentMode()
-      ? resolvedPromptText
-      : deps.buildModelPromptWithFileContext(
-          composedQuestionBase,
-          selectedFiles,
-        );
-    const runtimeMode: ChatRuntimeMode = deps.isAgentMode() ? "agent" : "chat";
+    const composedQuestion = deps.buildModelPromptWithFileContext(
+      composedQuestionBase,
+      selectedFiles,
+    );
     const displayQuestion = primarySelectedText
       ? resolvedPromptText
       : text || resolvedPromptText;
@@ -593,7 +571,6 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         selectedTexts: selectedTexts.length ? selectedTexts : undefined,
         selectedTextSources: selectedTexts.length ? selectedTextSources : undefined,
         selectedTextPaperContexts: selectedTexts.length ? selectedTextPaperContexts : undefined,
-        selectedTextNoteContexts: selectedTexts.length ? selectedTextNoteContexts : undefined,
         screenshotImages: images,
         paperContexts: selectedPaperContexts,
         fullTextPaperContexts,
@@ -601,7 +578,6 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         pdfUploadSystemMessages: pdfUploadSystemMessages.length
           ? pdfUploadSystemMessages
           : undefined,
-        targetRuntimeMode: runtimeMode,
         expected: activeEditSession,
         model: selectedProfile?.model,
         apiBase: selectedProfile?.apiBase,
@@ -686,11 +662,9 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       selectedTexts: selectedTexts.length ? selectedTexts : undefined,
       selectedTextSources: selectedTexts.length ? selectedTextSources : undefined,
       selectedTextPaperContexts: selectedTexts.length ? selectedTextPaperContexts : undefined,
-      selectedTextNoteContexts: selectedTexts.length ? selectedTextNoteContexts : undefined,
       paperContexts: selectedPaperContexts,
       fullTextPaperContexts,
       attachments: selectedFiles.length ? selectedFiles : undefined,
-      runtimeMode,
       pdfModePaperKeys: pdfModeKeySet.size > 0 ? pdfModeKeySet : undefined,
       pdfUploadSystemMessages: pdfUploadSystemMessages.length ? pdfUploadSystemMessages : undefined,
       webchatSendPdf,

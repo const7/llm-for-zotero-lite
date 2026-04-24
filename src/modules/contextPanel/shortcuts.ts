@@ -45,18 +45,8 @@ export async function loadShortcutText(file: string): Promise<string> {
 export async function renderShortcuts(
   body: Element,
   item?: Zotero.Item | null,
-  mode?: "paper" | "library",
 ) {
   shortcutRenderItemState.set(body, item);
-
-  // Library chat mode: no shortcut buttons (actions available via / menu)
-  if (mode === "library") {
-    const container = body.querySelector(
-      "#llm-shortcuts",
-    ) as HTMLDivElement | null;
-    if (container) container.innerHTML = "";
-    return;
-  }
 
   const container = body.querySelector(
     "#llm-shortcuts",

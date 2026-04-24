@@ -23,12 +23,8 @@ const zhCN: Record<string, string> = {
   "LLM-for-Zotero Lite": "LLM-for-Zotero Lite",
   "Start a new chat": "开始新对话",
   "Conversation history": "对话历史",
-  "Note editing": "笔记编辑",
-  "Library chat": "文献库对话",
   "Paper chat": "论文对话",
   "Switch to paper chat": "切换到论文对话",
-  "Switch to library chat": "切换到文献库对话",
-  "Lock library chat as default": "锁定文献库对话为默认",
   "Settings": "设置",
   "Open plugin settings": "打开插件设置",
   "Export": "导出",
@@ -38,12 +34,10 @@ const zhCN: Record<string, string> = {
   "Undo": "撤销",
   "Restore deleted conversation": "恢复已删除的对话",
   "Copy": "复制",
-  "Save as note": "保存为笔记",
   "Delete conversation": "删除对话",
   "Delete this turn": "删除此轮对话",
   "Delete this prompt and response": "删除此提问和回答",
   "Copy chat as md": "复制对话为 Markdown",
-  "Save chat as note": "保存对话为笔记",
   "Upload files": "上传文件",
   "Add documents or images": "添加文档或图片",
   "Select references": "选择参考文献",
@@ -64,18 +58,12 @@ const zhCN: Record<string, string> = {
   "Select PDF pages": "选择 PDF 页面",
   "Send current entire PDF": "发送当前整个 PDF",
   "Add the open PDF file to context": "将打开的 PDF 文件添加到上下文",
-  "Switch to Agent mode": "切换到 Agent 模式",
-  "Agent mode": "Agent 模式",
-  // "Agent (beta)" — intentionally not translated, keep English
-  "Agent actions": "Agent 操作",
-  "Base actions": "基础操作",
   "Selected screenshot preview": "已选截图预览",
   "Expand figures": "展开图片",
   "Clear selected screenshots": "清除已选截图",
   "Expand files": "展开文件",
   "Clear uploaded files": "清除已上传文件",
   "Ask about this paper... Type / for actions, @ to add papers": "询问关于这篇论文的问题... 输入 / 查看操作，@ 添加论文",
-  "Ask anything... Type / for actions, @ to add papers": "随便问... 输入 / 查看操作，@ 添加论文",
   "Open a PDF first": "请先打开一个 PDF",
   "Include selected reader text": "包含选中的阅读器文本",
   "Select figure screenshot": "选择图片截图",
@@ -115,7 +103,6 @@ const zhCN: Record<string, string> = {
   "Cannot delete active conversation right now": "当前无法删除活跃的对话",
   "Conversation deleted. Undo available.": "对话已删除。可撤销。",
   "Wait for the current response to finish before starting a new chat": "请等待当前回复完成后再开始新对话",
-  "No active library for global conversation": "没有可用的文献库用于全局对话",
   "Failed to create conversation": "创建对话失败",
   "Reused existing new conversation": "已复用现有新对话",
   "Started new conversation": "已开始新对话",
@@ -127,9 +114,6 @@ const zhCN: Record<string, string> = {
   "Wait for the current response to finish before switching modes": "请等待当前回复完成后再切换模式",
   "Conversation loaded": "对话已加载",
   "Paper already selected": "论文已选中",
-  "Selected note is empty": "所选笔记为空",
-  "Note already selected": "笔记已选中",
-  "Note context added as text.": "笔记内容已作为文本添加。",
   "File already selected": "文件已选中",
   "Figures cleared": "图片已清除",
   "Files cleared": "文件已清除",
@@ -149,14 +133,7 @@ const zhCN: Record<string, string> = {
   "No PDF found — open a PDF or select an item with a PDF attachment": "未找到 PDF — 请打开 PDF 或选择带有 PDF 附件的条目",
   "PDF added to context": "PDF 已添加到上下文",
   "Failed to load PDF": "加载 PDF 失败",
-  "Appended to existing note": "已追加到现有笔记",
   "Reference picker ready. Browse collections or type to search papers.": "参考文献选择器已就绪。浏览分类或输入搜索论文。",
-  "Tip: Enable Agent mode in Preferences for a better library chat experience.": "提示：在偏好设置中启用 Agent 模式以获得更好的文献库对话体验。",
-  "Agent mode enabled": "Agent 模式已启用",
-  "Chat mode enabled": "对话模式已启用",
-  "Agent mode ON. Click to switch to Chat mode": "Agent 模式已开启。点击切换到对话模式",
-  "Agent mode OFF. Click to switch to Agent mode": "Agent 模式已关闭。点击切换到 Agent 模式",
-  "Switch to Chat mode": "切换到对话模式",
   "Paper mode only accepts text from this paper": "论文模式仅接受来自此论文的文本",
   "Edit target changed. Please edit latest prompt again.": "编辑目标已更改。请重新编辑最新的提示。",
   "Deleted one turn": "已删除一轮对话",
@@ -409,9 +386,9 @@ export function getWelcomeHtml(): string {
         <div class="llm-welcome-text">
           <div class="llm-welcome-title">开始对话 — 以下是你可以做的。</div>
           <ul class="llm-welcome-list">
-            <li><strong>论文对话</strong>回答关于当前打开的 PDF 的问题。<strong>开放对话</strong>是一个自由形式的工作区，可跨多篇论文和文件提问。</li>
+            <li><strong>论文对话</strong>回答关于当前打开 PDF 的问题，并在第一次提问前自动预载当前论文上下文。</li>
             <li>输入 <strong>/</strong> 打开快捷操作：附加文件、添加参考文献、发送当前 PDF 页面或发送整个 PDF。输入 <strong>@</strong> 从文献库添加论文作为上下文。</li>
-            <li>在工具栏中启用 <strong>Agent 模式</strong>，让助手自主搜索文献库、查看论文并完成多步骤研究任务。</li>
+            <li>如果启用了 <strong>MinerU</strong>，插件会优先使用增强 Markdown 和图像信息；没有缓存时会自动回退到 PDF 文本。</li>
             <li>内联添加上下文：在 PDF 阅读器中选择文本作为<strong>文本上下文</strong>，使用截图按钮作为<strong>图片上下文</strong>，或使用 <strong>@</strong> 作为<strong>论文上下文</strong>。右键点击论文标签可强制发送全文；再次右键点击切换回检索模式。</li>
           </ul>
         </div>
@@ -424,9 +401,9 @@ export function getWelcomeHtml(): string {
       <div class="llm-welcome-text">
         <div class="llm-welcome-title">Start chatting — here's what you can do.</div>
         <ul class="llm-welcome-list">
-          <li><strong>Paper chat</strong> answers questions about the currently open PDF. <strong>Library chat</strong> is a free-form workspace for questions across multiple papers and files.</li>
+          <li><strong>Paper chat</strong> answers questions about the currently open PDF and preloads that paper before your first question.</li>
           <li>Type <strong>/</strong> to open quick actions: attach files, add a reference, send the current PDF page, or send the entire PDF. Type <strong>@</strong> to add a paper from your library as context.</li>
-          <li>Enable <strong>Agent mode</strong> with the toggle in the toolbar to let the assistant autonomously search your library, inspect papers, and complete multi-step research tasks.</li>
+          <li>If <strong>MinerU</strong> is enabled, the plugin prefers enhanced markdown and figure-aware context, then falls back to PDF text when no cache is available.</li>
           <li>Add context inline: select text in the PDF reader for <strong>text context</strong>, use the screenshot button for <strong>figure context</strong>, or use <strong>@</strong> for <strong>paper context</strong>. Right-click a paper chip to force sending its full text; right-click again to switch it back to retrieval mode.</li>
         </ul>
       </div>
@@ -443,7 +420,7 @@ export function getPaperChatStartPageHtml(): string {
         <div class="llm-start-page-desc">
           <p>论文对话回答关于当前活跃论文的问题。论文将在你提问前预加载到上下文中。</p>
           <p>内联添加上下文：<strong>文本</strong>、<strong>截图</strong>或 <strong>@论文</strong>。左键点击论文标签发送 PDF；右键点击切换全文/检索模式。</p>
-          <p>使用文献库对话请点击顶部的<strong>在新窗口中打开</strong>按钮。</p>
+          <p>如果启用了 <strong>MinerU</strong>，这里会优先使用增强 Markdown 和图像信息；没有缓存时会自动回退到 PDF 文本。</p>
         </div>
       </div>
     `;
@@ -455,69 +432,7 @@ export function getPaperChatStartPageHtml(): string {
       <div class="llm-start-page-desc">
         <p>Paper chat answers questions about your current active paper. The paper will be pre-loaded into context before your first question.</p>
         <p>Add context inline: <strong>text</strong>, <strong>screenshots</strong>, or <strong>@papers</strong>. Left-click a paper chip to send its PDF; right-click to toggle between full-text and retrieval mode.</p>
-        <p>For library chat, click the <strong>Open in Window</strong> button at the top.</p>
-      </div>
-    </div>
-  `;
-}
-
-export function getNoteEditingStartPageHtml(): string {
-  if (getEffectiveLocale().startsWith("zh")) {
-    return `
-      <div class="llm-start-page">
-        <div class="llm-start-page-title">LLM-for-Zotero Lite</div>
-        <div class="llm-start-page-subtitle">一起写笔记，让想法进化</div>
-        <div class="llm-start-page-desc">
-          <p>选中一段文字，我可以帮你<strong>重写润色</strong>。</p>
-          <p>如果是条目笔记，论文上下文会<strong>自动预加载</strong>；如果是独立笔记，那就自由发挥吧。</p>
-          <p>重写后的内容会以 <strong>diff 模式</strong>显示，让你清楚看到每处改动，帮助你越写越好。</p>
-        </div>
-      </div>
-    `;
-  }
-  return `
-    <div class="llm-start-page">
-      <div class="llm-start-page-title">LLM-for-Zotero Lite</div>
-      <div class="llm-start-page-subtitle">Write with me, evolve your ideas</div>
-      <div class="llm-start-page-desc">
-        <p>Select a text snippet, and I can <strong>rewrite</strong> it for you.</p>
-        <p>If it's an item note, the paper context will be <strong>automatically preloaded</strong> for you; if it's a standalone note, let's freestyle.</p>
-        <p>The rewritten note will show in <strong>diff mode</strong>, so you can see exactly what changed — helping you evolve to write better.</p>
-      </div>
-    </div>
-  `;
-}
-
-export function getStandaloneLibraryChatStartPageHtml(): string {
-  if (getEffectiveLocale().startsWith("zh")) {
-    return `
-      <div class="llm-standalone-start-page">
-        <div class="llm-start-page-title">LLM-for-Zotero Lite Agent</div>
-        <div class="llm-start-page-subtitle">为你和你的文献库服务</div>
-        <div class="llm-start-page-recommendations">
-          <div class="llm-start-page-rec-title">推荐设置以获得最佳体验</div>
-          <ol class="llm-start-page-rec-list">
-            <li><strong>偏好设置 → MinerU</strong>：将 PDF 解析为 Markdown + 图片<span class="llm-rec-reason">（MD 是 LLM 的语言；可以利用解析出的图片写出更好的笔记；节省 token）</span></li>
-            <li>启用 <strong>Agent 模式</strong>，让助手自主完成研究任务</li>
-            <li>使用<strong>高智能模型</strong>：如 Codex、GPT-5.4 等</li>
-            <li>在偏好设置中配置<strong>笔记目录路径</strong>（设置 → Agent 标签页）</li>
-          </ol>
-        </div>
-      </div>
-    `;
-  }
-  return `
-    <div class="llm-standalone-start-page">
-      <div class="llm-start-page-title">LLM-for-Zotero Lite Agent</div>
-      <div class="llm-start-page-subtitle">serve you and your library</div>
-      <div class="llm-start-page-recommendations">
-        <div class="llm-start-page-rec-title">Recommended settings for the best experience</div>
-        <ol class="llm-start-page-rec-list">
-          <li><strong>Preferences → MinerU</strong>: parse your PDFs to Markdown + images<span class="llm-rec-reason"> (MD is the language of LLMs; enables better notes with parsed images; saves tokens)</span></li>
-          <li>Activate <strong>Agent mode</strong> for autonomous research</li>
-          <li>Use an <strong>intelligent model</strong>: Codex, GPT-5.4, or similar high-intelligence models</li>
-          <li>Set up <strong>Notes directory</strong> in Preferences (Settings → Agent tab)</li>
-        </ol>
+        <p>If <strong>MinerU</strong> is enabled, the panel prefers enhanced markdown and figure-aware context; otherwise it falls back to standard PDF text.</p>
       </div>
     </div>
   `;

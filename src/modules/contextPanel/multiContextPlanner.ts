@@ -26,7 +26,6 @@ import {
   buildPaperRetrievalCandidates,
   preGenerateEmbeddings,
   ensurePDFTextCached,
-  ensureNoteTextCached,
   renderEvidencePack,
 } from "./pdfContext";
 import { pdfTextCache } from "./state";
@@ -708,11 +707,7 @@ async function resolvePlannerPaperEntries(params: {
     const paperKey = buildPaperKey(paperContext);
     const contextItem = resolveContextItem(paperContext);
     if (contextItem) {
-      if ((contextItem as any).isNote?.()) {
-        await ensureNoteTextCached(contextItem);
-      } else {
-        await ensurePDFTextCached(contextItem);
-      }
+      await ensurePDFTextCached(contextItem);
     }
     const isActive = Boolean(activeKey && paperKey === activeKey);
     const pinKind: PlannerPaperEntry["pinKind"] = explicitFullTextKeys.has(

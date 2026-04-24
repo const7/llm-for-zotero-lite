@@ -5,8 +5,6 @@ import {
   setStatus,
 } from "./textUtils";
 import {
-  buildNoteContextIdentityKey,
-  normalizeNoteContextRef,
   normalizePaperContextRefs,
   normalizePositiveInt,
   normalizeSelectedTextSource,
@@ -15,22 +13,16 @@ import { MAX_SELECTED_TEXT_CONTEXTS } from "./constants";
 import {
   selectedTextCache,
   selectedTextPreviewExpandedCache,
-  selectedNotePreviewExpandedCache,
   recentReaderSelectionCache,
   pinnedSelectedTextKeys,
 } from "./state";
 import type {
-  NoteContextRef,
   ZoteroTabsState,
   ResolvedContextSource,
   SelectedTextContext,
   SelectedTextSource,
   PaperContextRef,
 } from "./types";
-import {
-  isGlobalPortalItem,
-  resolveActiveNoteSession,
-} from "./portalScope";
 import { formatPaperCitationLabel } from "./paperAttribution";
 import {
   getFirstSelectionFromReader,
@@ -42,26 +34,11 @@ import {
   isPinnedSelectedText,
   prunePinnedSelectedTextKeys,
 } from "./setupHandlers/controllers/pinnedContextController";
-import { readNoteSnapshot } from "./notes";
 
 type SelectedTextPageLocation = {
   contextItemId?: number;
   pageIndex?: number;
   pageLabel?: string;
-};
-
-type NoteChipSnapshot = {
-  noteId?: number;
-  title: string;
-  text: string;
-};
-
-type CreateNoteChipOptions = {
-  ownerId: number;
-  expanded: boolean;
-  pinned?: boolean;
-  removableIndex?: number;
-  noteChipKind: "active" | "selected";
 };
 
 /**
@@ -326,44 +303,6 @@ function getFirstPdfChildAttachment(
 export function resolveContextSourceItem(
   panelItem: Zotero.Item,
 ): ResolvedContextSource {
-  if (isGlobalPortalItem(panelItem)) {
-    return {
-      contextItem: null,
-      statusText: "No active paper context. Type / to add papers.",
-    };
-  }
-
-  const activeNoteSession = resolveActiveNoteSession(panelItem);
-  if (activeNoteSession?.noteKind === "standalone") {
-    return {
-      contextItem: null,
-      statusText: `Using note: ${activeNoteSession.title}`,
-    };
-  }
-  if (activeNoteSession?.noteKind === "item" && activeNoteSession.parentItemId) {
-    const activeItem = getActiveContextAttachmentFromTabs();
-    if (activeItem?.parentID === activeNoteSession.parentItemId) {
-      const label = getContextItemLabel(activeItem);
-      return {
-        contextItem: activeItem,
-        statusText: `Using note: ${activeNoteSession.title} with parent paper context ${label}`,
-      };
-    }
-    const parentItem = Zotero.Items.get(activeNoteSession.parentItemId) || null;
-    const firstPdfChild = getFirstPdfChildAttachment(parentItem);
-    if (firstPdfChild) {
-      const label = getContextItemLabel(firstPdfChild);
-      return {
-        contextItem: firstPdfChild,
-        statusText: `Using note: ${activeNoteSession.title} with parent paper context ${label}`,
-      };
-    }
-    return {
-      contextItem: null,
-      statusText: `Using note: ${activeNoteSession.title}; parent item has no PDF context`,
-    };
-  }
-
   const activeItem = getActiveContextAttachmentFromTabs();
   if (activeItem) {
     const label = getContextItemLabel(activeItem);
@@ -504,7 +443,6 @@ function normalizeSelectedTextContexts(value: unknown): SelectedTextContext[] {
         text?: unknown;
         source?: unknown;
         paperContext?: unknown;
-        noteContext?: unknown;
         contextItemId?: unknown;
         pageIndex?: unknown;
         pageLabel?: unknown;
@@ -516,10 +454,6 @@ function normalizeSelectedTextContexts(value: unknown): SelectedTextContext[] {
       const normalizedPaperContext = normalizePaperContextRefs([
         typed.paperContext,
       ])[0];
-      const normalizedNoteContext = normalizeNoteContextRef(
-        typed.noteContext,
-        { sanitizeText },
-      );
       const contextItemId = normalizePositiveInt(typed.contextItemId) || undefined;
       const rawPageIndex = Number(typed.pageIndex);
       const pageIndex =
@@ -536,7 +470,6 @@ function normalizeSelectedTextContexts(value: unknown): SelectedTextContext[] {
         text: normalizedText,
         source: normalizeSelectedTextSource(typed.source),
         paperContext: normalizedPaperContext,
-        noteContext: normalizedNoteContext,
         contextItemId,
         pageIndex,
         pageLabel,
@@ -559,12 +492,7 @@ export function getSelectedTextContextEntries(
   itemId: number,
 ): SelectedTextContext[] {
   const raw = selectedTextCache.get(itemId);
-  const normalized = normalizeSelectedTextContexts(raw);
-  const synced = syncNoteBackedSelectedTextContexts(normalized);
-  if (synced.changed) {
-    selectedTextCache.set(itemId, synced.contexts);
-  }
-  return synced.contexts;
+  return normalizeSelectedTextContexts(raw);
 }
 
 export function setSelectedTextContexts(itemId: number, texts: string[]): void {
@@ -573,79 +501,6 @@ export function setSelectedTextContexts(itemId: number, texts: string[]): void {
     .filter(Boolean)
     .map((text) => ({ text, source: "pdf" as const }));
   setSelectedTextContextEntries(itemId, normalized);
-}
-
-function resolveNoteItemFromContext(
-  noteContext?: NoteContextRef | null,
-): Zotero.Item | null {
-  if (!noteContext) return null;
-  const noteItemId = normalizePositiveInt(noteContext.noteItemId);
-  if (noteItemId) {
-    const noteItem = Zotero.Items.get(noteItemId) || null;
-    if (noteItem) return noteItem;
-  }
-  const libraryID = normalizePositiveInt(noteContext.libraryID);
-  const noteItemKey =
-    typeof noteContext.noteItemKey === "string" && noteContext.noteItemKey.trim()
-      ? noteContext.noteItemKey.trim().toUpperCase()
-      : "";
-  const getByLibraryAndKey = (Zotero.Items as unknown as {
-    getByLibraryAndKey?: (
-      libraryID: number,
-      key: string,
-    ) => Zotero.Item | null | undefined;
-  }).getByLibraryAndKey;
-  if (libraryID && noteItemKey && typeof getByLibraryAndKey === "function") {
-    return getByLibraryAndKey(libraryID, noteItemKey) || null;
-  }
-  return null;
-}
-
-function syncNoteBackedSelectedTextContexts(
-  contexts: SelectedTextContext[],
-): {
-  contexts: SelectedTextContext[];
-  changed: boolean;
-} {
-  let changed = false;
-  const nextContexts = contexts.map((entry) => {
-    if (entry.source !== "note" || !entry.noteContext) {
-      return entry;
-    }
-    const noteItem = resolveNoteItemFromContext(entry.noteContext);
-    const snapshot = readNoteSnapshot(noteItem);
-    if (!snapshot?.text) {
-      return entry;
-    }
-    const nextNoteContext: NoteContextRef = {
-      libraryID: snapshot.libraryID,
-      noteItemKey: snapshot.noteItemKey || entry.noteContext.noteItemKey,
-      noteItemId: snapshot.noteId,
-      parentItemId: snapshot.parentItemId,
-      parentItemKey: snapshot.parentItemKey || entry.noteContext.parentItemKey,
-      noteKind: snapshot.noteKind,
-      title: snapshot.title || entry.noteContext.title || `Note ${snapshot.noteId}`,
-    };
-    if (
-      entry.text === snapshot.text &&
-      buildNoteContextIdentityKey(entry.noteContext) ===
-        buildNoteContextIdentityKey(nextNoteContext) &&
-      entry.noteContext.noteItemId === nextNoteContext.noteItemId &&
-      entry.noteContext.parentItemId === nextNoteContext.parentItemId &&
-      entry.noteContext.parentItemKey === nextNoteContext.parentItemKey &&
-      entry.noteContext.noteKind === nextNoteContext.noteKind &&
-      entry.noteContext.title === nextNoteContext.title
-    ) {
-      return entry;
-    }
-    changed = true;
-    return {
-      ...entry,
-      text: snapshot.text,
-      noteContext: nextNoteContext,
-    };
-  });
-  return { contexts: nextContexts, changed };
 }
 
 function normalizeSelectedTextPageLocation(
@@ -683,18 +538,13 @@ function buildSelectedTextContext(
   source: SelectedTextSource,
   paperContext?: PaperContextRef | null,
   location?: SelectedTextPageLocation | null,
-  noteContext?: NoteContextRef | null,
 ): SelectedTextContext {
   const normalizedPaperContext = normalizePaperContextRefs([paperContext])[0];
   const normalizedLocation = normalizeSelectedTextPageLocation(location);
-  const normalizedNoteContext = normalizeNoteContextRef(noteContext, {
-    sanitizeText,
-  });
   return {
     text,
     source: normalizeSelectedTextSource(source),
     paperContext: normalizedPaperContext,
-    noteContext: normalizedNoteContext,
     contextItemId: normalizedLocation?.contextItemId,
     pageIndex: normalizedLocation?.pageIndex,
     pageLabel: normalizedLocation?.pageLabel,
@@ -741,8 +591,6 @@ function areSelectedTextContextsEquivalent(
     left.text === right.text &&
     left.source === right.source &&
     leftPaperKey === rightPaperKey &&
-    buildNoteContextIdentityKey(left.noteContext) ===
-      buildNoteContextIdentityKey(right.noteContext) &&
     (left.contextItemId || 0) === (right.contextItemId || 0) &&
     (left.pageIndex ?? -1) === (right.pageIndex ?? -1) &&
     (left.pageLabel || "") === (right.pageLabel || "")
@@ -756,7 +604,6 @@ export function syncSelectedTextContextForSource(
   options?: {
     paperContext?: PaperContextRef | null;
     location?: SelectedTextPageLocation | null;
-    noteContext?: NoteContextRef | null;
   },
 ): boolean {
   const normalizedSource = normalizeSelectedTextSource(source);
@@ -779,7 +626,6 @@ export function syncSelectedTextContextForSource(
     normalizedSource,
     options?.paperContext,
     options?.location,
-    options?.noteContext,
   );
   const existingContext = existingContexts.find(
     (entry) => entry.source === normalizedSource,
@@ -792,11 +638,7 @@ export function syncSelectedTextContextForSource(
     return false;
   }
 
-  const nextContexts =
-    normalizedSource === "note-edit"
-      ? [nextContext, ...retainedContexts]
-      : [...retainedContexts, nextContext];
-  setSelectedTextContextEntries(itemId, nextContexts);
+  setSelectedTextContextEntries(itemId, [...retainedContexts, nextContext]);
   selectedTextPreviewExpandedCache.delete(itemId);
   return true;
 }
@@ -807,7 +649,6 @@ export function appendSelectedTextContextForItem(
   source: SelectedTextSource = "pdf",
   paperContext?: PaperContextRef | null,
   location?: SelectedTextPageLocation | null,
-  noteContext?: NoteContextRef | null,
 ): boolean {
   const normalizedText = normalizeSelectedText(text || "");
   if (!normalizedText) return false;
@@ -817,21 +658,19 @@ export function appendSelectedTextContextForItem(
     const paperKey = entry.paperContext
       ? `${entry.paperContext.itemId}:${entry.paperContext.contextItemId}`
       : "-";
-    const noteKey = buildNoteContextIdentityKey(entry.noteContext) || "-";
     const contextItemId = Number.isFinite(entry.contextItemId)
       ? Math.floor(entry.contextItemId as number)
       : 0;
     const pageIndex = Number.isFinite(entry.pageIndex)
       ? Math.floor(entry.pageIndex as number)
       : -1;
-    return `${sourceKey}\u241f${noteKey}\u241f${entry.text}\u241f${paperKey}\u241f${contextItemId}\u241f${pageIndex}`;
+    return `${sourceKey}\u241f${entry.text}\u241f${paperKey}\u241f${contextItemId}\u241f${pageIndex}`;
   };
   const incomingEntry = buildSelectedTextContext(
     normalizedText,
     source,
     paperContext,
     location,
-    noteContext,
   );
   const incomingKey = dedupeKey(incomingEntry);
   if (existingContexts.some((entry) => dedupeKey(entry) === incomingKey)) {
@@ -873,21 +712,6 @@ export function setSelectedTextExpandedIndex(
   selectedTextPreviewExpandedCache.set(itemId, Math.floor(index));
 }
 
-export function isNoteContextExpanded(itemId: number): boolean {
-  return selectedNotePreviewExpandedCache.get(itemId) === true;
-}
-
-export function setNoteContextExpanded(
-  itemId: number,
-  expanded: boolean | null,
-): void {
-  if (expanded !== true) {
-    selectedNotePreviewExpandedCache.delete(itemId);
-    return;
-  }
-  selectedNotePreviewExpandedCache.set(itemId, true);
-}
-
 type AddSelectedTextContextOptions = {
   noSelectionStatusText?: string;
   successStatusText?: string;
@@ -895,7 +719,6 @@ type AddSelectedTextContextOptions = {
   source?: SelectedTextSource;
   paperContext?: PaperContextRef | null;
   location?: SelectedTextPageLocation | null;
-  noteContext?: NoteContextRef | null;
 };
 
 export function addSelectedTextContext(
@@ -919,7 +742,6 @@ export function addSelectedTextContext(
     options.source || "pdf",
     options.paperContext,
     options.location,
-    options.noteContext,
   );
   if (!appended) {
     if (status) setStatus(status, "Text Context up to 5", "error");
@@ -938,139 +760,6 @@ export function addSelectedTextContext(
   return true;
 }
 
-function resolveNoteChipSnapshot(
-  note: number | NoteContextRef,
-  fallback?: {
-    title?: string;
-    text?: string;
-  },
-): NoteChipSnapshot | null {
-  const normalizedNoteId =
-    typeof note === "number" && Number.isFinite(note) && note > 0
-      ? Math.floor(note)
-      : typeof note === "object"
-        ? normalizePositiveInt(note.noteItemId) || undefined
-        : undefined;
-  const noteItem =
-    typeof note === "object"
-      ? resolveNoteItemFromContext(note)
-      : normalizedNoteId
-        ? Zotero.Items.get(normalizedNoteId) || null
-        : null;
-  const snapshot = readNoteSnapshot(noteItem);
-  const fallbackTitle =
-    fallback?.title ||
-    (typeof note === "object" ? note.title : "") ||
-    (normalizedNoteId ? `Note ${normalizedNoteId}` : "Note");
-  if (!snapshot && !normalizedNoteId && !fallback?.text && !fallbackTitle) {
-    return null;
-  }
-  return {
-    noteId: snapshot?.noteId || normalizedNoteId,
-    title: snapshot?.title || fallbackTitle,
-    text: snapshot?.text || fallback?.text || "",
-  };
-}
-
-export function createNoteContextChip(
-  ownerDoc: Document,
-  snapshot: NoteChipSnapshot,
-  options: CreateNoteChipOptions,
-): HTMLDivElement {
-  const noteLabelText = snapshot.noteId
-    ? `Note ${snapshot.noteId}`
-    : snapshot.title || "Note";
-  const noteChip = ownerDoc.createElement("div");
-  noteChip.className = "llm-selected-context llm-note-context-chip";
-  if (options.pinned) {
-    noteChip.classList.add("llm-selected-context-pinned");
-  }
-  noteChip.dataset.noteChip = "true";
-  noteChip.dataset.noteChipKind = options.noteChipKind;
-  noteChip.dataset.noteId = snapshot.noteId ? `${snapshot.noteId}` : "";
-  noteChip.dataset.contextOwnerId = `${options.ownerId}`;
-  noteChip.dataset.pinned = options.pinned ? "true" : "false";
-  noteChip.classList.toggle("expanded", options.expanded);
-  noteChip.classList.toggle("collapsed", !options.expanded);
-
-  const noteHeader = ownerDoc.createElement("div");
-  noteHeader.className = "llm-image-preview-header llm-selected-context-header";
-
-  const noteMeta = ownerDoc.createElement("button");
-  noteMeta.type = "button";
-  noteMeta.className =
-    "llm-image-preview-meta llm-selected-context-meta llm-note-context-meta";
-  noteMeta.setAttribute("aria-label", `Note context: ${noteLabelText}`);
-  noteMeta.setAttribute("aria-expanded", options.expanded ? "true" : "false");
-  if (options.removableIndex !== undefined) {
-    noteMeta.dataset.contextIndex = `${options.removableIndex}`;
-    noteChip.dataset.contextIndex = `${options.removableIndex}`;
-  }
-  const noteIcon = ownerDoc.createElement("span");
-  noteIcon.className = "llm-note-context-icon";
-  noteIcon.textContent = "📝";
-  const noteLabel = ownerDoc.createElement("span");
-  noteLabel.className = "llm-note-context-label";
-  noteLabel.textContent = noteLabelText;
-  noteMeta.append(noteIcon, noteLabel);
-  noteHeader.appendChild(noteMeta);
-
-  if (options.removableIndex !== undefined) {
-    const noteClear = ownerDoc.createElement("button");
-    noteClear.type = "button";
-    noteClear.className = "llm-remove-img-btn llm-selected-context-clear";
-    noteClear.dataset.contextIndex = `${options.removableIndex}`;
-    noteClear.textContent = "×";
-    noteClear.title = `Clear ${noteLabelText}`;
-    noteClear.setAttribute("aria-label", `Clear ${noteLabelText}`);
-    noteHeader.appendChild(noteClear);
-  }
-
-  const noteExpanded = ownerDoc.createElement("div");
-  noteExpanded.className =
-    "llm-image-preview-expanded llm-selected-context-expanded";
-  noteExpanded.hidden = false;
-  noteExpanded.style.display = "flex";
-  const noteBody = ownerDoc.createElement("div");
-  noteBody.className = "llm-selected-context-text llm-note-context-text";
-  noteBody.textContent = snapshot.text || "Empty note";
-  noteExpanded.appendChild(noteBody);
-
-  noteChip.append(noteHeader, noteExpanded);
-  return noteChip;
-}
-
-export function refreshNoteChipPreview(noteChip: Element): void {
-  const noteId = Number((noteChip as HTMLDivElement).dataset.noteId || 0);
-  const snapshot = resolveNoteChipSnapshot(noteId);
-  if (!snapshot) return;
-  (noteChip as HTMLDivElement).dataset.noteId = snapshot.noteId
-    ? `${snapshot.noteId}`
-    : "";
-  const noteMeta = noteChip.querySelector(
-    ".llm-note-context-meta",
-  ) as HTMLButtonElement | null;
-  if (noteMeta) {
-    noteMeta.removeAttribute("title");
-    const noteLabelText = snapshot.noteId
-      ? `Note ${snapshot.noteId}`
-      : snapshot.title || "Note";
-    noteMeta.setAttribute("aria-label", `Note context: ${noteLabelText}`);
-    const noteLabel = noteMeta.querySelector(
-      ".llm-note-context-label",
-    ) as HTMLSpanElement | null;
-    if (noteLabel) {
-      noteLabel.textContent = noteLabelText;
-    }
-  }
-  const bodyEl = noteChip.querySelector(
-    ".llm-note-context-text",
-  ) as HTMLDivElement | null;
-  if (bodyEl) {
-    bodyEl.textContent = snapshot.text || "Empty note";
-  }
-}
-
 export function applySelectedTextPreview(body: Element, itemId: number) {
   const previewList = body.querySelector(
     "#llm-selected-context-list",
@@ -1082,35 +771,11 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
 
   const selectedContexts = getSelectedTextContextEntries(itemId);
   const panelRoot = body.querySelector("#llm-main") as HTMLDivElement | null;
-  // Show the active-note chip whenever the panel is in note-editing mode,
-  // regardless of whether the user has selected any text in the editor.
-  const showActiveNoteChip = Boolean(panelRoot?.dataset.noteId);
-  const activeNoteChipData = (() => {
-    if (!panelRoot || !showActiveNoteChip) return null;
-    const noteId = Number(panelRoot.dataset.noteId || 0);
-    const snapshot = resolveNoteChipSnapshot(noteId, {
-      title: panelRoot.dataset.noteTitle || "",
-    });
-    if (!snapshot) return null;
-    const title = `${snapshot.title || panelRoot.dataset.noteTitle || ""}`.trim();
-    if (snapshot.title) {
-      panelRoot.dataset.noteTitle = snapshot.title;
-    }
-    return {
-      noteId: snapshot.noteId,
-      title,
-      text: snapshot.text,
-    };
-  })();
-  if (!showActiveNoteChip) {
-    selectedNotePreviewExpandedCache.delete(itemId);
-  }
   prunePinnedSelectedTextKeys(pinnedSelectedTextKeys, itemId, selectedContexts);
-  if (!selectedContexts.length && !activeNoteChipData) {
+  if (!selectedContexts.length) {
     previewList.style.display = "none";
     previewList.innerHTML = "";
     selectedTextPreviewExpandedCache.delete(itemId);
-    selectedNotePreviewExpandedCache.delete(itemId);
     if (selectTextBtn) {
       selectTextBtn.classList.remove("llm-action-btn-active");
     }
@@ -1124,21 +789,8 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
     itemId,
     selectedContexts.length,
   );
-  const isNoteExpanded = isNoteContextExpanded(itemId);
-  const isGlobalConversation = panelRoot?.dataset.conversationKind === "global";
   previewList.style.display = "contents";
   previewList.innerHTML = "";
-
-  if (activeNoteChipData) {
-    previewList.appendChild(
-      createNoteContextChip(ownerDoc, activeNoteChipData, {
-        ownerId: itemId,
-        expanded: isNoteExpanded,
-        pinned: true,
-        noteChipKind: "active",
-      }),
-    );
-  }
 
   for (const [index, selectedContext] of selectedContexts.entries()) {
     const selectedText = selectedContext.text;
@@ -1149,46 +801,15 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
       itemId,
       selectedContext,
     );
-    if (selectedSource === "note" && selectedContext.noteContext) {
-      const noteSnapshot = resolveNoteChipSnapshot(selectedContext.noteContext, {
-        title: selectedContext.noteContext.title,
-        text: selectedContext.text,
-      });
-      if (noteSnapshot) {
-        previewList.appendChild(
-          createNoteContextChip(ownerDoc, noteSnapshot, {
-            ownerId: itemId,
-            expanded: isExpanded,
-            pinned,
-            removableIndex: index,
-            noteChipKind: "selected",
-          }),
-        );
-        continue;
-      }
-    }
     const contextLabel =
       (() => {
-        if (selectedSource === "note-edit") {
-          return "Editing";
-        }
         const pageLabel = formatSelectedTextContextPageLabel(selectedContext);
         if (selectedSource === "pdf" && pageLabel) {
-          if (isGlobalConversation) {
-            const paperLabel = formatPaperCitationLabel(
-              selectedContext.paperContext,
-            );
-            return paperLabel
-              ? `${paperLabel}, ${pageLabel.replace(/^page /, "p")}`
-              : pageLabel.replace(/^page /, "p");
-          }
           return pageLabel;
         }
-        return isGlobalConversation && selectedSource === "pdf"
-          ? formatPaperCitationLabel(selectedContext.paperContext)
-          : selectedContexts.length > 1 && index > 0
-            ? `Text Context (${index + 1})`
-            : "Text Context";
+        return selectedContexts.length > 1 && index > 0
+          ? `Text Context (${index + 1})`
+          : "Text Context";
       })();
 
     const previewBox = ownerDoc.createElement("div");
@@ -1204,10 +825,6 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
     previewBox.classList.toggle(
       "llm-selected-context-source-model",
       selectedSource === "model",
-    );
-    previewBox.classList.toggle(
-      "llm-selected-context-source-note-edit",
-      selectedSource === "note-edit",
     );
     previewBox.classList.toggle("llm-selected-context-pinned", pinned);
     previewBox.dataset.pinned = pinned ? "true" : "false";
@@ -1231,10 +848,6 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
       "llm-selected-context-source-model",
       selectedSource === "model",
     );
-    previewMeta.classList.toggle(
-      "llm-selected-context-source-note-edit",
-      selectedSource === "note-edit",
-    );
     previewMeta.textContent = contextLabel;
     const isCorrupted = isLikelyCorruptedSelectedText(selectedText);
     previewMeta.classList.toggle(
@@ -1248,10 +861,6 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
       (selectedContext.pageIndex as number) >= 0;
     previewMeta.title = isJumpablePdfContext
       ? `Jump to ${pageLabel || "page"}`
-      : selectedSource === "note-edit"
-        ? isExpanded
-          ? "Collapse editing focus"
-          : "Expand editing focus"
       : isExpanded
         ? "Collapse text context"
         : "Expand text context";
@@ -1270,16 +879,14 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
         : "";
 
     previewHeader.appendChild(previewMeta);
-    if (selectedSource !== "note-edit") {
-      const previewClear = ownerDoc.createElement("button");
-      previewClear.type = "button";
-      previewClear.className = "llm-remove-img-btn llm-selected-context-clear";
-      previewClear.dataset.contextIndex = `${index}`;
-      previewClear.textContent = "×";
-      previewClear.title = "Clear selected context";
-      previewClear.setAttribute("aria-label", "Clear selected context");
-      previewHeader.appendChild(previewClear);
-    }
+    const previewClear = ownerDoc.createElement("button");
+    previewClear.type = "button";
+    previewClear.className = "llm-remove-img-btn llm-selected-context-clear";
+    previewClear.dataset.contextIndex = `${index}`;
+    previewClear.textContent = "×";
+    previewClear.title = "Clear selected context";
+    previewClear.setAttribute("aria-label", "Clear selected context");
+    previewHeader.appendChild(previewClear);
 
     const previewExpanded = ownerDoc.createElement("div");
     previewExpanded.className =
@@ -1308,33 +915,6 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
       selectedContexts.length > 0,
     );
   }
-}
-
-export function refreshActiveNoteChipPreview(body: Element): void {
-  const panelRoot = body.querySelector("#llm-main") as HTMLDivElement | null;
-  const previewList = body.querySelector(
-    "#llm-selected-context-list",
-  ) as HTMLDivElement | null;
-  if (!panelRoot || !previewList) return;
-  const noteChip = previewList.querySelector(
-    "[data-note-chip='true'][data-note-chip-kind='active']",
-  ) as HTMLDivElement | null;
-  if (!noteChip) return;
-  const noteId = Number(panelRoot.dataset.noteId || noteChip.dataset.noteId || 0);
-  const snapshot = resolveNoteChipSnapshot(noteId);
-  if (!snapshot) return;
-  panelRoot.dataset.noteTitle = snapshot.title;
-  refreshNoteChipPreview(noteChip);
-  const contextOwnerId = Number(
-    noteChip.dataset.contextOwnerId || panelRoot.dataset.itemId || 0,
-  );
-  const noteMeta = noteChip.querySelector(
-    ".llm-note-context-meta",
-  ) as HTMLButtonElement | null;
-  noteMeta?.setAttribute(
-    "aria-expanded",
-    isNoteContextExpanded(contextOwnerId) ? "true" : "false",
-  );
 }
 
 export async function includeSelectedTextFromReader(

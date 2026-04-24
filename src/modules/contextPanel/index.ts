@@ -23,7 +23,6 @@
  */
 
 import { getLocaleID } from "../../utils/locale";
-import { getFeatureProfile } from "../../featureProfile";
 import { config, PANE_ID } from "./constants";
 import type { Message } from "./types";
 import {
@@ -50,7 +49,6 @@ import {
   getItemSelectionCacheKeys,
   appendSelectedTextContextForItem,
   applySelectedTextPreview,
-  syncSelectedTextContextForSource,
 } from "./contextResolution";
 import { ensurePDFTextCached } from "./pdfContext";
 import { resolveCurrentSelectionPageLocationFromReader } from "./livePdfSelectionLocator";
@@ -92,7 +90,6 @@ export function registerLLMStyles(win: _ZoteroTypes.MainWindow) {
 export function registerReaderContextPanel() {
   if (readerContextPanelRegistered) return;
   setReaderContextPanelRegistered(true);
-  const featureProfile = getFeatureProfile();
   const loadSetupHandlers = (): typeof import("./setupHandlers") =>
     require("./setupHandlers");
   const loadChatModule = (): typeof import("./chat") => require("./chat");
@@ -739,248 +736,6 @@ export function registerReaderSelectionTracking() {
     config.addonID,
   );
   readerAPI.__llmSelectionTrackingRegistered = true;
-}
-
-type MainWindowWithNoteEditingTracker = _ZoteroTypes.MainWindow & {
-  __llmNoteEditingSelectionTracking?: {
-    intervalId: number;
-    refresh: () => void;
-    lastNoteId: number;
-    lastSelectionText: string;
-  };
-};
-
-function collectAccessibleDocuments(
-  rootDoc: Document,
-  docs: Document[] = [],
-  seen: Set<Document> = new Set<Document>(),
-  depth = 0,
-): Document[] {
-  if (!rootDoc || seen.has(rootDoc) || depth > 3) {
-    return docs;
-  }
-  seen.add(rootDoc);
-  docs.push(rootDoc);
-  const frames = Array.from(rootDoc.querySelectorAll("iframe"));
-  for (const frame of frames) {
-    try {
-      const frameDoc = (frame as HTMLIFrameElement).contentDocument;
-      if (frameDoc) {
-        collectAccessibleDocuments(frameDoc, docs, seen, depth + 1);
-      }
-    } catch (_err) {
-      void _err;
-    }
-  }
-  return docs;
-}
-
-function getActiveNoteItemFromWindow(
-  win: _ZoteroTypes.MainWindow,
-): Zotero.Item | null {
-  try {
-    const tabs = (win as unknown as { Zotero?: { Tabs?: any } }).Zotero?.Tabs;
-    const selectedId =
-      tabs?.selectedID === undefined || tabs?.selectedID === null
-        ? ""
-        : `${tabs.selectedID}`;
-    const activeTab = Array.isArray(tabs?._tabs)
-      ? tabs._tabs.find(
-          (tab: Record<string, unknown>) => `${tab?.id || ""}` === selectedId,
-        )
-      : null;
-    const data = (activeTab?.data || {}) as Record<string, unknown>;
-    const candidateIds = [
-      data.itemID,
-      data.itemId,
-      data.id,
-      data.noteID,
-      data.noteId,
-    ];
-    for (const candidateId of candidateIds) {
-      const parsed = Number(candidateId);
-      if (!Number.isFinite(parsed) || parsed <= 0) continue;
-      const item = Zotero.Items.get(Math.floor(parsed)) || null;
-      if ((item as any)?.isNote?.()) {
-        return item;
-      }
-    }
-  } catch (_err) {
-    void _err;
-  }
-
-  try {
-    const pane = (
-      win as unknown as {
-        ZoteroPane?: { getSelectedItems?: () => Zotero.Item[] };
-      }
-    ).ZoteroPane;
-    const selectedItems = pane?.getSelectedItems?.() || [];
-    const noteItem = selectedItems.find((item: Zotero.Item) =>
-      (item as any)?.isNote?.(),
-    );
-    return noteItem || null;
-  } catch (_err) {
-    void _err;
-  }
-
-  return null;
-}
-
-function refreshPanelsForConversationKey(conversationKey: number): void {
-  for (const [activeBody, syncPanelState] of activeContextPanelStateSync) {
-    if (!(activeBody as Element).isConnected) {
-      activeContextPanels.delete(activeBody);
-      activeContextPanelStateSync.delete(activeBody);
-      continue;
-    }
-    const activeRoot = activeBody.querySelector(
-      "#llm-main",
-    ) as HTMLDivElement | null;
-    const activeConversationKey = activeRoot
-      ? Number(activeRoot.dataset.itemId || 0)
-      : 0;
-    if (
-      Number.isFinite(activeConversationKey) &&
-      activeConversationKey === conversationKey
-    ) {
-      syncPanelState();
-    }
-  }
-}
-
-function refreshTrackedNoteEditingSelection(
-  win: MainWindowWithNoteEditingTracker,
-): void {
-  const { getEditableSelectionFromDocument } =
-    require("./noteSelection") as typeof import("./noteSelection");
-  const tracker = win.__llmNoteEditingSelectionTracking;
-  if (!tracker) return;
-
-  // If focus is inside the plugin's own UI (e.g. the input box), the note
-  // editing selection hasn't changed — preserve the current tracking state.
-  // Without this guard, the note editor iframe transiently loses hasFocus()
-  // and the "Editing..." chip disappears.
-  try {
-    const activeEl = win.document.activeElement;
-    if (
-      activeEl &&
-      (activeEl.id === "llm-main" || activeEl.closest?.("#llm-main"))
-    ) {
-      return;
-    }
-  } catch {
-    // Ignore — proceed with normal refresh
-  }
-
-  // Fast path: skip expensive iframe traversal when no note tab is active.
-  // getActiveNoteItemFromWindow traverses Zotero tabs and items; only proceed
-  // to the heavier collectAccessibleDocuments when a note is actually open.
-  const noteItem = getActiveNoteItemFromWindow(win);
-  const nextNoteId =
-    noteItem && Number.isFinite(noteItem.id) && noteItem.id > 0
-      ? Math.floor(noteItem.id)
-      : 0;
-
-  if (nextNoteId === 0 && tracker.lastNoteId === 0) {
-    // No note was active before and none is active now — nothing to do.
-    return;
-  }
-
-  const nextSelectionText = noteItem
-    ? collectAccessibleDocuments(win.document).reduce((found, doc) => {
-        if (found) return found;
-        // Skip documents from background tab editors: only the focused
-        // editor's selection matters.  Without this, switching from Note A
-        // (with selected text) to Note B leaks Note A's selection because
-        // collectAccessibleDocuments traverses ALL iframes, including
-        // hidden-tab editors that still hold stale selections.
-        if (doc !== win.document && typeof doc.hasFocus === "function") {
-          if (!doc.hasFocus()) return found;
-        }
-        return getEditableSelectionFromDocument(doc);
-      }, "")
-    : "";
-
-  if (
-    tracker.lastNoteId === nextNoteId &&
-    tracker.lastSelectionText === nextSelectionText
-  ) {
-    return;
-  }
-
-  if (
-    tracker.lastNoteId > 0 &&
-    (tracker.lastNoteId !== nextNoteId || !nextSelectionText)
-  ) {
-    if (syncSelectedTextContextForSource(tracker.lastNoteId, "", "note-edit")) {
-      refreshPanelsForConversationKey(tracker.lastNoteId);
-    }
-  }
-
-  if (nextNoteId > 0 && nextSelectionText) {
-    if (
-      syncSelectedTextContextForSource(
-        nextNoteId,
-        nextSelectionText,
-        "note-edit",
-      )
-    ) {
-      refreshPanelsForConversationKey(nextNoteId);
-    }
-  }
-
-  tracker.lastNoteId = nextNoteId;
-  tracker.lastSelectionText = nextSelectionText;
-}
-
-export function registerNoteEditingSelectionTracking(
-  win: _ZoteroTypes.MainWindow,
-) {
-  const trackedWindow = win as MainWindowWithNoteEditingTracker;
-  if (trackedWindow.__llmNoteEditingSelectionTracking) return;
-  const refresh = () => {
-    refreshTrackedNoteEditingSelection(trackedWindow);
-  };
-  // Debounced version for event-driven calls (selectionchange, mouseup,
-  // keyup) — prevents the expensive iframe traversal from firing dozens
-  // of times per second during rapid typing or drag-selecting.
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  const debouncedRefresh = () => {
-    if (debounceTimer !== null) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(refresh, 150);
-  };
-  // Interval reduced from 250ms → 1000ms.  The event listeners handle
-  // real-time changes; this interval is only a fallback safety net.
-  const intervalId = win.setInterval(refresh, 1000);
-  trackedWindow.__llmNoteEditingSelectionTracking = {
-    intervalId,
-    refresh,
-    lastNoteId: 0,
-    lastSelectionText: "",
-  };
-  win.document.addEventListener("selectionchange", debouncedRefresh, true);
-  win.document.addEventListener("mouseup", debouncedRefresh, true);
-  win.document.addEventListener("keyup", debouncedRefresh, true);
-  win.addEventListener(
-    "unload",
-    () => {
-      const tracker = trackedWindow.__llmNoteEditingSelectionTracking;
-      if (!tracker) return;
-      win.clearInterval(tracker.intervalId);
-      if (debounceTimer !== null) clearTimeout(debounceTimer);
-      win.document.removeEventListener(
-        "selectionchange",
-        debouncedRefresh,
-        true,
-      );
-      win.document.removeEventListener("mouseup", debouncedRefresh, true);
-      win.document.removeEventListener("keyup", debouncedRefresh, true);
-      delete trackedWindow.__llmNoteEditingSelectionTracking;
-    },
-    { once: true },
-  );
-  refresh();
 }
 
 export function clearConversation(itemId: number) {

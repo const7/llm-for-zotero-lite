@@ -1,22 +1,17 @@
 import {
   ensurePaperV1Conversation,
-  listGlobalConversations,
   listPaperConversations,
-  listAllPaperConversationsByLibrary,
 } from "../../utils/chatStore";
 import { normalizeHistoryTitle } from "./setupHandlers/controllers/conversationHistoryController";
 
-export type ConversationHistoryScopeMode = "open" | "paper";
-
 export type ConversationHistoryScopeParams = {
-  mode: ConversationHistoryScopeMode;
   libraryID: number;
   paperItemID?: number;
   limit: number;
 };
 
 export type ConversationHistoryScopeEntry = {
-  mode: ConversationHistoryScopeMode;
+  mode: "paper";
   conversationKey: number;
   title: string;
   createdAt: number;
@@ -45,33 +40,6 @@ export async function loadConversationHistoryScope(
   if (normalizedLibraryID <= 0) return [];
 
   const normalizedLimit = normalizeScopeLimit(params.limit);
-
-  if (params.mode === "open") {
-    const summaries = await listGlobalConversations(
-      normalizedLibraryID,
-      normalizedLimit,
-      true,
-    );
-    return summaries.map((summary) => {
-      const lastActivityAt = Number(summary.lastActivityAt || summary.createdAt || 0);
-      const createdAt = Number(summary.createdAt || lastActivityAt || 0);
-      const userTurnCount = Number(summary.userTurnCount || 0);
-      const isDraft = userTurnCount <= 0;
-      return {
-        mode: "open" as const,
-        conversationKey: summary.conversationKey,
-        title: normalizeTitle(summary.title, isDraft),
-        createdAt: Number.isFinite(createdAt) ? Math.floor(createdAt) : 0,
-        lastActivityAt: Number.isFinite(lastActivityAt)
-          ? Math.floor(lastActivityAt)
-          : 0,
-        userTurnCount: Number.isFinite(userTurnCount)
-          ? Math.max(0, Math.floor(userTurnCount))
-          : 0,
-        isDraft,
-      };
-    });
-  }
 
   const normalizedPaperItemID =
     Number.isFinite(params.paperItemID) && Number(params.paperItemID) > 0
@@ -113,70 +81,4 @@ export async function loadConversationHistoryScope(
           : undefined,
     };
   });
-}
-
-/**
- * Load all conversations (both paper and global) for a library,
- * sorted by lastActivityAt descending. Used by standalone search.
- */
-export async function loadAllConversationHistory(params: {
-  libraryID: number;
-  limit?: number;
-}): Promise<ConversationHistoryScopeEntry[]> {
-  const normalizedLibraryID = Number.isFinite(params.libraryID) && params.libraryID > 0
-    ? Math.floor(params.libraryID)
-    : 0;
-  if (normalizedLibraryID <= 0) return [];
-
-  const limit = params.limit ?? 100;
-
-  const [paperSummaries, globalSummaries] = await Promise.all([
-    listAllPaperConversationsByLibrary(normalizedLibraryID, limit),
-    listGlobalConversations(normalizedLibraryID, limit, false),
-  ]);
-
-  const entries: ConversationHistoryScopeEntry[] = [];
-
-  for (const summary of paperSummaries) {
-    const lastActivityAt = Number(summary.lastActivityAt || summary.createdAt || 0);
-    const createdAt = Number(summary.createdAt || lastActivityAt || 0);
-    const userTurnCount = Number(summary.userTurnCount || 0);
-    const isDraft = userTurnCount <= 0;
-    entries.push({
-      mode: "paper",
-      conversationKey: summary.conversationKey,
-      title: normalizeTitle(summary.title, isDraft),
-      createdAt: Number.isFinite(createdAt) ? Math.floor(createdAt) : 0,
-      lastActivityAt: Number.isFinite(lastActivityAt) ? Math.floor(lastActivityAt) : 0,
-      userTurnCount: Number.isFinite(userTurnCount) ? Math.max(0, Math.floor(userTurnCount)) : 0,
-      isDraft,
-      sessionVersion:
-        Number.isFinite(summary.sessionVersion) && summary.sessionVersion > 0
-          ? Math.floor(summary.sessionVersion)
-          : undefined,
-      paperItemID:
-        Number.isFinite(summary.paperItemID) && summary.paperItemID > 0
-          ? Math.floor(summary.paperItemID)
-          : undefined,
-    });
-  }
-
-  for (const summary of globalSummaries) {
-    const lastActivityAt = Number(summary.lastActivityAt || summary.createdAt || 0);
-    const createdAt = Number(summary.createdAt || lastActivityAt || 0);
-    const userTurnCount = Number(summary.userTurnCount || 0);
-    const isDraft = userTurnCount <= 0;
-    entries.push({
-      mode: "open",
-      conversationKey: summary.conversationKey,
-      title: normalizeTitle(summary.title, isDraft),
-      createdAt: Number.isFinite(createdAt) ? Math.floor(createdAt) : 0,
-      lastActivityAt: Number.isFinite(lastActivityAt) ? Math.floor(lastActivityAt) : 0,
-      userTurnCount: Number.isFinite(userTurnCount) ? Math.max(0, Math.floor(userTurnCount)) : 0,
-      isDraft,
-    });
-  }
-
-  entries.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-  return entries;
 }

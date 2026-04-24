@@ -50,24 +50,8 @@ import {
   getMineruApiKey,
   setMineruEnabled,
   setMineruApiKey,
-  isGlobalAutoParseEnabled,
-  setGlobalAutoParseEnabled,
-  getMineruExcludePatterns,
-  setMineruExcludePatterns,
 } from "../utils/mineruConfig";
-import {
-  getNotesDirectoryPath,
-  setNotesDirectoryPath,
-  getNotesDirectoryFolder,
-  setNotesDirectoryFolder,
-  getNotesDirectoryAttachmentsFolder,
-  setNotesDirectoryAttachmentsFolder,
-  getNotesDirectoryNickname,
-  setNotesDirectoryNickname,
-} from "../utils/notesDirectoryConfig";
 import { testMineruConnection } from "../utils/mineruClient";
-import { registerMineruManagerScript } from "./mineruManagerScript";
-import { getFeatureProfile } from "../featureProfile";
 
 type PrefKey = "systemPrompt";
 
@@ -453,7 +437,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   }
 
   const doc = _window.document;
-  const featureProfile = getFeatureProfile();
   await new Promise((resolve) => setTimeout(resolve, 100));
 
   // ── Translate static XHTML text ────────────────────────────────
@@ -523,19 +506,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   const prefPanels = doc.querySelectorAll("[data-pref-panel]");
   for (let i = 0; i < prefPanels.length; i++) {
     translateTextNodes(prefPanels[i]);
-  }
-  const hiddenTabs: string[] = [];
-  if (!featureProfile.preferences.showAgentTab) hiddenTabs.push("agent");
-  if (!featureProfile.preferences.showMineruTab) hiddenTabs.push("mineru");
-  for (const tabId of hiddenTabs) {
-    const tabButton = doc.querySelector(
-      `[data-pref-tab="${tabId}"]`,
-    ) as HTMLElement | null;
-    const panel = doc.querySelector(
-      `[data-pref-panel="${tabId}"]`,
-    ) as HTMLElement | null;
-    if (tabButton) tabButton.style.display = "none";
-    if (panel) panel.style.display = "none";
   }
   // Translate textarea placeholder
   const systemPrompt = doc.querySelector(
@@ -620,9 +590,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   ) as HTMLTextAreaElement | null;
   const popupAddTextEnabledInput = doc.querySelector(
     `#${config.addonRef}-popup-add-text-enabled`,
-  ) as HTMLInputElement | null;
-  const enableAgentModeInput = doc.querySelector(
-    `#${config.addonRef}-enable-agent-mode`,
   ) as HTMLInputElement | null;
 
   if (!modelSections) return;
@@ -1800,114 +1767,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     });
   }
 
-  if (enableAgentModeInput) {
-    const prefValue = Zotero.Prefs.get(
-      `${config.prefsPrefix}.enableAgentMode`,
-      true,
-    );
-    enableAgentModeInput.checked =
-      prefValue === true || `${prefValue || ""}`.toLowerCase() === "true";
-    enableAgentModeInput.addEventListener("change", () => {
-      Zotero.Prefs.set(
-        `${config.prefsPrefix}.enableAgentMode`,
-        enableAgentModeInput.checked,
-        true,
-      );
-    });
-  }
-
-  // ── Notes Directory settings ─────────────────────────────────────
-  {
-    const notesDirNicknameInput = doc.querySelector(
-      `#${config.addonRef}-notes-dir-nickname`,
-    ) as HTMLInputElement | null;
-    const notesDirPathInput = doc.querySelector(
-      `#${config.addonRef}-obsidian-vault-path`,
-    ) as HTMLInputElement | null;
-    const notesDirFolderInput = doc.querySelector(
-      `#${config.addonRef}-obsidian-target-folder`,
-    ) as HTMLInputElement | null;
-    const notesDirTestBtn = doc.querySelector(
-      `#${config.addonRef}-obsidian-test`,
-    ) as HTMLButtonElement | null;
-    const notesDirTestStatus = doc.querySelector(
-      `#${config.addonRef}-obsidian-test-status`,
-    ) as HTMLSpanElement | null;
-
-    if (notesDirNicknameInput) {
-      notesDirNicknameInput.value = getNotesDirectoryNickname();
-      notesDirNicknameInput.addEventListener("input", () => {
-        setNotesDirectoryNickname(notesDirNicknameInput.value);
-      });
-    }
-    if (notesDirPathInput) {
-      notesDirPathInput.value = getNotesDirectoryPath();
-      notesDirPathInput.addEventListener("input", () => {
-        setNotesDirectoryPath(notesDirPathInput.value);
-      });
-    }
-    if (notesDirFolderInput) {
-      notesDirFolderInput.value = getNotesDirectoryFolder();
-      notesDirFolderInput.addEventListener("input", () => {
-        setNotesDirectoryFolder(notesDirFolderInput.value);
-      });
-    }
-    const notesDirAttachmentsInput = doc.querySelector(
-      `#${config.addonRef}-obsidian-attachments-folder`,
-    ) as HTMLInputElement | null;
-    if (notesDirAttachmentsInput) {
-      notesDirAttachmentsInput.value = getNotesDirectoryAttachmentsFolder();
-      notesDirAttachmentsInput.addEventListener("input", () => {
-        setNotesDirectoryAttachmentsFolder(notesDirAttachmentsInput.value);
-      });
-    }
-    if (notesDirTestBtn && notesDirTestStatus) {
-      notesDirTestBtn.addEventListener("click", async () => {
-        const dirPath = (notesDirPathInput?.value || "").trim();
-        if (!dirPath) {
-          notesDirTestStatus.style.display = "inline";
-          notesDirTestStatus.style.color = "#dc2626";
-          notesDirTestStatus.textContent = t("Enter a directory path first");
-          return;
-        }
-        const targetFolder = (notesDirFolderInput?.value || "").trim();
-        const fullPath = targetFolder
-          ? joinLocalPath(dirPath, targetFolder)
-          : dirPath;
-
-        notesDirTestBtn.disabled = true;
-        notesDirTestStatus.style.display = "inline";
-        notesDirTestStatus.style.color = "var(--fill-secondary, #888)";
-        notesDirTestStatus.textContent = "Testing...";
-
-        try {
-          const IOUtils = (globalThis as any).IOUtils;
-          if (!IOUtils?.exists || !IOUtils?.write || !IOUtils?.remove) {
-            throw new Error("File I/O not available");
-          }
-          const exists = await IOUtils.exists(fullPath);
-          if (!exists) {
-            throw new Error(`Directory not found: ${fullPath}`);
-          }
-          const testFile = joinLocalPath(fullPath, ".llm-for-zotero-lite-test");
-          const bytes = new TextEncoder().encode("test");
-          await IOUtils.write(testFile, bytes);
-          await IOUtils.remove(testFile);
-          notesDirTestStatus.style.color = "#16a34a";
-          notesDirTestStatus.textContent = t("Write access verified");
-        } catch (err) {
-          notesDirTestStatus.style.color = "#dc2626";
-          notesDirTestStatus.textContent =
-            err instanceof Error ? err.message : String(err);
-        } finally {
-          notesDirTestBtn.disabled = false;
-        }
-      });
-    }
-  }
-
-
-
   // ── Semantic Search settings ───────────────────────────────────
   // Follows the same toggle + sub-settings pattern as MinerU.
 
@@ -2346,16 +2205,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     });
   }
 
-  const mineruGlobalAutoParseInput = doc.querySelector(
-    `#${config.addonRef}-mineru-global-auto-parse`,
-  ) as HTMLInputElement | null;
-  if (mineruGlobalAutoParseInput) {
-    mineruGlobalAutoParseInput.checked = isGlobalAutoParseEnabled();
-    mineruGlobalAutoParseInput.addEventListener("change", () => {
-      setGlobalAutoParseEnabled(mineruGlobalAutoParseInput.checked);
-    });
-  }
-
   if (mineruApiKeyInput) {
     mineruApiKeyInput.value = getMineruApiKey();
     mineruApiKeyInput.addEventListener("input", () => {
@@ -2391,26 +2240,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     mineruTestBtn.addEventListener("command", () => void runMineruTest());
   }
 
-  // ── Filename exclusion patterns ────────────────────────────────
-  const mineruExcludePatternsInput = doc.querySelector(
-    `#${config.addonRef}-mineru-exclude-patterns`,
-  ) as HTMLInputElement | null;
-  if (mineruExcludePatternsInput) {
-    const patterns = getMineruExcludePatterns();
-    mineruExcludePatternsInput.value = patterns.join(", ");
-    let saveTimer: ReturnType<typeof setTimeout> | null = null;
-    mineruExcludePatternsInput.addEventListener("input", () => {
-      if (saveTimer) clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => {
-        const parsed = mineruExcludePatternsInput.value
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
-        setMineruExcludePatterns(parsed);
-      }, 500);
-    });
-  }
-
   // ── Language selector ────────────────────────────────────────────
   const localeSelect = doc.querySelector(
     `#${config.addonRef}-locale-select`,
@@ -2431,11 +2260,4 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     });
   }
 
-  // ── Embedded MinerU manager ──────────────────────────────────────
-  const mineruMgrSidebar = doc.querySelector(
-    `#${config.addonRef}-mineru-mgr-sidebar`,
-  );
-  if (mineruMgrSidebar && _window) {
-    void registerMineruManagerScript(_window, config.addonRef);
-  }
 }

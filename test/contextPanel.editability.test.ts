@@ -2,14 +2,13 @@ import { assert } from "chai";
 import { canEditUserPromptTurn } from "../src/modules/contextPanel/editability";
 
 describe("contextPanel editability", function () {
-  it("keeps agent-backed user prompts editable", function () {
+  it("keeps completed assistant-backed user prompts editable", function () {
     const editable = canEditUserPromptTurn({
       isUser: true,
       hasItem: true,
       conversationIsIdle: true,
       assistantPair: {
         role: "assistant",
-        runMode: "agent",
       },
     });
 
@@ -34,7 +33,6 @@ describe("contextPanel editability", function () {
       conversationIsIdle: false,
       assistantPair: {
         role: "assistant",
-        runMode: "chat",
       },
     });
 

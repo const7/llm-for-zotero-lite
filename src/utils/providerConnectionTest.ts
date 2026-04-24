@@ -3,14 +3,13 @@ import type { ModelProviderAuthMode } from "./modelProviders";
 import {
   describeAgentCapabilityClass,
   getAgentCapabilityClass,
+  getProviderProtocolSpec,
   type ProviderProtocol,
 } from "./providerProtocol";
 import {
   buildProviderTransportHeaders,
   resolveProviderTransportEndpoint,
 } from "./providerTransport";
-import { createAgentModelAdapter } from "../agent/model/factory";
-import type { AgentRuntimeRequest } from "../agent/types";
 
 function extractTextFromCodexSSE(raw: string): string {
   const lines = raw.split(/\r?\n/);
@@ -204,17 +203,7 @@ export function getProviderConnectionCapabilityLabel(params: {
   apiKey: string;
   modelName: string;
 }): string {
-  const request: AgentRuntimeRequest = {
-    conversationKey: 0,
-    mode: "agent",
-    userText: "test",
-    model: params.modelName,
-    apiBase: params.apiBase,
-    apiKey: params.apiKey,
-    authMode: params.authMode,
-    providerProtocol: params.protocol,
-  };
-  const capabilities = createAgentModelAdapter(request).getCapabilities(request);
+  const capabilities = getProviderProtocolSpec(params.protocol);
   return describeAgentCapabilityClass(
     getAgentCapabilityClass({
       toolCalls: capabilities.toolCalls,

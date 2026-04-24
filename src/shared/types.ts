@@ -1,9 +1,9 @@
 /**
- * Shared domain types used by both the agent layer and the contextPanel layer.
+ * Shared domain types for the lean paper-chat runtime.
  * This file has zero imports — all types are pure data shapes.
  */
 
-export type SelectedTextSource = "pdf" | "model" | "note" | "note-edit";
+export type SelectedTextSource = "pdf" | "model";
 
 export type ChatAttachmentCategory =
   | "image"
@@ -43,17 +43,6 @@ export type PaperContextRef = {
   mineruCacheDir?: string;
 };
 
-/** A Zotero note (item note or standalone) selected as a reference context. */
-export type NoteContextRef = {
-  libraryID: number;
-  noteItemKey: string;
-  noteItemId?: number;
-  parentItemId?: number;
-  parentItemKey?: string;
-  noteKind: "item" | "standalone";
-  title: string;
-};
-
 /** A non-PDF, non-note file attachment (image/figure or other file) selected as reference context. */
 export type OtherContextRef = {
   contextItemId: number;
@@ -68,40 +57,6 @@ export type CollectionContextRef = {
   collectionId: number;
   name: string;
   libraryID: number;
-};
-
-export type ActiveNoteSession = {
-  noteKind: "item" | "standalone";
-  noteId: number;
-  title: string;
-  parentItemId?: number;
-  displayConversationKind: "paper" | "global";
-  capabilities: {
-    showModeSwitch: boolean;
-    showNewConversation: boolean;
-    showHistory: boolean;
-    showOpenLock: boolean;
-  };
-};
-
-export type ActiveNoteContext = {
-  noteId: number;
-  title: string;
-  noteKind: "item" | "standalone";
-  parentItemId?: number;
-  noteText: string;
-  /** Raw HTML of the note, provided so the agent can see the original
-   *  structure and inline styles when editing styled/template notes. */
-  noteHtml?: string;
-};
-
-export type GlobalConversationSummary = {
-  conversationKey: number;
-  libraryID: number;
-  createdAt: number;
-  title?: string;
-  lastActivityAt: number;
-  userTurnCount: number;
 };
 
 export type PaperConversationSummary = {

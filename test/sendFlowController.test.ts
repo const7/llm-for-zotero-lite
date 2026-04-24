@@ -40,8 +40,6 @@ describe("sendFlowController", function () {
     let persistDraftInputCalls = 0;
     let setActiveEditSessionCalls = 0;
     let lastSentQuestion = "";
-    let lastRuntimeMode = "";
-    let lastEditRuntimeMode = "";
     let lastEditPdfUploadSystemMessages: string[] | undefined;
     let resolvePdfPaperAttachmentsCalls = 0;
     let renderPdfPagesAsImagesCalls = 0;
@@ -84,11 +82,8 @@ describe("sendFlowController", function () {
         question: string,
         attachments: ChatAttachment[],
       ) => `${question} [files=${attachments.length}]`,
-      isAgentMode: () => false,
-      isGlobalMode: () => false,
       normalizeConversationTitleSeed: (raw: unknown) => String(raw || ""),
       getConversationKey: () => item.id,
-      touchGlobalConversationTitle: async () => undefined,
       touchPaperConversationTitle: async () => undefined,
       getSelectedProfile: () => null,
       getCurrentModelName: () => "",
@@ -102,14 +97,12 @@ describe("sendFlowController", function () {
       getLatestEditablePair: async () => null,
       editLatestUserMessageAndRetry: async (opts: any) => {
         editCalled += 1;
-        lastEditRuntimeMode = opts.targetRuntimeMode || "";
         lastEditPdfUploadSystemMessages = opts.pdfUploadSystemMessages;
         return "ok" as const;
       },
       sendQuestion: async (opts: any) => {
         sendCalled += 1;
         lastSentQuestion = opts.question;
-        lastRuntimeMode = opts.runtimeMode || "";
       },
       retainPinnedImageState: () => {
         retainImageCalled += 1;
@@ -136,8 +129,6 @@ describe("sendFlowController", function () {
         persistDraftInputCalls += 1;
         draftValue = inputBox.value;
       },
-      autoLockGlobalChat: () => undefined,
-      autoUnlockGlobalChat: () => undefined,
       setStatusMessage: () => undefined,
       editStaleStatusText: "stale",
       ...overrides,
@@ -164,9 +155,7 @@ describe("sendFlowController", function () {
       getDraftValue: () => draftValue,
       getLastSend: () => ({
         lastSentQuestion,
-        lastRuntimeMode,
       }),
-      getLastEditRuntimeMode: () => lastEditRuntimeMode,
       getLastEditPdfUploadSystemMessages: () => lastEditPdfUploadSystemMessages,
     };
   }
@@ -187,7 +176,7 @@ describe("sendFlowController", function () {
   });
 
   it("uses retain-pinned callbacks for edit-latest flow", async function () {
-    const { controller, inputBox, getCounts, getLastEditRuntimeMode } = createBaseDeps({
+    const { controller, inputBox, getCounts } = createBaseDeps({
       getActiveEditSession: () => ({
         conversationKey: item.id,
         userTimestamp: 10,
@@ -213,29 +202,6 @@ describe("sendFlowController", function () {
     assert.equal(counts.retainFileCalled, 1);
     assert.equal(counts.retainTextCalled, 1);
     assert.isAtLeast(counts.setActiveEditSessionCalls, 1);
-    assert.equal(getLastEditRuntimeMode(), "chat");
-  });
-
-  it("passes the current runtime mode into latest-turn edit retries", async function () {
-    const { controller, getLastEditRuntimeMode } = createBaseDeps({
-      isAgentMode: () => true,
-      getActiveEditSession: () => ({
-        conversationKey: item.id,
-        userTimestamp: 10,
-        assistantTimestamp: 20,
-      }),
-      getLatestEditablePair: async () => ({
-        conversationKey: item.id,
-        pair: {
-          userMessage: { timestamp: 10 },
-          assistantMessage: { timestamp: 20, streaming: false },
-        },
-      }),
-    });
-
-    await controller.doSend();
-
-    assert.equal(getLastEditRuntimeMode(), "agent");
   });
 
   it("passes provider-uploaded PDF context through latest-turn edit retries", async function () {
@@ -342,18 +308,6 @@ describe("sendFlowController", function () {
     assert.equal(counts.persistDraftInputCalls, 1);
   });
 
-  it("sends raw prompt text in agent mode and marks runtime mode as agent", async function () {
-    const { controller, getLastSend } = createBaseDeps({
-      isAgentMode: () => true,
-    });
-
-    await controller.doSend();
-    const lastSend = getLastSend();
-
-    assert.equal(lastSend.lastSentQuestion, "ask question");
-    assert.equal(lastSend.lastRuntimeMode, "agent");
-  });
-
   it("keeps normal paper chat on the lean fast path", async function () {
     const { controller, getCounts, getLastSend } = createBaseDeps({
       getSelectedFiles: () => [],
@@ -378,6 +332,5 @@ describe("sendFlowController", function () {
     assert.equal(counts.renderPdfPagesAsImagesCalls, 0);
     assert.equal(counts.uploadPdfForProviderCalls, 0);
     assert.equal(lastSend.lastSentQuestion, "summarize the paper (with selected text) [files=0]");
-    assert.equal(lastSend.lastRuntimeMode, "chat");
   });
 });

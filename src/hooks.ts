@@ -72,9 +72,6 @@ function registerPrefsPane() {
 async function onMainWindowUnload(win: Window): Promise<void> {
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
-  addon.data.standaloneWindow?.close();
-  win.document.getElementById("llmforzoterolite-open-standalone")?.remove();
-  win.document.getElementById("llmforzoterolite-key-standalone")?.remove();
 }
 
 function onShutdown(): void {
@@ -84,28 +81,9 @@ function onShutdown(): void {
   }
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
-  addon.data.standaloneWindow?.close();
   try {
     const { unregisterWebChatRelay } = require("./webchat/relayServer");
     unregisterWebChatRelay();
-  } catch {
-    /* ignore if module not loaded */
-  }
-  try {
-    const { pauseBatchProcessing } = require("./modules/mineruBatchProcessor");
-    pauseBatchProcessing();
-  } catch {
-    /* ignore if module not loaded */
-  }
-  try {
-    const { stopAutoWatch } = require("./modules/mineruAutoWatch");
-    stopAutoWatch();
-  } catch {
-    /* ignore if module not loaded */
-  }
-  try {
-    const { shutdownAgentSubsystem } = require("./agent");
-    shutdownAgentSubsystem();
   } catch {
     /* ignore if module not loaded */
   }

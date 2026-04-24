@@ -1,6 +1,5 @@
 import { createElement } from "../../utils/domHelpers";
 import { t } from "../../utils/i18n";
-import { getFeatureProfile } from "../../featureProfile";
 import type { RuntimeModelEntry } from "../../utils/modelProviders";
 import {
   getLastUsedModelEntryId,
@@ -142,11 +141,7 @@ import {
   getSelectedTextContextEntries,
   getSelectedTextContexts,
   getSelectedTextExpandedIndex,
-  isNoteContextExpanded,
-  refreshNoteChipPreview,
-  refreshActiveNoteChipPreview,
   resolveContextSourceItem,
-  setNoteContextExpanded,
   setSelectedTextContextEntries,
   setSelectedTextExpandedIndex,
 } from "./contextResolution";
@@ -186,7 +181,7 @@ import {
   retainPinnedTextState as retainPinnedTextState_,
 } from "./contexts/textContextState";
 import { captureScreenshotSelection, optimizeImageDataUrl } from "./screenshot";
-import { captureCurrentPdfPage } from "./pdfPageCapture";
+import { captureCurrentPdfPage, renderAllPdfPages } from "./pdfPageCapture";
 import {
   persistAttachmentBlob,
   readAttachmentBytes,
@@ -233,7 +228,6 @@ import {
   browseAllItemCandidates,
   searchAllItemCandidates,
   searchCollectionCandidates,
-  ZOTERO_NOTE_CONTENT_TYPE,
   normalizePaperSearchText,
   parseAtSearchToken,
   type PaperBrowseCollectionCandidate,
@@ -243,9 +237,6 @@ import {
 } from "./paperSearch";
 import {
   createPaperPortalItem,
-  isGlobalPortalItem,
-  resolveActiveNoteSession,
-  resolveDisplayConversationKind,
   resolveConversationBaseItem,
   resolveInitialPanelItemState,
   resolveActiveLibraryID,
@@ -315,16 +306,10 @@ import {
 /** Monotonic counter incremented every time setupHandlers rebuilds a panel. */
 let setupHandlersGeneration = 0;
 
-function getNotesModule(): typeof import("./notes") {
-  return require("./notes") as typeof import("./notes");
-}
-
 export type SetupHandlersHooks = {
   onConversationHistoryChanged?: () => void;
   onWebChatModeChanged?: (isWebChat: boolean) => void;
-  /** Called by standalone to clear force-new-chat intent before loading a session. */
   clearWebChatNewChatIntent?: () => void;
-  /** Called by standalone to resolve the currently selected model consistently. */
   getCurrentModelName?: () => string | null;
 };
 
@@ -333,12 +318,6 @@ export function setupHandlers(
   initialItem?: Zotero.Item | null,
   hooks?: SetupHandlersHooks,
 ) {
-  const featureProfile = getFeatureProfile();
-  const noteEditingEnabled =
-    featureProfile.startup.registerNoteEditingTracking;
-  const standalonePanelEnabled =
-    featureProfile.panel.enableStandaloneWindow &&
-    (body as HTMLElement).dataset?.standalone === "true";
   const resolvedInitialState = resolveInitialPanelItemState(initialItem);
   let item = resolvedInitialState.item;
   let basePaperItem = resolvedInitialState.basePaperItem;
@@ -475,17 +454,15 @@ export function setupHandlers(
   panelRoot.tabIndex = 0;
   applyPanelFontScale(panelRoot);
 
-  const resolveCurrentNoteSession = () =>
-    noteEditingEnabled ? resolveActiveNoteSession(item) : null;
-  const isNoteSession = () => Boolean(resolveCurrentNoteSession());
+  const isNoteSession = () => false;
   const notifyConversationHistoryChanged = () => {
     try {
       hooks?.onConversationHistoryChanged?.();
     } catch (err) {
-      ztoolkit.log("LLM: standalone history hook failed", err);
+      ztoolkit.log("LLM: conversation history hook failed", err);
     }
   };
-  const isPaperMode = () => resolveDisplayConversationKind(item) === "paper";
+  const isPaperMode = () => Boolean(item);
   const getCurrentLibraryID = (): number => {
     const fromItem =
       item && Number.isFinite(item.libraryID) && item.libraryID > 0
@@ -495,24 +472,7 @@ export function setupHandlers(
     return resolveActiveLibraryID() || 0;
   };
   const getCurrentRuntimeMode = () => "chat" as const;
-  const resolveCurrentNoteParentItem = (): Zotero.Item | null => {
-    const noteSession = resolveCurrentNoteSession();
-    if (!noteSession?.parentItemId) return null;
-    const parentItem = Zotero.Items.get(noteSession.parentItemId) || null;
-    return parentItem?.isRegularItem?.() ? parentItem : null;
-  };
   const resolveCurrentPaperBaseItem = (): Zotero.Item | null => {
-    const noteSession = resolveCurrentNoteSession();
-    if (noteSession?.noteKind === "item") {
-      const parentItem = resolveCurrentNoteParentItem();
-      if (parentItem) {
-        basePaperItem = parentItem;
-        return parentItem;
-      }
-    }
-    if (noteSession) {
-      return null;
-    }
     if (basePaperItem?.isRegularItem?.()) return basePaperItem;
     const resolvedFromItem = resolveConversationBaseItem(item);
     if (resolvedFromItem?.isRegularItem?.()) {
@@ -543,35 +503,21 @@ export function setupHandlers(
         : "";
     const libraryID = getCurrentLibraryID();
     panelRoot.dataset.libraryId = libraryID > 0 ? `${libraryID}` : "";
-    const noteSession = resolveCurrentNoteSession();
-    const mode: "global" | "paper" | null = item
-      ? resolveDisplayConversationKind(item)
-      : null;
-    panelRoot.dataset.conversationKind = mode || "";
-    const currentBasePaperItemID =
-      mode === "paper" ? Number(resolveCurrentPaperBaseItem()?.id || 0) : 0;
+    panelRoot.dataset.conversationKind = item ? "paper" : "";
+    const currentBasePaperItemID = Number(resolveCurrentPaperBaseItem()?.id || 0);
     panelRoot.dataset.basePaperItemId =
       Number.isFinite(currentBasePaperItemID) && currentBasePaperItemID > 0
         ? `${Math.floor(currentBasePaperItemID)}`
         : "";
-    panelRoot.dataset.noteKind = noteSession?.noteKind || "";
-    panelRoot.dataset.noteId = noteSession?.noteId
-      ? `${noteSession.noteId}`
-      : "";
-    panelRoot.dataset.noteTitle = noteSession?.title || "";
-    panelRoot.dataset.noteParentItemId = noteSession?.parentItemId
-      ? `${noteSession.parentItemId}`
-      : "";
     if (historyNewBtn) {
-      historyNewBtn.style.display = noteSession ? "none" : "";
+      historyNewBtn.style.display = "";
     }
     if (historyToggleBtn) {
-      historyToggleBtn.style.display = noteSession ? "none" : "";
+      historyToggleBtn.style.display = "";
     }
     if (
       item &&
       libraryID > 0 &&
-      !noteSession &&
       Number.isFinite(conversationKey) &&
       (conversationKey as number) > 0 &&
       Number.isFinite(currentBasePaperItemID) &&
@@ -1363,9 +1309,7 @@ export function setupHandlers(
       normalizePaperContextEntries(
         selectedPaperContextCache.get(currentItem.id) || [],
       );
-    const autoLoadedPaperContext = isGlobalPortalItem(currentItem)
-      ? null
-      : resolveAutoLoadedPaperContext();
+    const autoLoadedPaperContext = resolveAutoLoadedPaperContext();
     return normalizePaperContextEntries([
       ...(autoLoadedPaperContext ? [autoLoadedPaperContext] : []),
       ...selectedPapers,
@@ -1519,21 +1463,6 @@ export function setupHandlers(
 
   const resolveAutoLoadedPaperContext = (): PaperContextRef | null => {
     if (!item) return null;
-    const noteSession = resolveCurrentNoteSession();
-    if (noteSession?.noteKind === "standalone") return null;
-    if (noteSession?.noteKind === "item") {
-      const parentItem = resolveCurrentNoteParentItem();
-      if (!parentItem) return null;
-      const activeReaderAttachment = getActiveContextAttachmentFromTabs();
-      if (activeReaderAttachment?.parentID === parentItem.id) {
-        return (
-          resolvePaperContextRefFromAttachment(activeReaderAttachment) ||
-          resolvePaperContextRefFromItem(parentItem)
-        );
-      }
-      return resolvePaperContextRefFromItem(parentItem);
-    }
-    if (item && isGlobalPortalItem(item)) return null;
     const contextSource = resolveContextSourceItem(item);
     return (
       resolvePaperContextRefFromAttachment(contextSource.contextItem) ||
@@ -2550,7 +2479,7 @@ export function setupHandlers(
 
   let latestConversationHistory: ConversationHistoryEntry[] = [];
 
-  // Day-group helpers for history menu (matching standalone sidebar style)
+  // Day-group helpers for history menu
   const getDayGroupLabel = (ts: number): string => {
     const now = new Date();
     const todayStart = new Date(
@@ -2654,9 +2583,6 @@ export function setupHandlers(
       : undefined,
     selectedTextPaperContexts: Array.isArray(message.selectedTextPaperContexts)
       ? [...message.selectedTextPaperContexts]
-      : undefined,
-    selectedTextNoteContexts: Array.isArray(message.selectedTextNoteContexts)
-      ? [...message.selectedTextNoteContexts]
       : undefined,
     screenshotImages: Array.isArray(message.screenshotImages)
       ? [...message.screenshotImages]
@@ -3155,7 +3081,7 @@ export function setupHandlers(
           (a, b) => b.lastActivityAt - a.lastActivityAt,
         );
 
-    // Group by day (matching standalone sidebar style)
+    // Group by day
     const dayGroups = groupEntriesByDay(sortedEntries);
 
     const itemsList = createElement(
@@ -3452,7 +3378,6 @@ export function setupHandlers(
         > = [];
         try {
           summaries = await loadConversationHistoryScope({
-            mode: "paper",
             libraryID,
             paperItemID,
             limit: GLOBAL_HISTORY_LIMIT,
@@ -5428,8 +5353,8 @@ export function setupHandlers(
     webchatPdfUploadedInCurrentConversation = false;
   };
 
-  // Expose webchat intent clearing via hooks so standalone can call it
-  // when loading a conversation from its own sidebar/popup.
+  // Expose webchat intent clearing via hooks for consumers that switch
+  // conversations outside the primary send flow.
   if (hooks) {
     hooks.clearWebChatNewChatIntent = () => {
       clearNextWebChatNewChatIntent();
@@ -5697,7 +5622,7 @@ export function setupHandlers(
       updatePaperPreviewPreservingScroll();
     }
 
-    // Notify standalone window (or other listeners) of webchat mode change
+    // Notify external listeners of webchat mode change
     hooks?.onWebChatModeChanged?.(isWebChat);
   };
 
@@ -6100,21 +6025,10 @@ export function setupHandlers(
     // isWebChatMode may not be ready during initial render
   }
   restoreDraftInputForCurrentConversation();
-  if (isNoteSession()) {
-    void refreshGlobalHistoryHeader("selection");
-  } else if (isPaperMode()) {
-    // In the standalone window, mountChatPanel's own async IIFE handles
-    // conversation loading.  The parameter-less auto-fire would race with it
-    // and resolve to a different (default) conversation, overwriting the
-    // explicitly targeted one.
-    const isStandalone = panelRoot.dataset.standalone === "true";
-    if (!isStandalone) {
-      void switchPaperConversation().catch((err) => {
-        ztoolkit.log("LLM: Failed to restore paper conversation session", err);
-      });
-    }
-  } else {
-    void refreshGlobalHistoryHeader("selection");
+  if (isPaperMode()) {
+    void switchPaperConversation().catch((err) => {
+      ztoolkit.log("LLM: Failed to restore paper conversation session", err);
+    });
   }
 
   // Preferences can change outside this panel (e.g., settings window).
@@ -6402,31 +6316,27 @@ export function setupHandlers(
   }
   function resolvePickerItemKind(
     contentType?: string,
-  ): "pdf" | "note" | "figure" | "other" {
+  ): "pdf" | "figure" | "other" {
     if (!contentType) return "other";
     if (contentType === "application/pdf") return "pdf";
-    if (contentType === ZOTERO_NOTE_CONTENT_TYPE) return "note";
     if (contentType.startsWith("image/")) return "figure";
     return "other";
   }
   function resolvePickerKindIcon(
-    kind: "pdf" | "note" | "figure" | "other",
+    kind: "pdf" | "figure" | "other",
   ): string {
     if (kind === "pdf") return "📚";
-    if (kind === "note") return "📝";
     if (kind === "figure") return "🖼";
     return "📎";
   }
   function resolvePickerKindLabel(
-    kind: "pdf" | "note" | "figure" | "other",
+    kind: "pdf" | "figure" | "other",
   ): string {
     if (kind === "pdf") return "PDF";
-    if (kind === "note") return "Note";
     if (kind === "figure") return "Figure";
     return "File";
   }
   function resolveGroupIcon(group: PaperSearchGroupCandidate): string {
-    if (group.itemKind === "standalone-note") return "📝";
     const hasPdf = group.attachments.some(
       (a) => resolvePickerItemKind(a.contentType) === "pdf",
     );
@@ -6435,10 +6345,6 @@ export function setupHandlers(
       (a) => resolvePickerItemKind(a.contentType) === "figure",
     );
     if (hasFigure) return "🖼";
-    const hasNote = group.attachments.some(
-      (a) => resolvePickerItemKind(a.contentType) === "note",
-    );
-    if (hasNote) return "📝";
     if (group.attachments.length > 0) return "📎";
     return "📄";
   }
@@ -6737,50 +6643,11 @@ export function setupHandlers(
     }
     return true;
   };
-  const upsertNoteTextContext = (contextItemId: number): boolean => {
-    if (!noteEditingEnabled) return false;
-    const textContextKey = getTextContextConversationKey();
-    if (!item || !textContextKey) return false;
-    const noteItem = Zotero.Items.get(contextItemId) || null;
-    const snapshot = getNotesModule().readNoteSnapshot(noteItem);
-    if (!snapshot?.text) {
-      if (status) setStatus(status, t("Selected note is empty"), "warning");
-      return false;
-    }
-    const appended = appendSelectedTextContextForItem(
-      textContextKey,
-      snapshot.text,
-      "note",
-      undefined,
-      undefined,
-      {
-        libraryID: snapshot.libraryID,
-        noteItemKey: snapshot.noteItemKey || "",
-        noteItemId: snapshot.noteId,
-        parentItemId: snapshot.parentItemId,
-        parentItemKey: snapshot.parentItemKey,
-        noteKind: snapshot.noteKind,
-        title: snapshot.title || `Note ${snapshot.noteId}`,
-      },
-    );
-    if (!appended) {
-      if (status) setStatus(status, t("Note already selected"), "warning");
-      return false;
-    }
-    updateSelectedTextPreviewPreservingScroll();
-    if (status) setStatus(status, t("Note context added as text."), "ready");
-    return true;
-  };
   const addZoteroItemsAsPaperContext = (zoteroItems: Zotero.Item[]): void => {
     if (!item) return;
     let added = 0;
     let skipped = 0;
     for (const zi of zoteroItems) {
-      if ((zi as any).isNote?.()) {
-        if (upsertNoteTextContext(zi.id)) added++;
-        else skipped++;
-        continue;
-      }
       const ref = resolvePaperContextRefFromItem(zi);
       if (!ref) {
         skipped++;
@@ -6874,8 +6741,6 @@ export function setupHandlers(
         firstCreator: selectedGroup.firstCreator,
         year: selectedGroup.year,
       });
-    } else if (kind === "note") {
-      upsertNoteTextContext(selectedAttachment.contextItemId);
     } else {
       upsertOtherRefContext({
         contextItemId: selectedAttachment.contextItemId,
@@ -7596,8 +7461,6 @@ export function setupHandlers(
       return results;
     },
     renderPdfPagesAsImages: async (paperContexts) => {
-      const { renderAllPdfPages } =
-        await import("../../agent/services/pdfPageService");
       const dataUrls: string[] = [];
       for (const pc of paperContexts) {
         try {
@@ -7679,7 +7542,6 @@ export function setupHandlers(
     resolvePromptText,
     buildQuestionWithSelectedTextContexts,
     buildModelPromptWithFileContext,
-    isAgentMode: () => false,
     normalizeConversationTitleSeed,
     getConversationKey,
     touchPaperConversationTitle,
@@ -7777,9 +7639,6 @@ export function setupHandlers(
       const selectedTextSources = selectedContexts.map((entry) => entry.source);
       const selectedTextPaperContexts = selectedContexts.map(
         (entry) => entry.paperContext,
-      );
-      const selectedTextNoteContexts = selectedContexts.map(
-        (entry) => entry.noteContext,
       );
       const allPaperContexts = normalizePaperContextEntries(
         selectedPaperContextCache.get(currentItem.id) || [],
@@ -7925,8 +7784,6 @@ export function setupHandlers(
             }
           }
         } else if (pdfSupport === "vision") {
-          const { renderAllPdfPages } =
-            await import("../../agent/services/pdfPageService");
           for (const pc of pdfModePapers) {
             try {
               const pages = await renderAllPdfPages(pc.contextItemId);
@@ -8021,7 +7878,6 @@ export function setupHandlers(
       ].slice(0, MAX_SELECTED_IMAGES);
       const selectedReasoning = getSelectedReasoning();
       const advancedParams = getAdvancedModelParams(selectedProfile?.entryId);
-      const targetRuntimeMode = "chat";
       inlineEditCleanup?.();
       setInlineEditCleanup(null);
       setInlineEditInputSection(null, null, null);
@@ -8042,7 +7898,6 @@ export function setupHandlers(
           selectedTexts,
           selectedTextSources,
           selectedTextPaperContexts,
-          selectedTextNoteContexts,
           screenshotImages: images,
           paperContexts: selectedPaperContexts,
           fullTextPaperContexts,
@@ -8050,7 +7905,6 @@ export function setupHandlers(
           pdfUploadSystemMessages: pdfUploadSystemMessages.length
             ? pdfUploadSystemMessages
             : undefined,
-          targetRuntimeMode,
           model: selectedProfile?.model,
           apiBase: selectedProfile?.apiBase,
           apiKey: selectedProfile?.apiKey,
@@ -8208,11 +8062,6 @@ export function setupHandlers(
     const isEventWithinActivePanel = (event: Event) => {
       const panel = panelDoc.querySelector("#llm-main") as HTMLElement | null;
       if (!panel) return null;
-      // In standalone window, accept events from anywhere in the document
-      const standaloneRoot = panelDoc.getElementById(
-        "llmforzoterolite-standalone-chat-root",
-      ) as HTMLElement | null;
-      if (standaloneRoot) return panel;
       const target = event.target as Node | null;
       const activeEl = panelDoc.activeElement;
       const inPanel = Boolean(
@@ -8243,11 +8092,6 @@ export function setupHandlers(
       event.preventDefault();
       event.stopPropagation();
       applyPanelFontScale(panel);
-      // Also scale the standalone root so sidebar/tabs/title scale together
-      const standaloneRoot = panelDoc.getElementById(
-        "llmforzoterolite-standalone-chat-root",
-      ) as HTMLElement | null;
-      if (standaloneRoot) applyPanelFontScale(standaloneRoot);
     };
 
     panelDoc.addEventListener(
@@ -8361,8 +8205,6 @@ export function setupHandlers(
       // on every tab switch) — not from panel DOM which may be stale.
       const currentItem = activeContextPanels.get(body)?.() ?? item;
       const root = body.querySelector("#llm-main") as HTMLDivElement | null;
-      const conversationKind = root?.dataset?.conversationKind || "";
-      const isGlobal = conversationKind === "global";
       const conversationKey = currentItem
         ? getConversationKey(currentItem)
         : Number(root?.dataset?.itemId || 0);
@@ -8389,11 +8231,10 @@ export function setupHandlers(
         return;
       }
 
-      // Global mode: attribute text to source paper
       const readerAttachment = getActiveContextAttachmentFromTabs();
       const readerPaperContext =
         resolvePaperContextRefFromAttachment(readerAttachment);
-      const paperContext = isGlobal ? readerPaperContext : null;
+      const paperContext = readerPaperContext;
 
       // Resolve page location for jump-to-source
       const reader = getActiveReaderForSelectedTab();
@@ -9290,7 +9131,6 @@ export function setupHandlers(
         const textContextKey = getTextContextConversationKey();
         if (textContextKey) {
           setSelectedTextExpandedIndex(textContextKey, null);
-          setNoteContextExpanded(textContextKey, null);
         }
         selectedPaperPreviewExpandedCache.set(item.id, false);
         selectedFilePreviewExpandedCache.set(item.id, false);
@@ -9327,7 +9167,6 @@ export function setupHandlers(
         const textContextKey = getTextContextConversationKey();
         if (textContextKey) {
           setSelectedTextExpandedIndex(textContextKey, null);
-          setNoteContextExpanded(textContextKey, null);
         }
         selectedImagePreviewExpandedCache.set(item.id, false);
         selectedPaperPreviewExpandedCache.set(item.id, false);
@@ -9939,68 +9778,10 @@ export function setupHandlers(
   };
 
   if (selectedContextList) {
-    selectedContextList.addEventListener("mouseover", (e: Event) => {
-      const target = e.target as Element | null;
-      const noteChip = target?.closest(
-        "[data-note-chip='true']",
-      ) as HTMLDivElement | null;
-      if (!noteChip) {
-        return;
-      }
-      if (noteChip.dataset.noteChipKind === "active") {
-        refreshActiveNoteChipPreview(body);
-      } else {
-        refreshNoteChipPreview(noteChip);
-      }
-    });
-    selectedContextList.addEventListener("focusin", (e: Event) => {
-      const target = e.target as Element | null;
-      const noteChip = target?.closest(
-        "[data-note-chip='true']",
-      ) as HTMLDivElement | null;
-      if (!noteChip) {
-        return;
-      }
-      if (noteChip.dataset.noteChipKind === "active") {
-        refreshActiveNoteChipPreview(body);
-      } else {
-        refreshNoteChipPreview(noteChip);
-      }
-    });
     selectedContextList.addEventListener("click", (e: Event) => {
       if (!item) return;
       const target = e.target as Element | null;
       if (!target) return;
-      const noteChip = target.closest(
-        "[data-note-chip='true']",
-      ) as HTMLDivElement | null;
-      const noteChipKind = noteChip?.dataset.noteChipKind || "";
-      const noteMetaBtn = target.closest(
-        ".llm-note-context-meta",
-      ) as HTMLButtonElement | null;
-      if (noteMetaBtn && noteChipKind === "active") {
-        e.preventDefault();
-        e.stopPropagation();
-        const textContextKey = getTextContextConversationKey();
-        if (!textContextKey) return;
-        refreshActiveNoteChipPreview(body);
-        const nextExpanded = !isNoteContextExpanded(textContextKey);
-        setNoteContextExpanded(textContextKey, nextExpanded);
-        if (nextExpanded) {
-          setSelectedTextExpandedIndex(textContextKey, null);
-          selectedImagePreviewExpandedCache.set(item.id, false);
-          selectedPaperPreviewExpandedCache.set(item.id, false);
-          selectedFilePreviewExpandedCache.set(item.id, false);
-        }
-        updatePaperPreviewPreservingScroll();
-        updateFilePreviewPreservingScroll();
-        updateImagePreviewPreservingScroll();
-        updateSelectedTextPreviewPreservingScroll();
-        return;
-      }
-      if (noteChip && noteChipKind === "active") {
-        return;
-      }
 
       const clearBtn = target.closest(
         ".llm-selected-context-clear",
@@ -10093,7 +9874,6 @@ export function setupHandlers(
       const nextExpandedIndex = expandedIndex === index ? null : index;
       setSelectedTextExpandedIndex(textContextKey, nextExpandedIndex);
       if (nextExpandedIndex !== null) {
-        setNoteContextExpanded(textContextKey, null);
         selectedImagePreviewExpandedCache.set(item.id, false);
         selectedPaperPreviewExpandedCache.set(item.id, false);
         selectedFilePreviewExpandedCache.set(item.id, false);
@@ -10107,21 +9887,6 @@ export function setupHandlers(
       if (!item) return;
       const target = e.target as Element | null;
       if (!target) return;
-      const noteChip = target.closest(
-        "[data-note-chip='true']",
-      ) as HTMLDivElement | null;
-      if (noteChip?.dataset.noteChipKind === "active") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (status) {
-          setStatus(
-            status,
-            t("Live note preview is pinned while editing"),
-            "ready",
-          );
-        }
-        return;
-      }
       const selectedContext = target.closest(
         ".llm-selected-context",
       ) as HTMLDivElement | null;
@@ -10140,18 +9905,6 @@ export function setupHandlers(
         index < 0 ||
         index >= selectedContexts.length
       ) {
-        return;
-      }
-      if (selectedContexts[index]?.source === "note-edit") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (status) {
-          setStatus(
-            status,
-            t("Editing focus syncs to the live note selection"),
-            "ready",
-          );
-        }
         return;
       }
       e.preventDefault();
@@ -10215,7 +9968,6 @@ export function setupHandlers(
         textContextKey,
         getSelectedTextContexts(textContextKey).length,
       ) >= 0;
-    const notePinned = isNoteContextExpanded(textContextKey);
     const figurePinned =
       selectedImagePreviewExpandedCache.get(item.id) === true;
     const paperPinned =
@@ -10223,7 +9975,6 @@ export function setupHandlers(
     const filePinned = selectedFilePreviewExpandedCache.get(item.id) === true;
     if (
       !textPinned &&
-      !notePinned &&
       !figurePinned &&
       !paperPinned &&
       !filePinned
@@ -10231,7 +9982,6 @@ export function setupHandlers(
       return;
 
     setSelectedTextExpandedIndex(textContextKey, null);
-    setNoteContextExpanded(textContextKey, null);
     selectedImagePreviewExpandedCache.set(item.id, false);
     selectedPaperPreviewExpandedCache.set(item.id, false);
     selectedFilePreviewExpandedCache.set(item.id, false);

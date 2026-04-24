@@ -2,7 +2,7 @@ import { assert } from "chai";
 import { buildQuestionWithSelectedTextContexts } from "../src/modules/contextPanel/textUtils";
 
 describe("textUtils selected text prompt composition", function () {
-  it("includes paper attribution for open-chat prompt composition", function () {
+  it("includes paper attribution for prompt composition", function () {
     const prompt = buildQuestionWithSelectedTextContexts(
       ["A selected text snippet."],
       ["pdf"],
@@ -37,33 +37,5 @@ describe("textUtils selected text prompt composition", function () {
     );
     assert.include(prompt, "Selected text from the PDF reader:");
     assert.notInclude(prompt, "[paper=");
-  });
-
-  it("uses note-edit wording for active note editing focus", function () {
-    const prompt = buildQuestionWithSelectedTextContexts(
-      ["Revise this paragraph."],
-      ["note-edit"],
-      "Make it clearer.",
-    );
-    assert.include(
-      prompt,
-      "Selected text from the current Zotero note editor (editing focus):",
-    );
-    assert.include(
-      prompt,
-      "The user selected this snippet inside the active note and wants help editing it in place.",
-    );
-    assert.include(prompt, "User question:\nMake it clearer.");
-  });
-
-  it("uses note wording for selected Zotero note context", function () {
-    const prompt = buildQuestionWithSelectedTextContexts(
-      ["Draft note content."],
-      ["note"],
-      "Use this for context.",
-    );
-    assert.include(prompt, "Selected text from a Zotero note:");
-    assert.notInclude(prompt, "editing focus");
-    assert.include(prompt, "User question:\nUse this for context.");
   });
 });
