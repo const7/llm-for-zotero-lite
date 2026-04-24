@@ -16,7 +16,7 @@ type ClearConversationControllerDeps = {
   ) => Promise<void>;
   removeConversationAttachmentFiles: (conversationKey: number) => Promise<void>;
   refreshChatPreservingScroll: () => void;
-  refreshGlobalHistoryHeader: () => void | Promise<void>;
+  refreshPaperHistoryHeader: () => void | Promise<void>;
   scheduleAttachmentGc: () => void;
   setStatusMessage?: (message: string, level: StatusLevel) => void;
   logError?: (message: string, error: unknown) => void;
@@ -76,7 +76,7 @@ export function createClearConversationController(
     }
 
     deps.refreshChatPreservingScroll();
-    await deps.refreshGlobalHistoryHeader();
+    await deps.refreshPaperHistoryHeader();
     deps.scheduleAttachmentGc();
     deps.setStatusMessage?.("Cleared", "ready");
   };

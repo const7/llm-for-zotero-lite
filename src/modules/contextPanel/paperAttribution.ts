@@ -127,12 +127,6 @@ export function formatPaperContextReferenceLabel(
   return parts.join(" - ");
 }
 
-export function formatOpenChatTextContextLabel(
-  paperContext: PaperContextRef | null | undefined,
-): string {
-  return `${formatPaperCitationLabel(paperContext)} - Text Context`;
-}
-
 export function resolvePaperContextRefFromAttachment(
   contextItem: Zotero.Item | null | undefined,
 ): PaperContextRef | null {

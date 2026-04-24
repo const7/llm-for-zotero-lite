@@ -186,7 +186,7 @@ export function registerReaderContextPanel() {
           buildUI(body, resolvedState.item);
           activeContextPanels.set(body, () => resolvedState.item);
           activeContextPanelRawItems.set(body, item || null);
-          // Attach handlers synchronously so buttons (lock, send, etc.) are
+          // Attach handlers synchronously so core controls are
           // immediately interactive — don't gate on ensureConversationLoaded.
           const { setupHandlers } = loadSetupHandlers();
           setupHandlers(body, item);

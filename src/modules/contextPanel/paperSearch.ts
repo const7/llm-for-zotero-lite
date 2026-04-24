@@ -92,8 +92,6 @@ const paperSearchLibraryLoadTasks = new Map<
   number,
   Promise<PaperSearchLibraryIndex>
 >();
-const allItemsLibraryIndexCache = new Map<number, AllItemsLibraryIndex>();
-const allItemsLibraryLoadTasks = new Map<number, Promise<AllItemsLibraryIndex>>();
 
 function normalizeText(value: unknown): string {
   if (typeof value !== "string") return "";
@@ -405,14 +403,10 @@ export function invalidatePaperSearchCache(libraryID?: number): void {
     const normalizedLibraryID = Math.floor(libraryID);
     paperSearchLibraryIndexCache.delete(normalizedLibraryID);
     paperSearchLibraryLoadTasks.delete(normalizedLibraryID);
-    allItemsLibraryIndexCache.delete(normalizedLibraryID);
-    allItemsLibraryLoadTasks.delete(normalizedLibraryID);
     return;
   }
   paperSearchLibraryIndexCache.clear();
   paperSearchLibraryLoadTasks.clear();
-  allItemsLibraryIndexCache.clear();
-  allItemsLibraryLoadTasks.clear();
 }
 
 function buildVisibleCandidate(
@@ -431,6 +425,7 @@ function buildVisibleCandidate(
       contextItemId: attachment.contextItemId,
       title: attachment.title,
       score: 0,
+      contentType: attachment.contentType,
     }));
   if (!attachments.length) return null;
   return {
@@ -853,189 +848,6 @@ export async function searchPaperCandidates(
     .map((entry) => entry.candidate);
 }
 
-// ── All-items index (non-PDF-filtered) ────────────────────────────────────────
-
-type AllItemsLibraryIndex = {
-  libraryID: number;
-  candidates: IndexedPaperCandidate[];
-  collections: IndexedCollection[];
-};
-
-function buildIndexedItemCandidate(item: Zotero.Item): IndexedPaperCandidate | null {
-  if (!item?.isRegularItem?.()) return null;
-  // All file attachments
-  const allAtts: Zotero.Item[] = [];
-  for (const attachmentId of item.getAttachments()) {
-    const att = Zotero.Items.get(attachmentId);
-    if (att && att.isAttachment?.()) allAtts.push(att);
-  }
-  const attachments = buildIndexedAttachments(allAtts);
-
-  const title = getItemFieldText(item, "title") || `Item ${item.id}`;
-  const citationKey = getItemFieldText(item, "citationKey") || undefined;
-  const creators = collectCreators(item);
-  const firstCreator = creators[0] || undefined;
-  const year = extractYear(getItemFieldText(item, "date")) || undefined;
-  const shortTitle = getItemFieldText(item, "shortTitle");
-  const doi = getItemFieldText(item, "DOI");
-  const venue = collectVenue(item);
-
-  return {
-    itemId: item.id,
-    title,
-    citationKey,
-    firstCreator,
-    year,
-    attachments,
-    modifiedAt: toModifiedTimestamp(item.dateModified),
-    collectionIDs: getCollectionIDs(item),
-    normalized: {
-      title: normalizePaperSearchText(title),
-      shortTitle: normalizePaperSearchText(shortTitle),
-      citationKey: normalizePaperSearchText(citationKey || ""),
-      doi: normalizePaperSearchText(doi),
-      creator: normalizePaperSearchText(creators.join(" ")),
-      venue: normalizePaperSearchText(venue),
-      year: normalizePaperSearchText(year || ""),
-    },
-  };
-}
-
-async function buildAllItemsLibraryIndex(libraryID: number): Promise<AllItemsLibraryIndex> {
-  let items: Zotero.Item[] = [];
-  let collections: Zotero.Collection[] = [];
-  try {
-    const allItems: Zotero.Item[] = await Zotero.Items.getAll(libraryID, true, false, false);
-    items = allItems.filter((item) => {
-      if ((item as any).isNote?.()) return !item.parentID;
-      if (item.isAttachment?.()) return false;
-      return item.isRegularItem?.() ?? false;
-    });
-    collections = Zotero.Collections.getByLibrary(libraryID, true) || [];
-  } catch (err) {
-    ztoolkit.log("LLM: Failed to build all-items index", err);
-    return { libraryID, candidates: [], collections: [] };
-  }
-  const candidates: IndexedPaperCandidate[] = [];
-  for (const item of items) {
-    const candidate = buildIndexedItemCandidate(item);
-    if (candidate) candidates.push(candidate);
-  }
-  return {
-    libraryID,
-    candidates,
-    collections: collections.map((c) => buildIndexedCollection(c)),
-  };
-}
-
-async function getAllItemsLibraryIndex(libraryID: number): Promise<AllItemsLibraryIndex> {
-  const cached = allItemsLibraryIndexCache.get(libraryID);
-  if (cached) return cached;
-  const pending = allItemsLibraryLoadTasks.get(libraryID);
-  if (pending) return pending;
-  const loadTask = buildAllItemsLibraryIndex(libraryID)
-    .then((index) => {
-      allItemsLibraryIndexCache.set(libraryID, index);
-      return index;
-    })
-    .finally(() => {
-      allItemsLibraryLoadTasks.delete(libraryID);
-    });
-  allItemsLibraryLoadTasks.set(libraryID, loadTask);
-  return loadTask;
-}
-
-export function invalidateAllItemsSearchCache(libraryID?: number): void {
-  if (
-    typeof libraryID === "number" &&
-    Number.isFinite(libraryID) &&
-    libraryID > 0
-  ) {
-    const id = Math.floor(libraryID);
-    allItemsLibraryIndexCache.delete(id);
-    allItemsLibraryLoadTasks.delete(id);
-    return;
-  }
-  allItemsLibraryIndexCache.clear();
-  allItemsLibraryLoadTasks.clear();
-}
-
-function buildVisibleItemCandidate(
-  candidate: IndexedPaperCandidate,
-): PaperSearchGroupCandidate {
-  return {
-    itemId: candidate.itemId,
-    title: candidate.title,
-    citationKey: candidate.citationKey,
-    firstCreator: candidate.firstCreator,
-    year: candidate.year,
-    attachments: candidate.attachments.map((att) => ({
-      contextItemId: att.contextItemId,
-      title: att.title,
-      score: 0,
-      contentType: att.contentType,
-    })),
-    score: 0,
-    modifiedAt: candidate.modifiedAt,
-  };
-}
-
-export async function listAllItemCandidates(
-  libraryID: number,
-  limit?: number,
-): Promise<PaperSearchGroupCandidate[]> {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
-  const index = await getAllItemsLibraryIndex(Math.floor(libraryID));
-  const candidates = index.candidates
-    .map((c) => buildVisibleItemCandidate(c))
-    .sort((a, b) => {
-      const delta = b.modifiedAt - a.modifiedAt;
-      if (delta !== 0) return delta;
-      return a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
-    });
-  if (Number.isFinite(limit) && typeof limit === "number" && limit > 0) {
-    return candidates.slice(0, Math.floor(limit));
-  }
-  return candidates;
-}
-
-export async function searchAllItemCandidates(
-  libraryID: number,
-  query: string,
-  limit = DEFAULT_PAPER_SEARCH_LIMIT,
-): Promise<PaperSearchGroupCandidate[]> {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
-  const normalizedQuery = normalizePaperSearchText(query);
-  if (!normalizedQuery) return [];
-  const normalizedLimit = Number.isFinite(limit)
-    ? Math.max(1, Math.floor(limit))
-    : DEFAULT_PAPER_SEARCH_LIMIT;
-  const queryTokens = getSearchTokens(normalizedQuery);
-  if (!queryTokens.length) return [];
-
-  const index = await getAllItemsLibraryIndex(Math.floor(libraryID));
-  const rankedCandidates: Array<{ candidate: PaperSearchGroupCandidate; matchedTokenCount: number }> = [];
-
-  for (const indexedCandidate of index.candidates) {
-    const visibleCandidate = buildVisibleItemCandidate(indexedCandidate);
-    const scored = scoreCandidate(indexedCandidate, visibleCandidate, normalizedQuery, queryTokens);
-    if (!scored) continue;
-    visibleCandidate.score = scored.score;
-    rankedCandidates.push({ candidate: visibleCandidate, matchedTokenCount: scored.matchedTokenCount });
-  }
-
-  rankedCandidates.sort((a, b) => {
-    const scoreDelta = b.candidate.score - a.candidate.score;
-    if (scoreDelta !== 0) return scoreDelta;
-    const matchedTokenDelta = b.matchedTokenCount - a.matchedTokenCount;
-    if (matchedTokenDelta !== 0) return matchedTokenDelta;
-    return b.candidate.modifiedAt - a.candidate.modifiedAt;
-  });
-
-  return rankedCandidates.slice(0, normalizedLimit).map((e) => e.candidate);
-}
-
-
 const DEFAULT_COLLECTION_SEARCH_LIMIT = 5;
 
 export async function searchCollectionCandidates(
@@ -1052,7 +864,7 @@ export async function searchCollectionCandidates(
   const queryTokens = getSearchTokens(normalizedQuery);
   if (!queryTokens.length) return [];
 
-  const index = await getAllItemsLibraryIndex(Math.floor(libraryID));
+  const index = await getPaperSearchLibraryIndex(Math.floor(libraryID));
   const ranked: Array<{
     collection: IndexedCollection;
     score: number;
@@ -1094,66 +906,4 @@ export async function searchCollectionCandidates(
     childCollections: [],
     papers: [],
   }));
-}
-
-export async function browseAllItemCandidates(
-  libraryID: number,
-): Promise<PaperBrowseCollectionCandidate[]> {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
-  const index = await getAllItemsLibraryIndex(Math.floor(libraryID));
-  const visibleCandidates = new Map<number, PaperSearchGroupCandidate>();
-  for (const candidate of index.candidates) {
-    visibleCandidates.set(candidate.itemId, buildVisibleItemCandidate(candidate));
-  }
-
-  const collectionMap = new Map<number, PaperBrowseCollectionCandidate>();
-  for (const collection of index.collections) {
-    collectionMap.set(collection.collectionId, {
-      collectionId: collection.collectionId,
-      name: collection.name,
-      childCollections: [],
-      papers: [],
-    });
-  }
-
-  for (const collection of index.collections) {
-    const node = collectionMap.get(collection.collectionId);
-    if (!node) continue;
-    for (const childCollectionID of collection.childCollectionIDs) {
-      const child = collectionMap.get(childCollectionID);
-      if (child) node.childCollections.push(child);
-    }
-    for (const childItemID of collection.childItemIDs) {
-      const candidate = visibleCandidates.get(childItemID);
-      if (candidate) node.papers.push(candidate);
-    }
-  }
-
-  const topLevelCollections: PaperBrowseCollectionCandidate[] = [];
-  for (const collection of index.collections) {
-    const node = collectionMap.get(collection.collectionId);
-    if (!node) continue;
-    if (!collection.parentID || !collectionMap.has(collection.parentID)) {
-      topLevelCollections.push(node);
-    }
-  }
-
-  const unfiledItems = index.candidates
-    .filter((candidate) => candidate.collectionIDs.length === 0)
-    .map((candidate) => visibleCandidates.get(candidate.itemId) || null)
-    .filter((c): c is PaperSearchGroupCandidate => Boolean(c))
-    .sort((a, b) =>
-      a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
-    );
-
-  if (unfiledItems.length) {
-    topLevelCollections.push({
-      collectionId: 0,
-      name: resolveLibraryDisplayName(libraryID),
-      childCollections: [],
-      papers: unfiledItems,
-    });
-  }
-
-  return topLevelCollections;
 }

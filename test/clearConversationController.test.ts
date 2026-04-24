@@ -46,7 +46,7 @@ describe("clearConversationController", function () {
       refreshChatPreservingScroll: () => {
         calls.push("refresh");
       },
-      refreshGlobalHistoryHeader: async () => {
+      refreshPaperHistoryHeader: async () => {
         calls.push("history-header");
       },
       scheduleAttachmentGc: () => {
@@ -113,7 +113,7 @@ describe("clearConversationController", function () {
       refreshChatPreservingScroll: () => {
         called = true;
       },
-      refreshGlobalHistoryHeader: () => {
+      refreshPaperHistoryHeader: () => {
         called = true;
       },
       scheduleAttachmentGc: () => {

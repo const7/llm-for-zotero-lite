@@ -226,8 +226,8 @@ import type {
 import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/llmClient";
 import type { ReasoningConfig as LLMReasoningConfig } from "../../utils/llmClient";
 import {
-  browseAllItemCandidates,
-  searchAllItemCandidates,
+  browsePaperCollectionCandidates,
+  searchPaperCandidates,
   searchCollectionCandidates,
   normalizePaperSearchText,
   parseAtSearchToken,
@@ -260,11 +260,11 @@ import {
   getModelPdfSupport,
 } from "./setupHandlers/controllers/modelReasoningController";
 import {
-  GLOBAL_HISTORY_UNDO_WINDOW_MS,
+  PAPER_HISTORY_UNDO_WINDOW_MS,
   type ConversationHistoryEntry,
   type HistorySwitchTarget,
   type PendingHistoryDeletion,
-  formatGlobalHistoryTimestamp,
+  formatPaperHistoryTimestamp,
   formatHistoryRowDisplayTitle,
   normalizeConversationTitleSeed,
   normalizeHistoryTitle,
@@ -350,7 +350,6 @@ export function setupHandlers(
     historyBar,
     historyNewBtn,
     historyToggleBtn,
-    historyModeIndicator,
     historyMenu,
     historyRowMenu,
     historyRowRenameBtn,
@@ -431,7 +430,7 @@ export function setupHandlers(
   // navigation), which destroys the cancel/send button DOM mid-stream.
   // Re-apply the generating state immediately so the user never sees a stale
   // idle UI while a request is still running in the background.
-  // Only lock the UI if the CURRENT conversation has a pending request.
+  // Only disable the composer if the current conversation has a pending request.
   const earlyConversationKey = item ? getConversationKey(item) : null;
   if (earlyConversationKey !== null && isRequestPending(earlyConversationKey)) {
     if (sendBtn) sendBtn.style.display = "none";
@@ -472,7 +471,6 @@ export function setupHandlers(
     if (fromItem > 0) return fromItem;
     return resolveActiveLibraryID() || 0;
   };
-  const getCurrentRuntimeMode = () => "chat" as const;
   const resolveCurrentPaperBaseItem = (): Zotero.Item | null => {
     if (basePaperItem?.isRegularItem?.()) return basePaperItem;
     const resolvedFromItem = resolveConversationBaseItem(item);
@@ -538,10 +536,6 @@ export function setupHandlers(
         Math.floor(currentBasePaperItemID),
         normalizedConversationKey,
       );
-    }
-    if (historyModeIndicator) {
-      // Keep historyModeIndicator (which is the clock history button) accessible.
-      // Its label is static "Conversation history" — no text update needed.
     }
   };
   syncConversationIdentity();
@@ -720,7 +714,7 @@ export function setupHandlers(
       historyToggleBtn.setAttribute("aria-expanded", "false");
     }
     paperHistoryLoadSeq += 1;
-    latestConversationHistory = [];
+    latestPaperHistoryEntries = [];
     historySearchLoadSeq += 1;
     historySearchQuery = "";
     historySearchExpanded = false;
@@ -2474,7 +2468,7 @@ export function setupHandlers(
     previewRanges: HistorySearchRange[];
   };
 
-  let latestConversationHistory: ConversationHistoryEntry[] = [];
+  let latestPaperHistoryEntries: ConversationHistoryEntry[] = [];
 
   // Day-group helpers for history menu
   const getDayGroupLabel = (ts: number): string => {
@@ -2966,14 +2960,14 @@ export function setupHandlers(
     return results;
   };
 
-  const renderGlobalHistoryMenu = () => {
+  const renderPaperHistoryMenu = () => {
     if (!historyMenu) return;
     historyMenu.innerHTML = "";
     const searchQuery = historySearchQuery;
     const normalizedSearchQuery = normalizeHistorySearchQuery(searchQuery);
     const searchTokens = tokenizeHistorySearchQuery(normalizedSearchQuery);
     const searchActive = searchTokens.length > 0;
-    const allEntries = latestConversationHistory.filter(
+    const allEntries = latestPaperHistoryEntries.filter(
       (entry) => !entry.isPendingDelete,
     );
     if (!allEntries.length) {
@@ -3176,9 +3170,9 @@ export function setupHandlers(
     historyMenu.appendChild(itemsList);
   };
 
-  const renderGlobalHistoryMenuIfOpen = () => {
+  const renderPaperHistoryMenuIfOpen = () => {
     if (!historyMenu || historyMenu.style.display === "none") return;
-    renderGlobalHistoryMenu();
+    renderPaperHistoryMenu();
     if (historyToggleBtn) {
       positionMenuBelowButton(body, historyMenu, historyToggleBtn);
     }
@@ -3203,7 +3197,7 @@ export function setupHandlers(
 
   const expandHistorySearch = () => {
     historySearchExpanded = true;
-    renderGlobalHistoryMenu();
+    renderPaperHistoryMenu();
     if (
       historyToggleBtn &&
       historyMenu &&
@@ -3220,7 +3214,7 @@ export function setupHandlers(
     historySearchExpanded = false;
     historySearchQuery = "";
     historySearchLoading = false;
-    renderGlobalHistoryMenu();
+    renderPaperHistoryMenu();
     if (
       historyToggleBtn &&
       historyMenu &&
@@ -3234,12 +3228,12 @@ export function setupHandlers(
     const requestId = ++historySearchLoadSeq;
     const normalizedSearchQuery =
       normalizeHistorySearchQuery(historySearchQuery);
-    const entries = latestConversationHistory.filter(
+    const entries = latestPaperHistoryEntries.filter(
       (entry) => !entry.isPendingDelete,
     );
     if (!normalizedSearchQuery) {
       historySearchLoading = false;
-      renderGlobalHistoryMenu();
+      renderPaperHistoryMenu();
       if (
         historyToggleBtn &&
         historyMenu &&
@@ -3255,7 +3249,7 @@ export function setupHandlers(
     );
     if (!missingEntries.length) {
       historySearchLoading = false;
-      renderGlobalHistoryMenu();
+      renderPaperHistoryMenu();
       if (
         historyToggleBtn &&
         historyMenu &&
@@ -3267,7 +3261,7 @@ export function setupHandlers(
       return;
     }
     historySearchLoading = true;
-    renderGlobalHistoryMenu();
+    renderPaperHistoryMenu();
     if (
       historyToggleBtn &&
       historyMenu &&
@@ -3279,7 +3273,7 @@ export function setupHandlers(
     await ensureHistorySearchDocuments(missingEntries);
     if (requestId !== historySearchLoadSeq) return;
     historySearchLoading = false;
-    renderGlobalHistoryMenu();
+    renderPaperHistoryMenu();
     if (
       historyToggleBtn &&
       historyMenu &&
@@ -3294,10 +3288,10 @@ export function setupHandlers(
     paperHistoryLoadSeq += 1;
     historySearchLoadSeq += 1;
     historySearchLoading = false;
-    latestConversationHistory = [];
+    latestPaperHistoryEntries = [];
   };
 
-  const refreshGlobalHistoryHeader = async (
+  const refreshPaperHistoryHeader = async (
     mode: ConversationHistoryRefreshMode = "mutation",
   ) => {
     const shouldReloadMenuEntries = shouldReloadConversationHistoryMenu(
@@ -3387,7 +3381,7 @@ export function setupHandlers(
             title: summary.title,
             timestampText: isDraft
               ? "Draft"
-              : formatGlobalHistoryTimestamp(lastActivity) || "Paper chat",
+              : formatPaperHistoryTimestamp(lastActivity) || "Paper chat",
             deletable: true,
             isDraft,
             isPendingDelete: false,
@@ -3409,8 +3403,8 @@ export function setupHandlers(
     const visibleEntries = paperEntries.filter(
       (entry) => !pendingHistoryDeletionKeys.has(entry.conversationKey),
     );
-    latestConversationHistory = visibleEntries;
-    renderGlobalHistoryMenu();
+    latestPaperHistoryEntries = visibleEntries;
+    renderPaperHistoryMenu();
     if (shouldNotifyHistoryConsumers) {
       notifyConversationHistoryChanged();
     }
@@ -3496,7 +3490,7 @@ export function setupHandlers(
     resetComposePreviewUI();
     updateModelButton();
     updateReasoningButton();
-    void refreshGlobalHistoryHeader("selection");
+    void refreshPaperHistoryHeader("selection");
   };
 
   const switchToHistoryTarget = async (
@@ -3678,7 +3672,7 @@ export function setupHandlers(
     } else if (reason === "timeout" && status) {
       setStatus(status, t("Turn deleted"), "ready");
     }
-    void refreshGlobalHistoryHeader("mutation");
+    void refreshPaperHistoryHeader("mutation");
   };
 
   const undoPendingTurnDeletion = () => {
@@ -3802,7 +3796,7 @@ export function setupHandlers(
     });
     await finalizePaperConversationDeletion(pending);
     pendingHistoryDeletionKeys.delete(pending.conversationKey);
-    await refreshGlobalHistoryHeader("mutation");
+    await refreshPaperHistoryHeader("mutation");
   };
 
   const undoPendingHistoryDeletion = async () => {
@@ -3818,7 +3812,7 @@ export function setupHandlers(
       if (status) setStatus(status, t("Conversation restored"), "ready");
       return;
     }
-    renderGlobalHistoryMenuIfOpen();
+    renderPaperHistoryMenuIfOpen();
     if (status) setStatus(status, t("Conversation restored"), "ready");
   };
 
@@ -3826,7 +3820,7 @@ export function setupHandlers(
     conversationKey: number,
   ): ConversationHistoryEntry | null => {
     return (
-      latestConversationHistory.find(
+      latestPaperHistoryEntries.find(
         (entry) => entry.conversationKey === conversationKey,
       ) || null
     );
@@ -3879,7 +3873,7 @@ export function setupHandlers(
     if (!nextTitle) return;
     try {
       await setPaperConversationTitle(entry.conversationKey, nextTitle);
-      await refreshGlobalHistoryHeader("mutation");
+      await refreshPaperHistoryHeader("mutation");
       if (status) setStatus(status, t("Conversation renamed"), "ready");
     } catch (err) {
       ztoolkit.log("LLM: Failed to rename conversation", err);
@@ -3944,12 +3938,12 @@ export function setupHandlers(
       title: entry.title,
       wasActive,
       fallbackTarget,
-      expiresAt: Date.now() + GLOBAL_HISTORY_UNDO_WINDOW_MS,
+      expiresAt: Date.now() + PAPER_HISTORY_UNDO_WINDOW_MS,
       timeoutId: null,
     };
     pending.timeoutId = getWindowTimeout(() => {
       void finalizePendingHistoryDeletion("timeout");
-    }, GLOBAL_HISTORY_UNDO_WINDOW_MS);
+    }, PAPER_HISTORY_UNDO_WINDOW_MS);
     pendingHistoryDeletion = pending;
 
     ztoolkit.log("LLM: Queued history deletion", {
@@ -3960,7 +3954,7 @@ export function setupHandlers(
       expiresAt: pending.expiresAt,
     });
     showHistoryUndoToast(entry.title);
-    renderGlobalHistoryMenuIfOpen();
+    renderPaperHistoryMenuIfOpen();
     if (status)
       setStatus(status, t("Conversation deleted. Undo available."), "ready");
   };
@@ -4054,7 +4048,7 @@ export function setupHandlers(
     });
 
     await switchPaperConversation(targetConversationKey);
-    await refreshGlobalHistoryHeader("mutation");
+    await refreshPaperHistoryHeader("mutation");
     if (status) {
       setStatus(
         status,
@@ -4182,8 +4176,8 @@ export function setupHandlers(
           closeHistoryMenu();
           return;
         }
-        await refreshGlobalHistoryHeader("menu-open");
-        if (!latestConversationHistory.length) {
+        await refreshPaperHistoryHeader("menu-open");
+        if (!latestPaperHistoryEntries.length) {
           closeHistoryMenu();
           return;
         }
@@ -7211,7 +7205,7 @@ export function setupHandlers(
       }
       const normalizedQuery = normalizePaperSearchText(activeSlashToken.query);
       if (!normalizedQuery) {
-        const collections = await browseAllItemCandidates(libraryID);
+        const collections = await browsePaperCollectionCandidates(libraryID);
         if (requestId !== paperPickerRequestSeq) return;
         if (!getActiveSlashToken()) {
           closePaperPicker();
@@ -7223,7 +7217,7 @@ export function setupHandlers(
         return;
       }
       const [paperResults, collectionResults] = await Promise.all([
-        searchAllItemCandidates(libraryID, activeSlashToken.query, 20),
+        searchPaperCandidates(libraryID, activeSlashToken.query, undefined, 20),
         searchCollectionCandidates(libraryID, activeSlashToken.query),
       ]);
       if (requestId !== paperPickerRequestSeq) return;
@@ -7537,8 +7531,8 @@ export function setupHandlers(
     updateImagePreviewPreservingScroll,
     updateSelectedTextPreviewPreservingScroll,
     scheduleAttachmentGc,
-    refreshGlobalHistoryHeader: () => {
-      void refreshGlobalHistoryHeader("mutation");
+    refreshPaperHistoryHeader: () => {
+      void refreshPaperHistoryHeader("mutation");
     },
     persistDraftInput: persistDraftInputForCurrentConversation,
     setStatusMessage: status
@@ -7570,8 +7564,8 @@ export function setupHandlers(
     clearOwnerAttachmentRefs,
     removeConversationAttachmentFiles,
     refreshChatPreservingScroll,
-    refreshGlobalHistoryHeader: () => {
-      return refreshGlobalHistoryHeader("mutation");
+    refreshPaperHistoryHeader: () => {
+      return refreshPaperHistoryHeader("mutation");
     },
     scheduleAttachmentGc,
     setStatusMessage: status

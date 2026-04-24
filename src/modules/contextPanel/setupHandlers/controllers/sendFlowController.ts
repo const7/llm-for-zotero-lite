@@ -118,7 +118,7 @@ type SendFlowControllerDeps = {
   updateImagePreviewPreservingScroll: () => void;
   updateSelectedTextPreviewPreservingScroll: () => void;
   scheduleAttachmentGc: () => void;
-  refreshGlobalHistoryHeader: () => void;
+  refreshPaperHistoryHeader: () => void;
   persistDraftInput: () => void;
   setStatusMessage?: (message: string, level: StatusLevel) => void;
   editStaleStatusText: string;
@@ -309,7 +309,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         }
         deps.setActiveEditSession(null);
         deps.scheduleAttachmentGc();
-        deps.refreshGlobalHistoryHeader();
+        deps.refreshPaperHistoryHeader();
         return;
       }
 
@@ -354,11 +354,11 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       const win = deps.body.ownerDocument?.defaultView;
       if (win) {
         win.setTimeout(() => {
-          deps.refreshGlobalHistoryHeader();
+          deps.refreshPaperHistoryHeader();
         }, 120);
       }
       await sendTask;
-      deps.refreshGlobalHistoryHeader();
+      deps.refreshPaperHistoryHeader();
       return;
     }
 
@@ -617,7 +617,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       }
       deps.setActiveEditSession(null);
       deps.scheduleAttachmentGc();
-      deps.refreshGlobalHistoryHeader();
+      deps.refreshPaperHistoryHeader();
       return;
     }
 
@@ -676,14 +676,14 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     const win = deps.body.ownerDocument?.defaultView;
     if (win) {
       win.setTimeout(() => {
-        deps.refreshGlobalHistoryHeader();
+          deps.refreshPaperHistoryHeader();
       }, 120);
     }
     await sendTask;
     if (isWebChat && webchatSendPdf) {
       deps.markWebChatPdfUploadedForCurrentConversation?.();
     }
-    deps.refreshGlobalHistoryHeader();
+    deps.refreshPaperHistoryHeader();
   };
 
   return { doSend };

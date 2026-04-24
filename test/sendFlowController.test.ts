@@ -124,7 +124,7 @@ describe("sendFlowController", function () {
       updateImagePreviewPreservingScroll: () => undefined,
       updateSelectedTextPreviewPreservingScroll: () => undefined,
       scheduleAttachmentGc: () => undefined,
-      refreshGlobalHistoryHeader: () => undefined,
+      refreshPaperHistoryHeader: () => undefined,
       persistDraftInput: () => {
         persistDraftInputCalls += 1;
         draftValue = inputBox.value;

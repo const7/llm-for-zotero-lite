@@ -239,15 +239,6 @@ export function buildModelPromptWithFileContext(
   return blocks.join("\n");
 }
 
-export function escapeNoteHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 export function formatTime(timestamp: number) {
   if (!timestamp) return "";
   const date = new Date(timestamp);

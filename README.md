@@ -34,12 +34,7 @@ Paper parsing kept:
 
 - MinerU manual parsing / cache
 
-Removed from this fork:
-
-- agent workflows
-- standalone windows
-- note export / note editing workflows
-- template-style product surface inherited from upstream
+Anything outside this scope is intentionally not part of the product surface.
 
 ## Installation
 
@@ -117,7 +112,7 @@ git push origin main --tags
 If the repository metadata in `package.json` points to your fork, generated
 update metadata and release links will also point to your fork.
 
-## Notes For This Fork
+## Fork Policy
 
 - README and docs are intentionally short and aligned to the lean profile.
 - If a feature is not documented here, it should not be treated as part of the

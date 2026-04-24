@@ -18,7 +18,6 @@ export type PanelDomRefs = {
   historyBar: HTMLDivElement | null;
   historyNewBtn: HTMLButtonElement | null;
   historyToggleBtn: HTMLButtonElement | null;
-  historyModeIndicator: HTMLButtonElement | null;
   historyMenu: HTMLDivElement | null;
   historyRowMenu: HTMLDivElement | null;
   historyRowRenameBtn: HTMLButtonElement | null;
@@ -104,9 +103,6 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
       "#llm-history-new",
     ) as HTMLButtonElement | null,
     historyToggleBtn: body.querySelector(
-      "#llm-history-toggle",
-    ) as HTMLButtonElement | null,
-    historyModeIndicator: body.querySelector(
       "#llm-history-toggle",
     ) as HTMLButtonElement | null,
     historyMenu: body.querySelector(

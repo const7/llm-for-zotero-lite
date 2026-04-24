@@ -29,8 +29,8 @@ export const pdfTextCache = new TTLMap<number, PdfContext>(30 * 60 * 1000, 20);
 export const pdfTextLoadingTasks = new Map<number, Promise<void>>();
 export const shortcutTextCache = new Map<string, string>();
 export const activeContextPanels = new Map<Element, () => Zotero.Item | null>();
-/** Raw Zotero item (from onRender) per body — used to recover the original
- *  paper item when clearing a global lock. */
+/** Raw Zotero item (from onRender) per body — used to recover the selected paper
+ *  when the panel is displaying a conversation portal item. */
 export const activeContextPanelRawItems = new Map<Element, Zotero.Item | null>();
 export const activeContextPanelStateSync = new Map<Element, () => void>();
 export let readerContextPanelRegistered = false;
@@ -142,7 +142,6 @@ export const paperContextModeOverrides = new Map<string, PaperContextSendMode>()
 export const paperContentSourceOverrides = new Map<string, PaperContentSourceMode>();
 // Stores the contextItemId of the currently expanded (sticky) paper chip, or false/undefined if none
 export const selectedPaperPreviewExpandedCache = new Map<number, number | false>();
-export const activeGlobalConversationByLibrary = new Map<number, number>();
 // Draft text per conversation — capped to prevent unbounded growth (24h TTL, max 100).
 export const draftInputCache = new TTLMap<number, string>(24 * 60 * 60 * 1000, 100);
 export const selectedTextCache = new Map<number, SelectedTextContext[]>();
@@ -235,7 +234,6 @@ export function clearAllState(): void {
   paperContextModeOverrides.clear();
   paperContentSourceOverrides.clear();
   selectedPaperPreviewExpandedCache.clear();
-  activeGlobalConversationByLibrary.clear();
   draftInputCache.clear();
   selectedTextCache.clear();
   selectedTextPreviewExpandedCache.clear();
