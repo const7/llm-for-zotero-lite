@@ -587,10 +587,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   const systemPromptInput = doc.querySelector(
     `#${config.addonRef}-system-prompt`,
   ) as HTMLTextAreaElement | null;
-  const popupAddTextEnabledInput = doc.querySelector(
-    `#${config.addonRef}-popup-add-text-enabled`,
-  ) as HTMLInputElement | null;
-
   if (!modelSections) return;
 
   const storedGroupsRaw = Zotero.Prefs.get(
@@ -1748,22 +1744,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     if (defaultPromptPre) {
       defaultPromptPre.textContent = DEFAULT_SYSTEM_PROMPT;
     }
-  }
-
-  if (popupAddTextEnabledInput) {
-    const prefValue = Zotero.Prefs.get(
-      `${config.prefsPrefix}.showPopupAddText`,
-      true,
-    );
-    popupAddTextEnabledInput.checked =
-      prefValue !== false && `${prefValue || ""}`.toLowerCase() !== "false";
-    popupAddTextEnabledInput.addEventListener("change", () => {
-      Zotero.Prefs.set(
-        `${config.prefsPrefix}.showPopupAddText`,
-        popupAddTextEnabledInput.checked,
-        true,
-      );
-    });
   }
 
   // ── Semantic Search settings ───────────────────────────────────

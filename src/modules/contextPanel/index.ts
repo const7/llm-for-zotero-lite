@@ -12,7 +12,7 @@
  * - setupHandlers.ts – event handler wiring
  * - chat.ts        – conversation logic, send/refresh
  * - shortcuts.ts   – shortcut rendering and management
- * - screenshot.ts  – screenshot capture from PDF reader
+ * - imageOptimize.ts – image context compression before model requests
  * - pdfContext.ts   – PDF text extraction, chunking, BM25, embeddings
  * - leanPaperContextPlanner.ts – paper-chat context assembly
  * - mineruCache.ts / mineruImages.ts – MinerU paper-chat inputs
@@ -42,6 +42,7 @@ import {
   collectAndDeleteUnreferencedBlobs,
 } from "../../utils/attachmentRefStore";
 import { normalizeSelectedText, setStatus } from "./textUtils";
+import { t } from "../../utils/i18n";
 import { buildUI } from "./buildUI";
 import {
   getActiveContextAttachmentFromTabs,
@@ -57,9 +58,7 @@ import {
   getSelectionFromDocument,
 } from "./readerSelection";
 import { resolveReaderPopupPaperContext } from "./readerPopup";
-import {
-  resolveInitialPanelItemState,
-} from "./portalScope";
+import { resolveInitialPanelItemState } from "./portalScope";
 import { createLatestOnlyTaskScheduler } from "./latestOnlyTaskScheduler";
 
 // =============================================================================
@@ -249,7 +248,7 @@ export function registerReaderSelectionTracking() {
   const handler: _ZoteroTypes.Reader.EventHandler<
     "renderTextSelectionPopup"
   > = (event) => {
-    const selectedText = (() => {
+    const readSelectedTextSnapshot = (): string => {
       const fromAnnotation = normalizeSelectedText(
         event.params?.annotation?.text || "",
       );
@@ -263,20 +262,22 @@ export function registerReaderSelectionTracking() {
         event.reader as any,
         normalizeSelectedText,
       );
-    })();
-    const itemId = event.reader?._item?.id || event.reader?.itemID;
-    if (typeof itemId !== "number") return;
-    const item = Zotero.Items.get(itemId) || null;
-    const cacheKeys = getItemSelectionCacheKeys(item);
-    const keys = cacheKeys.length ? cacheKeys : [itemId];
-    const popupPrefValue = Zotero.Prefs.get(
-      `${config.prefsPrefix}.showPopupAddText`,
-      true,
-    );
-    const showAddTextInPopup =
-      popupPrefValue !== false &&
-      `${popupPrefValue || ""}`.toLowerCase() !== "false";
-
+    };
+    const resolveSelectionContext = (): {
+      itemId: number | null;
+      item: Zotero.Item | null;
+      keys: number[];
+    } => {
+      const rawItemId = event.reader?._item?.id || event.reader?.itemID;
+      const itemId = typeof rawItemId === "number" ? rawItemId : null;
+      const item = itemId ? Zotero.Items.get(itemId) || null : null;
+      const cacheKeys = getItemSelectionCacheKeys(item);
+      return {
+        itemId,
+        item,
+        keys: cacheKeys.length ? cacheKeys : itemId ? [itemId] : [],
+      };
+    };
     const resolveSelectedTextForPopupAction = (): string => {
       const fromPopupDoc = getSelectionFromDocument(
         event.doc,
@@ -300,7 +301,7 @@ export function registerReaderSelectionTracking() {
         normalizeSelectedText,
       );
       if (fromReader) return fromReader;
-      for (const key of keys) {
+      for (const key of resolveSelectionContext().keys) {
         const cached = normalizeSelectedText(
           recentReaderSelectionCache.get(key) || "",
         );
@@ -309,14 +310,19 @@ export function registerReaderSelectionTracking() {
       return "";
     };
 
-    if (selectedText || showAddTextInPopup) {
+    // Lean profile: reader selections always expose Add Text.
+    {
       let popupSentinelEl: HTMLElement | null = null;
       const addTextToPanel = async () => {
-        const effectiveSelectedText =
-          normalizeSelectedText(selectedText) ||
-          resolveSelectedTextForPopupAction();
+        const effectiveSelectedText = resolveSelectedTextForPopupAction();
         if (!effectiveSelectedText) {
           ztoolkit.log("LLM: Add Text popup action skipped (no selection)");
+          return;
+        }
+        const selectionContext = resolveSelectionContext();
+        const item = selectionContext.item;
+        if (!item) {
+          ztoolkit.log("LLM: Add Text popup action skipped (no reader item)");
           return;
         }
         try {
@@ -442,8 +448,7 @@ export function registerReaderSelectionTracking() {
             })
             .filter(
               (state) =>
-                state.panelItemId !== null &&
-                state.conversationKey !== null,
+                state.panelItemId !== null && state.conversationKey !== null,
             );
           if (!rootStates.length) return;
           const sameLibraryStates =
@@ -493,7 +498,7 @@ export function registerReaderSelectionTracking() {
           // Derive conversation key directly from the reader's paper —
           // no dependency on panel scoring or stale panel data attributes.
           let conversationKey: number;
-          let selectedPaperContext: typeof readerPaperContext | null = null;
+          const selectedPaperContext = readerPaperContext;
           // Resolve the conversation key from the reader's paper item via
           // resolveInitialPanelItemState + getConversationKey. This correctly
           // handles portal keys (multi-conversation papers).
@@ -618,76 +623,76 @@ export function registerReaderSelectionTracking() {
         if (isSeparator(prev)) prev.style.display = "none";
         if (isSeparator(next)) next.style.display = "none";
       };
-      if (showAddTextInPopup) {
-        try {
-          const addTextBtn = event.doc.createElementNS(
-            "http://www.w3.org/1999/xhtml",
-            "button",
-          ) as HTMLButtonElement;
-          addTextBtn.type = "button";
-          addTextBtn.textContent = "Add Text";
-          addTextBtn.title = "Add selected text to LLM panel";
-          addTextBtn.style.cssText = [
-            "display:block",
-            "width:100%",
-            "margin:0",
-            "padding:6px 8px",
-            "box-sizing:border-box",
-            "border:1px solid rgba(130,130,130,0.38)",
-            "border-radius:6px",
-            "background:rgba(255,255,255,0.04)",
-            // Keep text readable across light/dark themes.
-            "color:inherit",
-            "font-size:12px",
-            "line-height:1.25",
-            "text-align:center",
-            "cursor:pointer",
-          ].join(";");
-          let addTextHandled = false;
-          const handleAddTextAction = (e: Event) => {
-            if (addTextHandled) return;
-            addTextHandled = true;
-            e.preventDefault();
-            e.stopPropagation();
-            void addTextToPanel();
-          };
-          const isPrimaryButton = (e: Event): boolean => {
-            const maybeMouse = e as MouseEvent;
-            return (
-              typeof maybeMouse.button !== "number" || maybeMouse.button === 0
-            );
-          };
-          // Reader popup items may be removed before "click" fires.
-          // Handle early pointer/mouse down as the primary trigger.
-          addTextBtn.addEventListener("pointerdown", (e: Event) => {
-            if (!isPrimaryButton(e)) return;
-            handleAddTextAction(e);
-          });
-          addTextBtn.addEventListener("mousedown", (e: Event) => {
-            if (!isPrimaryButton(e)) return;
-            handleAddTextAction(e);
-          });
-          addTextBtn.addEventListener("click", handleAddTextAction);
-          addTextBtn.addEventListener("command", handleAddTextAction);
-          event.append(addTextBtn);
-          popupSentinelEl = addTextBtn;
-          stripPopupRowChrome(addTextBtn.parentElement as HTMLElement | null);
-        } catch (err) {
-          ztoolkit.log("LLM: failed to append Add Text popup button", err);
-        }
+      try {
+        const addTextBtn = event.doc.createElementNS(
+          "http://www.w3.org/1999/xhtml",
+          "button",
+        ) as HTMLButtonElement;
+        addTextBtn.type = "button";
+        addTextBtn.textContent = t("Add Text");
+        addTextBtn.title = t("Add selected text to LLM panel");
+        addTextBtn.style.cssText = [
+          "display:block",
+          "width:100%",
+          "margin:0",
+          "padding:6px 8px",
+          "box-sizing:border-box",
+          "border:1px solid rgba(130,130,130,0.38)",
+          "border-radius:6px",
+          "background:rgba(255,255,255,0.04)",
+          // Keep text readable across light/dark themes.
+          "color:inherit",
+          "font-size:12px",
+          "line-height:1.25",
+          "text-align:center",
+          "cursor:pointer",
+        ].join(";");
+        let addTextHandled = false;
+        const handleAddTextAction = (e: Event) => {
+          if (addTextHandled) return;
+          addTextHandled = true;
+          e.preventDefault();
+          e.stopPropagation();
+          void addTextToPanel();
+        };
+        const isPrimaryButton = (e: Event): boolean => {
+          const maybeMouse = e as MouseEvent;
+          return (
+            typeof maybeMouse.button !== "number" || maybeMouse.button === 0
+          );
+        };
+        // Reader popup items may be removed before "click" fires.
+        // Handle early pointer/mouse down as the primary trigger.
+        addTextBtn.addEventListener("pointerdown", (e: Event) => {
+          if (!isPrimaryButton(e)) return;
+          handleAddTextAction(e);
+        });
+        addTextBtn.addEventListener("mousedown", (e: Event) => {
+          if (!isPrimaryButton(e)) return;
+          handleAddTextAction(e);
+        });
+        addTextBtn.addEventListener("click", handleAddTextAction);
+        addTextBtn.addEventListener("command", handleAddTextAction);
+        event.append(addTextBtn);
+        popupSentinelEl = addTextBtn;
+        stripPopupRowChrome(addTextBtn.parentElement as HTMLElement | null);
+      } catch (err) {
+        ztoolkit.log("LLM: failed to append Add Text popup button", err);
       }
 
+      const selectedText = readSelectedTextSnapshot();
+      const cacheKeys = resolveSelectionContext().keys;
       if (selectedText) {
-        for (const key of keys) {
+        for (const key of cacheKeys) {
           recentReaderSelectionCache.set(key, selectedText);
         }
       } else {
-        for (const key of keys) {
+        for (const key of cacheKeys) {
           recentReaderSelectionCache.delete(key);
         }
       }
 
-      if (selectedText) {
+      if (selectedText && cacheKeys.length) {
         try {
           let sentinel = popupSentinelEl;
           if (!sentinel) {
@@ -711,7 +716,7 @@ export function registerReaderSelectionTracking() {
           if (win) {
             win.setTimeout(() => {
               if (!sentinel.isConnected) {
-                for (const key of keys) {
+                for (const key of cacheKeys) {
                   if (recentReaderSelectionCache.get(key) === selectedText) {
                     recentReaderSelectionCache.delete(key);
                   }
@@ -722,10 +727,6 @@ export function registerReaderSelectionTracking() {
         } catch (_err) {
           ztoolkit.log("LLM: selection popup sentinel failed", _err);
         }
-      }
-    } else {
-      for (const key of keys) {
-        recentReaderSelectionCache.delete(key);
       }
     }
   };

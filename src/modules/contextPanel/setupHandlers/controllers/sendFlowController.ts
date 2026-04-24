@@ -94,7 +94,7 @@ type SendFlowControllerDeps = {
   ) => Promise<void>;
   getSelectedProfile: () => SelectedProfile | null;
   getCurrentModelName: () => string;
-  isScreenshotUnsupportedModel: (modelName: string) => boolean;
+  isImageContextUnsupportedModel: (modelName: string) => boolean;
   getSelectedReasoning: () => LLMReasoningConfig | undefined;
   getAdvancedModelParams: (
     entryId: string | undefined,
@@ -230,7 +230,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         deps.getCurrentModelName() ||
         ""
       ).trim();
-      const images = deps.isScreenshotUnsupportedModel(activeModelName)
+      const images = deps.isImageContextUnsupportedModel(activeModelName)
         ? []
         : selectedImages;
       const selectedReasoning = deps.getSelectedReasoning();
@@ -448,7 +448,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         }
         deps.setStatusMessage?.(`Sending ${pdfPageImageDataUrls.length} PDF(s)...`, "ready");
       } else if (pdfSupport === "vision") {
-        if (deps.isScreenshotUnsupportedModel(earlyModelName)) {
+        if (deps.isImageContextUnsupportedModel(earlyModelName)) {
           deps.setStatusMessage?.(
             "This model does not support image input. PDF pages will be sent as text.",
             "warning",
@@ -536,7 +536,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       .getSelectedImages(item.id)
       .slice(0, MAX_SELECTED_IMAGES);
     const images = [
-      ...(deps.isScreenshotUnsupportedModel(activeModelName) ? [] : selectedImages),
+      ...(deps.isImageContextUnsupportedModel(activeModelName) ? [] : selectedImages),
       ...pdfPageImageDataUrls,
     ];
     const selectedReasoning = deps.getSelectedReasoning();

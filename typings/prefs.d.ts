@@ -16,7 +16,6 @@ declare namespace _ZoteroTypes {
       "modelProviderGroupsMigrationVersion": number;
       "lastUsedModelEntryId": string;
       "systemPrompt": string;
-      "showPopupAddText": boolean;
       "temperaturePrimary": string;
       "maxTokensPrimary": string;
       "temperatureSecondary": string;

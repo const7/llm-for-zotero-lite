@@ -17,10 +17,6 @@ import {
   FONT_SCALE_MAX_PERCENT,
   FONT_SCALE_STEP_PERCENT,
   FONT_SCALE_DEFAULT_PERCENT,
-  getSelectTextExpandedLabel,
-  SELECT_TEXT_COMPACT_LABEL,
-  getScreenshotExpandedLabel,
-  SCREENSHOT_COMPACT_LABEL,
   UPLOAD_FILE_EXPANDED_LABEL,
   UPLOAD_FILE_COMPACT_LABEL,
   REASONING_COMPACT_LABEL,
@@ -42,7 +38,6 @@ import {
   selectedFilePreviewExpandedCache,
   selectedPaperContextCache,
   selectedOtherRefContextCache,
-  selectedCollectionContextCache,
   paperContextModeOverrides,
   selectedPaperPreviewExpandedCache,
   pinnedSelectedTextKeys,
@@ -132,10 +127,8 @@ import {
 import { shouldBackfillOlderChatMessages } from "./chatRenderWindow";
 import {
   getActiveReaderForSelectedTab,
-  getActiveReaderSelectionText,
   getActiveContextAttachmentFromTabs,
   addSelectedTextContext,
-  appendSelectedTextContextForItem,
   applySelectedTextPreview,
   formatSelectedTextContextPageLabel,
   getSelectedTextContextEntries,
@@ -181,7 +174,7 @@ import {
   clearSelectedTextState as clearSelectedTextState_,
   retainPinnedTextState as retainPinnedTextState_,
 } from "./contexts/textContextState";
-import { captureScreenshotSelection, optimizeImageDataUrl } from "./screenshot";
+import { optimizeImageDataUrl } from "./imageOptimize";
 import { captureCurrentPdfPage, renderAllPdfPages } from "./pdfPageCapture";
 import {
   persistAttachmentBlob,
@@ -218,7 +211,6 @@ import type {
   AdvancedModelParams,
   PaperContextRef,
   OtherContextRef,
-  CollectionContextRef,
   PaperContextSendMode,
   PaperContentSourceMode,
   SelectedTextContext,
@@ -226,15 +218,12 @@ import type {
 import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/llmClient";
 import type { ReasoningConfig as LLMReasoningConfig } from "../../utils/llmClient";
 import {
-  browsePaperCollectionCandidates,
   searchPaperCandidates,
-  searchCollectionCandidates,
   normalizePaperSearchText,
   parseAtSearchToken,
-  type PaperBrowseCollectionCandidate,
   type PaperSearchAttachmentCandidate,
   type PaperSearchGroupCandidate,
-  type PaperSearchSlashToken,
+  type PaperSearchToken,
 } from "./paperSearch";
 import {
   createPaperPortalItem,
@@ -255,8 +244,8 @@ import {
 import {
   getReasoningLevelDisplayLabel,
   isReasoningDisplayLabelActive,
-  getScreenshotDisabledHint,
-  isScreenshotUnsupportedModel,
+  getImageContextDisabledHint,
+  isImageContextUnsupportedModel,
   getModelPdfSupport,
 } from "./setupHandlers/controllers/modelReasoningController";
 import {
@@ -356,8 +345,6 @@ export function setupHandlers(
     historyUndo,
     historyUndoText,
     historyUndoBtn,
-    selectTextBtn,
-    screenshotBtn,
     uploadBtn,
     uploadInput,
     slashMenu,
@@ -1975,52 +1962,6 @@ export function setupHandlers(
     list.appendChild(chip);
   };
 
-  const appendCollectionChip = (
-    ownerDoc: Document,
-    list: HTMLDivElement,
-    ref: CollectionContextRef,
-    removableIndex: number,
-  ) => {
-    const chip = createElement(
-      ownerDoc,
-      "div",
-      "llm-selected-context llm-collection-context-chip",
-    );
-    chip.dataset.collectionId = `${ref.collectionId}`;
-    chip.dataset.collectionIndex = `${removableIndex}`;
-    chip.classList.add("collapsed");
-
-    const chipHeader = createElement(
-      ownerDoc,
-      "div",
-      "llm-image-preview-header llm-selected-context-header llm-collection-chip-header",
-    );
-    const chipLabel = createElement(
-      ownerDoc,
-      "span",
-      "llm-collection-chip-label",
-      {
-        textContent: `\u{1F5C2}\uFE0F ${ref.name}`,
-        title: `Collection: ${ref.name}`,
-      },
-    );
-    const removeBtn = createElement(
-      ownerDoc,
-      "button",
-      "llm-remove-img-btn llm-collection-clear",
-      {
-        type: "button",
-        textContent: "\u00D7",
-        title: `Remove ${ref.name}`,
-      },
-    ) as HTMLButtonElement;
-    removeBtn.dataset.collectionIndex = `${removableIndex}`;
-    removeBtn.setAttribute("aria-label", `Remove ${ref.name}`);
-    chipHeader.append(chipLabel, removeBtn);
-    chip.appendChild(chipHeader);
-    list.appendChild(chip);
-  };
-
   const updatePaperPreview = () => {
     if (!item || !paperPreview || !paperPreviewList) return;
     closePaperChipMenu();
@@ -2029,13 +1970,10 @@ export function setupHandlers(
       selectedPaperContextCache.get(itemId) || [],
     );
     const selectedOtherRefs = selectedOtherRefContextCache.get(itemId) || [];
-    const selectedCollections =
-      selectedCollectionContextCache.get(itemId) || [];
     const autoLoadedPaperContext = resolveAutoLoadedPaperContext();
     const hasAnyContext =
       selectedPapers.length > 0 ||
       selectedOtherRefs.length > 0 ||
-      selectedCollections.length > 0 ||
       !!autoLoadedPaperContext;
     if (!hasAnyContext) {
       paperPreview.style.display = "none";
@@ -2085,9 +2023,6 @@ export function setupHandlers(
     });
     selectedOtherRefs.forEach((ref, index) => {
       appendOtherRefChip(ownerDoc, paperPreviewList, ref, index);
-    });
-    selectedCollections.forEach((ref, index) => {
-      appendCollectionChip(ownerDoc, paperPreviewList, ref, index);
     });
   };
 
@@ -2225,17 +2160,15 @@ export function setupHandlers(
       !previewExpanded ||
       !previewSelected ||
       !previewSelectedImg ||
-      !previewMeta ||
-      !screenshotBtn
+      !previewMeta
     )
       return;
     const ownerDoc = body.ownerDocument;
     if (!ownerDoc) return;
     const { currentModel } = getSelectedModelInfo();
-    const screenshotUnsupported = isScreenshotUnsupportedModel(currentModel);
-    const screenshotDisabledHint = getScreenshotDisabledHint(currentModel);
+    const imageContextUnsupported = isImageContextUnsupportedModel(currentModel);
     let selectedImages = selectedImageCache.get(item.id) || [];
-    if (screenshotUnsupported && selectedImages.length) {
+    if (imageContextUnsupported && selectedImages.length) {
       clearSelectedImageState(item.id);
       selectedImages = [];
     }
@@ -2285,12 +2218,12 @@ export function setupHandlers(
           "llm-preview-thumb",
           {
             type: "button",
-            title: `Screenshot ${index + 1}`,
+            title: `Image ${index + 1}`,
           },
         ) as HTMLButtonElement;
         thumbBtn.classList.toggle("active", index === activeIndex);
         const thumb = createElement(ownerDoc, "img", "llm-preview-img", {
-          alt: "Selected screenshot",
+          alt: "Selected image",
         }) as HTMLImageElement;
         thumb.src = imageUrl;
         thumbBtn.appendChild(thumb);
@@ -2312,7 +2245,7 @@ export function setupHandlers(
           {
             type: "button",
             textContent: "×",
-            title: `Remove screenshot ${index + 1}`,
+            title: `Remove image ${index + 1}`,
           },
         );
         removeOneBtn.addEventListener("click", (e: Event) => {
@@ -2344,7 +2277,7 @@ export function setupHandlers(
           if (status) {
             setStatus(
               status,
-              `Screenshot removed (${nextImages.length})`,
+              `Image removed (${nextImages.length})`,
               "ready",
             );
           }
@@ -2353,14 +2286,7 @@ export function setupHandlers(
         previewStrip.appendChild(thumbItem);
       }
       previewSelectedImg.src = selectedImages[activeIndex];
-      previewSelectedImg.alt = `Selected screenshot ${activeIndex + 1}`;
-      screenshotBtn.disabled =
-        screenshotUnsupported || imageCount >= MAX_SELECTED_IMAGES;
-      screenshotBtn.title = screenshotUnsupported
-        ? screenshotDisabledHint
-        : imageCount >= MAX_SELECTED_IMAGES
-          ? `Max ${MAX_SELECTED_IMAGES} screenshots`
-          : `Add screenshot (${imageCount})`;
+      previewSelectedImg.alt = `Selected image ${activeIndex + 1}`;
     } else {
       imagePreview.style.display = "none";
       imagePreview.classList.remove("expanded", "collapsed");
@@ -2369,16 +2295,12 @@ export function setupHandlers(
       previewStrip.innerHTML = "";
       previewSelected.style.display = "none";
       previewSelectedImg.removeAttribute("src");
-      previewSelectedImg.alt = "Selected screenshot preview";
+      previewSelectedImg.alt = "Selected image preview";
       previewMeta.textContent = formatFigureCountLabel(0);
       previewMeta.classList.remove("expanded");
       previewMeta.setAttribute("aria-expanded", "false");
       previewMeta.title = t("Expand figures panel");
       clearSelectedImageState(item.id);
-      screenshotBtn.disabled = screenshotUnsupported;
-      screenshotBtn.title = screenshotUnsupported
-        ? screenshotDisabledHint
-        : "Select figure screenshot";
     }
     applyResponsiveActionButtonsLayout();
   };
@@ -4103,7 +4025,7 @@ export function setupHandlers(
         // and we also trigger a remote new-chat command immediately.
         markNextWebChatSendAsNewChat();
         primeFreshWebChatPaperChipState();
-        // Clear cached images so stale screenshots don't auto-attach to ChatGPT
+        // Clear cached images so stale image context doesn't auto-attach to ChatGPT
         if (item) {
           selectedImageCache.delete(item.id);
           updateImagePreviewPreservingScroll();
@@ -4395,13 +4317,11 @@ export function setupHandlers(
 
   type ActionLabelMode = "icon" | "full";
   type ModelLabelMode = "icon" | "full-single" | "full-wrap2";
-  type ActionLayoutMode = "icon" | "half" | "full";
+  type ActionLayoutMode = "icon" | "half";
   type ActionRevealState = {
     send: ActionLabelMode;
     reasoning: ActionLabelMode;
     model: ModelLabelMode;
-    screenshot: ActionLabelMode;
-    selectText: ActionLabelMode;
   };
 
   const setActionButtonLabel = (
@@ -4604,8 +4524,6 @@ export function setupHandlers(
     };
 
     const uploadSlot = uploadBtn?.parentElement as HTMLElement | null;
-    const selectTextSlot = selectTextBtn?.parentElement as HTMLElement | null;
-    const screenshotSlot = screenshotBtn?.parentElement as HTMLElement | null;
     const sendSlot = sendBtn?.parentElement as HTMLElement | null;
 
     const getModelWidth = (mode: ModelLabelMode) => {
@@ -4626,18 +4544,6 @@ export function setupHandlers(
       return mode === "full"
         ? getFullSlotRequiredWidth(reasoningSlot, reasoningBtn, reasoningLabel)
         : ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX;
-    };
-
-    const getContextButtonWidth = (
-      slot: HTMLElement | null,
-      button: HTMLButtonElement | null,
-      expandedLabel: string,
-      mode: ActionLabelMode,
-    ) => {
-      if (!button) return 0;
-      return mode === "full"
-        ? getFullSlotRequiredWidth(slot, button, expandedLabel)
-        : ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX;
     };
 
     const getSendWidth = (mode: ActionLabelMode) => {
@@ -4665,18 +4571,6 @@ export function setupHandlers(
               ),
             )
           : 0,
-        getContextButtonWidth(
-          selectTextSlot,
-          selectTextBtn,
-          getSelectTextExpandedLabel(),
-          state.selectText,
-        ),
-        getContextButtonWidth(
-          screenshotSlot,
-          screenshotBtn,
-          getScreenshotExpandedLabel(),
-          state.screenshot,
-        ),
         getModelWidth(state.model),
         getReasoningWidth(state.reasoning),
       ].filter((width) => width > 0);
@@ -4693,14 +4587,7 @@ export function setupHandlers(
       getAvailableRowWidth() + 1 >= getRequiredWidth(state);
 
     const getPanelLayoutMode = (state: ActionRevealState): ActionLayoutMode => {
-      if (state.selectText === "full") {
-        return "full";
-      }
-      if (
-        state.screenshot === "full" ||
-        state.model !== "icon" ||
-        state.reasoning === "full"
-      ) {
+      if (state.model !== "icon" || state.reasoning === "full") {
         return "half";
       }
       return "icon";
@@ -4715,18 +4602,6 @@ export function setupHandlers(
         UPLOAD_FILE_EXPANDED_LABEL,
         UPLOAD_FILE_COMPACT_LABEL,
         "icon",
-      );
-      setActionButtonLabel(
-        selectTextBtn,
-        getSelectTextExpandedLabel(),
-        SELECT_TEXT_COMPACT_LABEL,
-        "full",
-      );
-      setActionButtonLabel(
-        screenshotBtn,
-        getScreenshotExpandedLabel(),
-        SCREENSHOT_COMPACT_LABEL,
-        "full",
       );
       setSendButtonLabel("full");
 
@@ -4753,18 +4628,6 @@ export function setupHandlers(
         UPLOAD_FILE_EXPANDED_LABEL,
         UPLOAD_FILE_COMPACT_LABEL,
         "icon",
-      );
-      setActionButtonLabel(
-        selectTextBtn,
-        getSelectTextExpandedLabel(),
-        SELECT_TEXT_COMPACT_LABEL,
-        state.selectText,
-      );
-      setActionButtonLabel(
-        screenshotBtn,
-        getScreenshotExpandedLabel(),
-        SCREENSHOT_COMPACT_LABEL,
-        state.screenshot,
       );
       setSendButtonLabel(state.send);
 
@@ -4814,50 +4677,32 @@ export function setupHandlers(
       send: "full",
       reasoning: "full",
       model: "full-single",
-      screenshot: "full",
-      selectText: "full",
-    };
-    const screenshotState: ActionRevealState = {
-      send: "full",
-      reasoning: "full",
-      model: "full-single",
-      screenshot: "full",
-      selectText: "icon",
     };
     const modelState: ActionRevealState = {
       send: "full",
       reasoning: "full",
       model: "full-single",
-      screenshot: "icon",
-      selectText: "icon",
     };
     const reasoningState: ActionRevealState = {
       send: "full",
       reasoning: "full",
       model: "icon",
-      screenshot: "icon",
-      selectText: "icon",
     };
     const sendState: ActionRevealState = {
       send: "full",
       reasoning: "icon",
       model: "icon",
-      screenshot: "icon",
-      selectText: "icon",
     };
     const iconOnlyState: ActionRevealState = {
       send: "icon",
       reasoning: "icon",
       model: "icon",
-      screenshot: "icon",
-      selectText: "icon",
     };
 
     // Reveal order as width grows:
-    // send/cancel -> reasoning -> model -> screenshots -> add text.
+    // send/cancel -> reasoning -> model.
     const candidateStates: ActionRevealState[] = [
       widestState,
-      screenshotState,
       modelState,
       reasoningState,
       sendState,
@@ -4869,7 +4714,6 @@ export function setupHandlers(
         1,
         0,
         { ...widestState, model: "full-wrap2" },
-        { ...screenshotState, model: "full-wrap2" },
         { ...modelState, model: "full-wrap2" },
       );
     }
@@ -5046,7 +4890,7 @@ export function setupHandlers(
           if (entry.authMode === "webchat" && !wasWebChat) {
             markNextWebChatSendAsNewChat();
             primeFreshWebChatPaperChipState();
-            // Clear cached images so stale screenshots don't auto-attach to ChatGPT
+            // Clear cached images so stale image context doesn't auto-attach to ChatGPT
             if (item) {
               selectedImageCache.delete(item.id);
               updateImagePreviewPreservingScroll();
@@ -5575,7 +5419,7 @@ export function setupHandlers(
       }
     }
 
-    // [webchat] Hide the "/" action button — slash menu is disabled in webchat
+    // [webchat] Hide the "+" action button — context menu is disabled in webchat
     if (uploadBtn) {
       uploadBtn.style.display = isWebChat ? "none" : "";
     }
@@ -6110,7 +5954,7 @@ export function setupHandlers(
     body,
     getItem: () => item,
     getCurrentModel: () => getSelectedModelInfo().currentModel,
-    isScreenshotUnsupportedModel,
+    isImageContextUnsupportedModel,
     optimizeImageDataUrl,
     persistAttachmentBlob,
     selectedImageCache,
@@ -6134,14 +5978,9 @@ export function setupHandlers(
     }
   };
 
-  type ActiveSlashToken = PaperSearchSlashToken;
-  type PaperPickerMode = "browse" | "search" | "empty";
+  type ActiveSlashToken = PaperSearchToken;
+  type PaperPickerMode = "search" | "empty";
   type PaperPickerRow =
-    | {
-        kind: "collection";
-        collectionId: number;
-        depth: number;
-      }
     | {
         kind: "paper";
         itemId: number;
@@ -6153,17 +5992,11 @@ export function setupHandlers(
         attachmentIndex: number;
         depth: number;
       };
-  let paperPickerMode: PaperPickerMode = "browse";
+  let paperPickerMode: PaperPickerMode = "empty";
   let paperPickerEmptyMessage = "No references available.";
   let paperPickerGroups: PaperSearchGroupCandidate[] = [];
-  let paperPickerCollections: PaperBrowseCollectionCandidate[] = [];
   let paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
-  let paperPickerCollectionById = new Map<
-    number,
-    PaperBrowseCollectionCandidate
-  >();
   let paperPickerExpandedPaperKeys = new Set<number>();
-  let paperPickerExpandedCollectionKeys = new Set<number>();
   let paperPickerRows: PaperPickerRow[] = [];
   let paperPickerActiveRowIndex = 0;
   let paperPickerRequestSeq = 0;
@@ -6179,21 +6012,15 @@ export function setupHandlers(
     paperPickerDebounceTimer = null;
   };
   const resetPaperPickerState = () => {
-    paperPickerMode = "browse";
+    paperPickerMode = "empty";
     paperPickerEmptyMessage = "No references available.";
     paperPickerGroups = [];
-    paperPickerCollections = [];
     paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
-    paperPickerCollectionById = new Map<
-      number,
-      PaperBrowseCollectionCandidate
-    >();
     paperPickerExpandedPaperKeys = new Set<number>();
-    paperPickerExpandedCollectionKeys = new Set<number>();
     paperPickerRows = [];
     paperPickerActiveRowIndex = 0;
   };
-  // Paper picker is now triggered by '@'; action picker is triggered by '/'
+  // Paper picker is triggered by '@'; context actions are opened by the + button.
   const getActiveAtToken = (): ActiveSlashToken | null => {
     const caretEnd =
       typeof inputBox.selectionStart === "number"
@@ -6204,8 +6031,10 @@ export function setupHandlers(
   const getActiveSlashToken = (): ActiveSlashToken | null => getActiveAtToken();
   const isPaperPickerOpen = () =>
     Boolean(paperPicker && paperPicker.style.display !== "none");
-  const closePaperPicker = () => {
-    consumeActiveAtToken(); // Remove leftover "@" + query from textarea on dismiss
+  const closePaperPicker = (opts: { consumeToken?: boolean } = {}) => {
+    if (opts.consumeToken === true) {
+      consumeActiveAtToken();
+    }
     paperPickerRequestSeq += 1;
     clearPaperPickerDebounceTimer();
     resetPaperPickerState();
@@ -6216,7 +6045,7 @@ export function setupHandlers(
       paperPickerList.innerHTML = "";
     }
   };
-  // ── Slash menu keyboard navigation ────────────────────────────────────────
+  // ── Context action menu keyboard navigation ───────────────────────────────
   let slashMenuActiveIndex = -1;
   const getVisibleSlashItems = (): HTMLButtonElement[] => {
     if (!slashMenu) return [];
@@ -6327,17 +6156,11 @@ export function setupHandlers(
     itemId: number,
   ): PaperSearchGroupCandidate | null =>
     paperPickerGroupByItemId.get(itemId) || null;
-  const getPaperPickerCollectionById = (
-    collectionId: number,
-  ): PaperBrowseCollectionCandidate | null =>
-    paperPickerCollectionById.get(collectionId) || null;
   const isPaperPickerGroupExpanded = (itemId: number): boolean => {
     const group = getPaperPickerGroupByItemId(itemId);
     if (!group || group.attachments.length <= 1) return false;
     return paperPickerExpandedPaperKeys.has(itemId);
   };
-  const isPaperPickerCollectionExpanded = (collectionId: number): boolean =>
-    paperPickerExpandedCollectionKeys.has(collectionId);
   const togglePaperPickerGroupExpanded = (
     itemId: number,
     expanded?: boolean,
@@ -6355,91 +6178,16 @@ export function setupHandlers(
     rebuildPaperPickerRows();
     return true;
   };
-  const togglePaperPickerCollectionExpanded = (
-    collectionId: number,
-    expanded?: boolean,
-  ): boolean => {
-    const collection = getPaperPickerCollectionById(collectionId);
-    if (!collection) return false;
-    const currentlyExpanded =
-      paperPickerExpandedCollectionKeys.has(collectionId);
-    const nextExpanded = expanded === undefined ? !currentlyExpanded : expanded;
-    if (nextExpanded === currentlyExpanded) return false;
-    if (nextExpanded) {
-      paperPickerExpandedCollectionKeys.add(collectionId);
-    } else {
-      paperPickerExpandedCollectionKeys.delete(collectionId);
-    }
-    rebuildPaperPickerRows();
-    return true;
-  };
   const setPaperPickerSearchGroups = (
     groups: PaperSearchGroupCandidate[],
   ): void => {
     paperPickerMode = groups.length ? "search" : "empty";
     paperPickerEmptyMessage = "No papers matched.";
     paperPickerGroups = groups;
-    paperPickerCollections = [];
     paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
-    paperPickerCollectionById = new Map<
-      number,
-      PaperBrowseCollectionCandidate
-    >();
     paperPickerExpandedPaperKeys = new Set<number>();
-    paperPickerExpandedCollectionKeys = new Set<number>();
     for (const group of groups) {
       paperPickerGroupByItemId.set(group.itemId, group);
-    }
-  };
-  /** Sets search results containing both papers and (optionally) collections. */
-  const setPaperPickerSearchResults = (
-    groups: PaperSearchGroupCandidate[],
-    collections: PaperBrowseCollectionCandidate[],
-  ): void => {
-    paperPickerMode = groups.length || collections.length ? "search" : "empty";
-    paperPickerEmptyMessage = "No items matched.";
-    paperPickerGroups = groups;
-    paperPickerCollections = collections;
-    paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
-    paperPickerCollectionById = new Map<
-      number,
-      PaperBrowseCollectionCandidate
-    >();
-    paperPickerExpandedPaperKeys = new Set<number>();
-    paperPickerExpandedCollectionKeys = new Set<number>();
-    for (const group of groups) {
-      paperPickerGroupByItemId.set(group.itemId, group);
-    }
-    for (const collection of collections) {
-      paperPickerCollectionById.set(collection.collectionId, collection);
-    }
-  };
-  const setPaperPickerCollections = (
-    collections: PaperBrowseCollectionCandidate[],
-  ): void => {
-    paperPickerMode = collections.length ? "browse" : "empty";
-    paperPickerEmptyMessage = "No references available.";
-    paperPickerGroups = [];
-    paperPickerCollections = collections;
-    paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
-    paperPickerCollectionById = new Map<
-      number,
-      PaperBrowseCollectionCandidate
-    >();
-    paperPickerExpandedPaperKeys = new Set<number>();
-    paperPickerExpandedCollectionKeys = new Set<number>();
-
-    const registerCollection = (collection: PaperBrowseCollectionCandidate) => {
-      paperPickerCollectionById.set(collection.collectionId, collection);
-      for (const paper of collection.papers) {
-        paperPickerGroupByItemId.set(paper.itemId, paper);
-      }
-      for (const child of collection.childCollections) {
-        registerCollection(child);
-      }
-    };
-    for (const collection of collections) {
-      registerCollection(collection);
     }
   };
   const rebuildPaperPickerRows = () => {
@@ -6464,35 +6212,7 @@ export function setupHandlers(
         });
       });
     };
-    const appendCollectionRows = (
-      collections: PaperBrowseCollectionCandidate[],
-      depth: number,
-    ) => {
-      for (const collection of collections) {
-        rows.push({
-          kind: "collection",
-          collectionId: collection.collectionId,
-          depth,
-        });
-        if (!isPaperPickerCollectionExpanded(collection.collectionId)) continue;
-        appendCollectionRows(collection.childCollections, depth + 1);
-        for (const paper of collection.papers) {
-          appendPaperRow(paper, depth + 1);
-        }
-      }
-    };
-
-    if (paperPickerMode === "browse") {
-      appendCollectionRows(paperPickerCollections, 0);
-    } else if (paperPickerMode === "search") {
-      // Collections first, then papers
-      for (const collection of paperPickerCollections) {
-        rows.push({
-          kind: "collection",
-          collectionId: collection.collectionId,
-          depth: 0,
-        });
-      }
+    if (paperPickerMode === "search") {
       paperPickerGroups.forEach((group) => {
         appendPaperRow(group, 0);
       });
@@ -6540,15 +6260,6 @@ export function setupHandlers(
       if (candidateRow && candidateRow.depth === row.depth - 1) {
         return candidateIndex;
       }
-    }
-    return -1;
-  };
-  const findPaperPickerFirstChildRowIndex = (index: number): number => {
-    const row = getPaperPickerRowAt(index);
-    if (!row) return -1;
-    const nextRow = getPaperPickerRowAt(index + 1);
-    if (nextRow && nextRow.depth === row.depth + 1) {
-      return index + 1;
     }
     return -1;
   };
@@ -6654,24 +6365,11 @@ export function setupHandlers(
   const consumeActiveAtToken = (): boolean => {
     const token = getActiveAtToken();
     if (!token) return false;
-    const beforeAt = inputBox.value.slice(0, token.slashStart);
+    const beforeAt = inputBox.value.slice(0, token.tokenStart);
     const afterCaret = inputBox.value.slice(token.caretEnd);
     inputBox.value = `${beforeAt}${afterCaret}`;
     persistDraftInputForCurrentConversation();
     const nextCaret = beforeAt.length;
-    inputBox.setSelectionRange(nextCaret, nextCaret);
-    return true;
-  };
-  /** Removes only the query text after `@`, preserving the `@` character itself.
-   *  Used after item selection so the picker can reset to browse mode. */
-  const consumeAtQueryOnly = (): boolean => {
-    const token = getActiveAtToken();
-    if (!token || token.query.length === 0) return false;
-    const beforeQuery = inputBox.value.slice(0, token.slashStart + 1); // keeps "@"
-    const afterCaret = inputBox.value.slice(token.caretEnd);
-    inputBox.value = `${beforeQuery}${afterCaret}`;
-    persistDraftInputForCurrentConversation();
-    const nextCaret = token.slashStart + 1; // right after "@"
     inputBox.setSelectionRange(nextCaret, nextCaret);
     return true;
   };
@@ -6684,8 +6382,6 @@ export function setupHandlers(
     if (!selectedGroup) return false;
     const selectedAttachment = selectedGroup.attachments[attachmentIndex];
     if (!selectedAttachment) return false;
-    // Do NOT consume the @ token or close the picker — keep it open for multi-select.
-    // The picker closes when the user clicks outside, presses Escape, or removes the @ token.
     const contentType = selectedAttachment.contentType;
     const kind = resolvePickerItemKind(contentType);
     ztoolkit.log("LLM: Picker selection", {
@@ -6716,53 +6412,13 @@ export function setupHandlers(
         refKind: kind === "figure" ? "figure" : "other",
       });
     }
-    // Clear the query text (e.g. "abc" from "@abc") but keep "@" so the picker
-    // stays open for further selections.  The ensuing schedulePaperPickerSearch()
-    // will detect the empty query after its debounce and reset to browse mode.
-    consumeAtQueryOnly();
-    schedulePaperPickerSearch();
-    // Re-render to show visual feedback (selected state) while keeping picker open
-    renderPaperPicker();
+    closePaperPicker({ consumeToken: true });
     inputBox.focus({ preventScroll: true });
-    return true;
-  };
-  /** Selects a collection and adds it as context, keeping the picker open for multi-select. */
-  const selectCollectionFromPickerUnified = (collectionId: number): boolean => {
-    if (!item) return false;
-    const collection = getPaperPickerCollectionById(collectionId);
-    if (!collection) return false;
-    const libraryID = getCurrentLibraryID();
-    const ref: CollectionContextRef = {
-      collectionId: collection.collectionId,
-      name: collection.name,
-      libraryID,
-    };
-    const existing = selectedCollectionContextCache.get(item.id) || [];
-    if (existing.some((e) => e.collectionId === ref.collectionId)) {
-      if (status)
-        setStatus(status, t("Collection already selected"), "warning");
-      return false;
-    }
-    selectedCollectionContextCache.set(item.id, [...existing, ref]);
-    consumeAtQueryOnly();
-    schedulePaperPickerSearch();
-    updatePaperPreviewPreservingScroll();
-    renderPaperPicker();
-    inputBox.focus({ preventScroll: true });
-    if (status) setStatus(status, t("Collection context added."), "ready");
     return true;
   };
   const selectPaperPickerRowAt = (index: number): boolean => {
     const row = getPaperPickerRowAt(index);
     if (!row) return false;
-    if (row.kind === "collection") {
-      if (paperPickerMode === "search") {
-        return selectCollectionFromPickerUnified(row.collectionId);
-      }
-      togglePaperPickerCollectionExpanded(row.collectionId);
-      renderPaperPicker();
-      return true;
-    }
     if (row.kind === "attachment") {
       return selectPaperPickerAttachment(
         row.itemId,
@@ -6794,22 +6450,6 @@ export function setupHandlers(
   const handlePaperPickerArrowRight = (): boolean => {
     const activeRow = getPaperPickerRowAt(paperPickerActiveRowIndex);
     if (!activeRow) return false;
-    if (activeRow.kind === "collection") {
-      if (!isPaperPickerCollectionExpanded(activeRow.collectionId)) {
-        togglePaperPickerCollectionExpanded(activeRow.collectionId, true);
-        renderPaperPicker();
-        return true;
-      }
-      const firstChildIndex = findPaperPickerFirstChildRowIndex(
-        paperPickerActiveRowIndex,
-      );
-      if (firstChildIndex >= 0) {
-        paperPickerActiveRowIndex = firstChildIndex;
-        renderPaperPicker();
-        return true;
-      }
-      return false;
-    }
     if (activeRow.kind !== "paper") return false;
     const group = getPaperPickerGroupByItemId(activeRow.itemId);
     if (!group || group.attachments.length <= 1) return false;
@@ -6831,22 +6471,6 @@ export function setupHandlers(
   const handlePaperPickerArrowLeft = (): boolean => {
     const activeRow = getPaperPickerRowAt(paperPickerActiveRowIndex);
     if (!activeRow) return false;
-    if (activeRow.kind === "collection") {
-      if (isPaperPickerCollectionExpanded(activeRow.collectionId)) {
-        togglePaperPickerCollectionExpanded(activeRow.collectionId, false);
-        renderPaperPicker();
-        return true;
-      }
-      const parentIndex = findPaperPickerParentRowIndex(
-        paperPickerActiveRowIndex,
-      );
-      if (parentIndex >= 0) {
-        paperPickerActiveRowIndex = parentIndex;
-        renderPaperPicker();
-        return true;
-      }
-      return false;
-    }
     if (activeRow.kind === "attachment") {
       const parentIndex = findPaperPickerPaperRowIndex(activeRow.itemId);
       if (parentIndex >= 0 && parentIndex !== paperPickerActiveRowIndex) {
@@ -6892,12 +6516,8 @@ export function setupHandlers(
     }
     rebuildPaperPickerRows();
     if (!paperPickerRows.length) {
-      const emptyMessage =
-        paperPickerMode === "browse"
-          ? "No items available."
-          : "No items matched.";
       paperPickerMode = "empty";
-      paperPickerEmptyMessage = emptyMessage;
+      paperPickerEmptyMessage = "No papers matched.";
       renderPaperPicker();
       return;
     }
@@ -6909,9 +6529,7 @@ export function setupHandlers(
         `llm-paper-picker-item ${
           row.kind === "attachment"
             ? "llm-paper-picker-attachment-row"
-            : row.kind === "paper"
-              ? "llm-paper-picker-group-row"
-              : "llm-paper-picker-group-row llm-paper-picker-collection-row"
+            : "llm-paper-picker-group-row"
         }`,
       );
       option.setAttribute("role", "option");
@@ -6946,67 +6564,7 @@ export function setupHandlers(
         }
       }
 
-      if (row.kind === "collection") {
-        const collection = getPaperPickerCollectionById(row.collectionId);
-        if (!collection) return;
-        // Visual feedback: mark already-selected collections
-        if (item) {
-          const selectedCollections =
-            selectedCollectionContextCache.get(item.id) || [];
-          if (
-            selectedCollections.some((c) => c.collectionId === row.collectionId)
-          ) {
-            option.classList.add("llm-paper-picker-selected");
-          }
-        }
-        option.setAttribute(
-          "aria-expanded",
-          isPaperPickerCollectionExpanded(row.collectionId) ? "true" : "false",
-        );
-        const rowMain = createElement(
-          ownerDoc,
-          "div",
-          "llm-paper-picker-group-row-main",
-        );
-        const titleLine = createElement(
-          ownerDoc,
-          "div",
-          "llm-paper-picker-group-title-line",
-        );
-        const chevron = createElement(
-          ownerDoc,
-          "span",
-          isPaperPickerCollectionExpanded(row.collectionId)
-            ? "llm-paper-picker-group-chevron llm-folder-open"
-            : "llm-paper-picker-group-chevron llm-folder-closed",
-        );
-        const title = createElement(
-          ownerDoc,
-          "span",
-          "llm-paper-picker-title",
-          {
-            textContent: collection.name,
-            title: collection.name,
-          },
-        );
-        titleLine.append(chevron, title);
-        rowMain.appendChild(titleLine);
-        option.appendChild(rowMain);
-
-        // "+" button to add collection as context (visible on hover)
-        const addBtn = createElement(
-          ownerDoc,
-          "button",
-          "llm-paper-picker-collection-add-btn",
-          { textContent: "+", title: t("Add collection as context") },
-        );
-        addBtn.addEventListener("mousedown", (e: Event) => {
-          e.preventDefault();
-          e.stopPropagation();
-          selectCollectionFromPickerUnified(row.collectionId);
-        });
-        option.appendChild(addBtn);
-      } else if (row.kind === "paper") {
+      if (row.kind === "paper") {
         const group = getPaperPickerGroupByItemId(row.itemId);
         if (!group) return;
         const isMultiAttachment = group.attachments.length > 1;
@@ -7120,15 +6678,6 @@ export function setupHandlers(
         e.preventDefault();
         e.stopPropagation();
         paperPickerActiveRowIndex = rowIndex;
-        if (row.kind === "collection") {
-          if (paperPickerMode === "search") {
-            selectCollectionFromPickerUnified(row.collectionId);
-            return;
-          }
-          togglePaperPickerCollectionExpanded(row.collectionId);
-          renderPaperPicker();
-          return;
-        }
         if (row.kind === "paper") {
           const group = getPaperPickerGroupByItemId(row.itemId);
           if (!group) return;
@@ -7205,27 +6754,21 @@ export function setupHandlers(
       }
       const normalizedQuery = normalizePaperSearchText(activeSlashToken.query);
       if (!normalizedQuery) {
-        const collections = await browsePaperCollectionCandidates(libraryID);
-        if (requestId !== paperPickerRequestSeq) return;
-        if (!getActiveSlashToken()) {
-          closePaperPicker();
-          return;
-        }
-        setPaperPickerCollections(collections);
-        paperPickerActiveRowIndex = 0;
-        renderPaperPicker();
+        closePaperPicker({ consumeToken: false });
         return;
       }
-      const [paperResults, collectionResults] = await Promise.all([
-        searchPaperCandidates(libraryID, activeSlashToken.query, undefined, 20),
-        searchCollectionCandidates(libraryID, activeSlashToken.query),
-      ]);
+      const paperResults = await searchPaperCandidates(
+        libraryID,
+        activeSlashToken.query,
+        undefined,
+        20,
+      );
       if (requestId !== paperPickerRequestSeq) return;
       if (!getActiveSlashToken()) {
         closePaperPicker();
         return;
       }
-      setPaperPickerSearchResults(paperResults, collectionResults);
+      setPaperPickerSearchGroups(paperResults);
       paperPickerActiveRowIndex = 0;
       renderPaperPicker();
     };
@@ -7510,7 +7053,7 @@ export function setupHandlers(
     touchPaperConversationTitle,
     getSelectedProfile,
     getCurrentModelName: () => getSelectedModelInfo().currentModel,
-    isScreenshotUnsupportedModel,
+    isImageContextUnsupportedModel,
     getSelectedReasoning,
     getAdvancedModelParams,
     getActiveEditSession: () => activeEditSession,
@@ -7834,7 +7377,7 @@ export function setupHandlers(
         selectedImageCache.get(currentItem.id) || []
       ).slice(0, MAX_SELECTED_IMAGES);
       const images = [
-        ...(isScreenshotUnsupportedModel(activeModelName)
+        ...(isImageContextUnsupportedModel(activeModelName)
           ? []
           : selectedImages),
         ...pdfPageImageDataUrls,
@@ -8119,229 +7662,6 @@ export function setupHandlers(
     ).__llmFontScaleShortcut = true;
   }
 
-  // "Add Text" button — mirrors the reader popup "Add Text" path.
-  // Reads the conversation key directly from the panel's own DOM data
-  // attributes, so it always targets the correct conversation regardless
-  // of which tab was active when setupHandlers last ran.
-  {
-    const bodyDelegation = body as Element & {
-      __llmAddTextPointerDown?: EventListener;
-      __llmAddTextMouseDown?: EventListener;
-      __llmAddTextClick?: EventListener;
-    };
-    if (bodyDelegation.__llmAddTextPointerDown) {
-      body.removeEventListener(
-        "pointerdown",
-        bodyDelegation.__llmAddTextPointerDown,
-        true,
-      );
-    }
-    if (bodyDelegation.__llmAddTextMouseDown) {
-      body.removeEventListener(
-        "mousedown",
-        bodyDelegation.__llmAddTextMouseDown,
-        true,
-      );
-    }
-    if (bodyDelegation.__llmAddTextClick) {
-      body.removeEventListener("click", bodyDelegation.__llmAddTextClick, true);
-    }
-
-    let pendingSelectedText = "";
-
-    const cacheSelectionBeforeFocusShift = (e: Event) => {
-      if (!(e.target as Element)?.closest?.("#llm-select-text")) return;
-      const currentItem = activeContextPanels.get(body)?.() ?? item;
-      if (!currentItem) return;
-      pendingSelectedText = getActiveReaderSelectionText(
-        body.ownerDocument as Document,
-        currentItem,
-      );
-    };
-
-    const addTextClickHandler = async (e: Event) => {
-      if (!(e.target as Element)?.closest?.("#llm-select-text")) return;
-      e.preventDefault();
-      e.stopPropagation();
-
-      // Derive conversation key from the current item (updated by onRender
-      // on every tab switch) — not from panel DOM which may be stale.
-      const currentItem = activeContextPanels.get(body)?.() ?? item;
-      const root = body.querySelector("#llm-main") as HTMLDivElement | null;
-      const conversationKey = currentItem
-        ? getConversationKey(currentItem)
-        : Number(root?.dataset?.itemId || 0);
-
-      if (!conversationKey) {
-        ztoolkit.log("LLM addText: no conversationKey");
-        return;
-      }
-
-      // Resolve selected text (cached on pointerdown, fallback on click)
-      let selectedText = pendingSelectedText;
-      pendingSelectedText = "";
-      if (!selectedText) {
-        const currentItem = activeContextPanels.get(body)?.() ?? item;
-        if (currentItem) {
-          selectedText = getActiveReaderSelectionText(
-            body.ownerDocument as Document,
-            currentItem,
-          );
-        }
-      }
-      if (!selectedText) {
-        ztoolkit.log("LLM addText: no text selected");
-        return;
-      }
-
-      const readerAttachment = getActiveContextAttachmentFromTabs();
-      const readerPaperContext =
-        resolvePaperContextRefFromAttachment(readerAttachment);
-      const paperContext = readerPaperContext;
-
-      // Resolve page location for jump-to-source
-      const reader = getActiveReaderForSelectedTab();
-      const selectedTextLocation =
-        await resolveCurrentSelectionPageLocationFromReader(
-          reader,
-          selectedText,
-        );
-
-      const added = appendSelectedTextContextForItem(
-        conversationKey,
-        selectedText,
-        "pdf",
-        paperContext,
-        selectedTextLocation,
-      );
-      if (added) {
-        applySelectedTextPreview(body, conversationKey);
-      }
-    };
-
-    bodyDelegation.__llmAddTextPointerDown =
-      cacheSelectionBeforeFocusShift as EventListener;
-    bodyDelegation.__llmAddTextMouseDown =
-      cacheSelectionBeforeFocusShift as EventListener;
-    bodyDelegation.__llmAddTextClick = addTextClickHandler as EventListener;
-
-    body.addEventListener(
-      "pointerdown",
-      cacheSelectionBeforeFocusShift as EventListener,
-      true,
-    );
-    body.addEventListener(
-      "mousedown",
-      cacheSelectionBeforeFocusShift as EventListener,
-      true,
-    );
-    body.addEventListener("click", addTextClickHandler as EventListener, true);
-  }
-
-  // Screenshot button
-  if (screenshotBtn) {
-    screenshotBtn.addEventListener("click", async (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item) return;
-      const { currentModel } = getSelectedModelInfo();
-      if (isScreenshotUnsupportedModel(currentModel)) {
-        if (status) {
-          setStatus(status, getScreenshotDisabledHint(currentModel), "error");
-        }
-        updateImagePreviewPreservingScroll();
-        return;
-      }
-
-      // Get the main Zotero window
-      // Try multiple methods to find the correct window
-      let mainWindow: Window | null = null;
-
-      // Method 1: Try Zotero.getMainWindow()
-      mainWindow = Zotero.getMainWindow();
-      ztoolkit.log("Screenshot: Zotero.getMainWindow() =", mainWindow);
-
-      // Method 2: If that doesn't work, try getting top window from our document
-      if (!mainWindow) {
-        const panelWin = body.ownerDocument?.defaultView;
-        mainWindow = panelWin?.top || panelWin || null;
-        ztoolkit.log("Screenshot: Using panel's top window");
-      }
-
-      if (!mainWindow) {
-        ztoolkit.log("Screenshot: No window found");
-        return;
-      }
-
-      ztoolkit.log(
-        "Screenshot: Using window, body exists:",
-        !!mainWindow.document.body,
-      );
-      ztoolkit.log(
-        "Screenshot: documentElement exists:",
-        !!mainWindow.document.documentElement,
-      );
-
-      const currentImages = selectedImageCache.get(item.id) || [];
-      if (currentImages.length >= MAX_SELECTED_IMAGES) {
-        if (status) {
-          setStatus(
-            status,
-            `Maximum ${MAX_SELECTED_IMAGES} screenshots allowed`,
-            "error",
-          );
-        }
-        updateImagePreviewPreservingScroll();
-        return;
-      }
-      if (status) setStatus(status, t("Select a region..."), "sending");
-
-      try {
-        ztoolkit.log("Screenshot: Starting capture selection...");
-        const dataUrl = await captureScreenshotSelection(mainWindow);
-        ztoolkit.log(
-          "Screenshot: Capture returned:",
-          dataUrl ? "image data" : "null",
-        );
-        if (dataUrl) {
-          const optimized = await optimizeImageDataUrl(mainWindow, dataUrl);
-          const existingImages = selectedImageCache.get(item.id) || [];
-          const nextImages = [...existingImages, optimized].slice(
-            0,
-            MAX_SELECTED_IMAGES,
-          );
-          selectedImageCache.set(item.id, nextImages);
-          const expandedBeforeCapture = selectedImagePreviewExpandedCache.get(
-            item.id,
-          );
-          selectedImagePreviewExpandedCache.set(
-            item.id,
-            typeof expandedBeforeCapture === "boolean"
-              ? expandedBeforeCapture
-              : false,
-          );
-          selectedImagePreviewActiveIndexCache.set(
-            item.id,
-            nextImages.length - 1,
-          );
-          updateImagePreviewPreservingScroll();
-          if (status) {
-            setStatus(
-              status,
-              `Screenshot captured (${nextImages.length})`,
-              "ready",
-            );
-          }
-        } else {
-          if (status) setStatus(status, t("Selection cancelled"), "ready");
-        }
-      } catch (err) {
-        ztoolkit.log("Screenshot selection error:", err);
-        if (status) setStatus(status, t("Screenshot failed"), "error");
-      }
-    });
-  }
-
   const openReferenceSlashFromMenu = () => {
     if (!item) return;
     // Paper picker is now triggered by '@'
@@ -8369,12 +7689,90 @@ export function setupHandlers(
     if (status) {
       setStatus(
         status,
-        t(
-          "Reference picker ready. Browse collections or type to search papers.",
-        ),
+        t("Type after @ to search papers."),
         "ready",
       );
     }
+  };
+
+  const openNativeReferencePicker = async () => {
+    if (!item) return;
+    const libraryID = getCurrentLibraryID();
+    const win =
+      Zotero.getMainWindow?.() ||
+      body.ownerDocument?.defaultView?.top ||
+      body.ownerDocument?.defaultView ||
+      null;
+    const openDialog = (win as Window & {
+      openDialog?: (
+        url: string,
+        name: string,
+        features: string,
+        io: unknown,
+      ) => unknown;
+    } | null)?.openDialog;
+    if (!win || typeof openDialog !== "function") {
+      openReferenceSlashFromMenu();
+      return;
+    }
+
+    let resolveDialog: () => void = () => {};
+    const io: {
+      dataIn: null;
+      dataOut: number[] | null;
+      deferred: { promise: Promise<void>; resolve: () => void };
+      itemTreeID: string;
+      filterLibraryIDs?: number[];
+      onlyRegularItems: boolean;
+      multiSelect: boolean;
+    } = {
+      dataIn: null,
+      dataOut: null,
+      deferred: {
+        promise: new Promise<void>((resolve) => {
+          resolveDialog = resolve;
+        }),
+        resolve: () => resolveDialog(),
+      },
+      itemTreeID: "llm-for-zotero-lite-reference-picker",
+      filterLibraryIDs: libraryID > 0 ? [libraryID] : undefined,
+      onlyRegularItems: true,
+      multiSelect: true,
+    };
+
+    try {
+      openDialog.call(
+        win,
+        "chrome://zotero/content/selectItemsDialog.xhtml",
+        "",
+        "chrome,dialog=no,centerscreen,resizable=yes,width=980,height=760",
+        io,
+      );
+      await io.deferred.promise;
+    } catch (err) {
+      ztoolkit.log("LLM: native reference picker failed", err);
+      openReferenceSlashFromMenu();
+      return;
+    }
+
+    const selectedIds = (io.dataOut || [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .map((value) => Math.floor(value));
+    if (!selectedIds.length) {
+      if (status) setStatus(status, t("Selection cancelled"), "ready");
+      return;
+    }
+    const getAsync = (Zotero.Items as unknown as {
+      getAsync?: (ids: number[]) => Promise<Zotero.Item[]>;
+    }).getAsync;
+    const selectedItems =
+      typeof getAsync === "function"
+        ? await getAsync.call(Zotero.Items, selectedIds)
+        : selectedIds
+            .map((id) => Zotero.Items.get(id) || null)
+            .filter((value): value is Zotero.Item => Boolean(value));
+    addZoteroItemsAsPaperContext(selectedItems);
   };
 
   if (uploadBtn && uploadInput) {
@@ -8423,7 +7821,7 @@ export function setupHandlers(
       e.preventDefault();
       e.stopPropagation();
       closeSlashMenu();
-      openReferenceSlashFromMenu();
+      void openNativeReferencePicker();
     });
   }
 
@@ -8434,9 +7832,9 @@ export function setupHandlers(
       if (!item) return;
       closeSlashMenu();
       const { currentModel } = getSelectedModelInfo();
-      if (isScreenshotUnsupportedModel(currentModel)) {
+      if (isImageContextUnsupportedModel(currentModel)) {
         if (status)
-          setStatus(status, getScreenshotDisabledHint(currentModel), "error");
+          setStatus(status, getImageContextDisabledHint(currentModel), "error");
         return;
       }
       const currentImages = selectedImageCache.get(item.id) || [];
@@ -8501,9 +7899,9 @@ export function setupHandlers(
       if (!item) return;
       closeSlashMenu();
       const { currentModel } = getSelectedModelInfo();
-      if (isScreenshotUnsupportedModel(currentModel)) {
+      if (isImageContextUnsupportedModel(currentModel)) {
         if (status)
-          setStatus(status, getScreenshotDisabledHint(currentModel), "error");
+          setStatus(status, getImageContextDisabledHint(currentModel), "error");
         return;
       }
       const currentImages = selectedImageCache.get(item.id) || [];
@@ -9228,8 +8626,8 @@ export function setupHandlers(
         setStatus(
           status,
           nextPinned
-            ? t("Screenshot pinned for next sends")
-            : t("Screenshot unpinned"),
+            ? t("Image pinned for next sends")
+            : t("Image unpinned"),
           "ready",
         );
       }
@@ -9264,36 +8662,6 @@ export function setupHandlers(
           updatePaperPreviewPreservingScroll();
           if (status)
             setStatus(status, `File context removed (${next.length})`, "ready");
-        }
-        return;
-      }
-
-      // Collection chip removal
-      const collectionClearBtn = target.closest(
-        ".llm-collection-clear",
-      ) as HTMLButtonElement | null;
-      if (collectionClearBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-        const index = Number.parseInt(
-          collectionClearBtn.dataset.collectionIndex || "",
-          10,
-        );
-        const collections = selectedCollectionContextCache.get(item.id) || [];
-        if (
-          Number.isFinite(index) &&
-          index >= 0 &&
-          index < collections.length
-        ) {
-          const next = collections.filter((_, i) => i !== index);
-          if (next.length) {
-            selectedCollectionContextCache.set(item.id, next);
-          } else {
-            selectedCollectionContextCache.delete(item.id);
-          }
-          updatePaperPreviewPreservingScroll();
-          if (status)
-            setStatus(status, t("Collection context removed."), "ready");
         }
         return;
       }

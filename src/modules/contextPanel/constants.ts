@@ -53,14 +53,6 @@ export function formatPaperCountLabel(count: number): string {
   return t("Papers");
 }
 
-export function getSelectTextExpandedLabel() {
-  return t("Add Text");
-}
-export const SELECT_TEXT_COMPACT_LABEL = "";
-export function getScreenshotExpandedLabel() {
-  return t("Screenshots");
-}
-export const SCREENSHOT_COMPACT_LABEL = "";
 export const UPLOAD_FILE_EXPANDED_LABEL = "";
 export const UPLOAD_FILE_COMPACT_LABEL = "";
 export const REASONING_COMPACT_LABEL = "";

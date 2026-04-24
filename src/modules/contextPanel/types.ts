@@ -6,7 +6,6 @@ import type {
   AdvancedModelParams,
   PaperContextRef,
   OtherContextRef,
-  CollectionContextRef,
   PaperConversationSummary,
 } from "../../shared/types";
 
@@ -17,7 +16,6 @@ export type {
   AdvancedModelParams,
   PaperContextRef,
   OtherContextRef,
-  CollectionContextRef,
   PaperConversationSummary,
 } from "../../shared/types";
 

@@ -17,17 +17,10 @@ export type PaperSearchGroupCandidate = Omit<
   modifiedAt: number;
 };
 
-export type PaperSearchSlashToken = {
+export type PaperSearchToken = {
   query: string;
-  slashStart: number;
+  tokenStart: number;
   caretEnd: number;
-};
-
-export type PaperBrowseCollectionCandidate = {
-  collectionId: number;
-  name: string;
-  childCollections: PaperBrowseCollectionCandidate[];
-  papers: PaperSearchGroupCandidate[];
 };
 
 type IndexedPaperAttachment = {
@@ -45,7 +38,6 @@ type IndexedPaperCandidate = {
   year?: string;
   attachments: IndexedPaperAttachment[];
   modifiedAt: number;
-  collectionIDs: number[];
   normalized: {
     title: string;
     shortTitle: string;
@@ -57,18 +49,9 @@ type IndexedPaperCandidate = {
   };
 };
 
-type IndexedCollection = {
-  collectionId: number;
-  name: string;
-  parentID: number;
-  childCollectionIDs: number[];
-  childItemIDs: number[];
-};
-
 type PaperSearchLibraryIndex = {
   libraryID: number;
   candidates: IndexedPaperCandidate[];
-  collections: IndexedCollection[];
 };
 
 type PaperSearchScore = {
@@ -256,37 +239,6 @@ function collectVenue(item: Zotero.Item): string {
   return deduped.join(" ");
 }
 
-function getCollectionIDs(item: Zotero.Item): number[] {
-  try {
-    return item
-      .getCollections()
-      .map((id) => Number(id))
-      .filter((id) => Number.isFinite(id) && id > 0)
-      .map((id) => Math.floor(id));
-  } catch (_err) {
-    return [];
-  }
-}
-
-function resolveLibraryDisplayName(libraryID: number): string {
-  try {
-    const libraries = (Zotero as unknown as {
-      Libraries?: {
-        getName?: (targetLibraryID: number) => unknown;
-        get?: (targetLibraryID: number) => { name?: unknown } | null | undefined;
-      };
-    }).Libraries;
-    const directName = normalizeText(libraries?.getName?.(libraryID));
-    if (directName) return directName;
-    const library = libraries?.get?.(libraryID);
-    const objectName = normalizeText(library?.name);
-    if (objectName) return objectName;
-  } catch (_err) {
-    void _err;
-  }
-  return "My Library";
-}
-
 function buildIndexedCandidate(item: Zotero.Item): IndexedPaperCandidate | null {
   if (!item?.isRegularItem?.()) return null;
   const attachments = buildIndexedAttachments(getPdfChildAttachments(item));
@@ -309,7 +261,6 @@ function buildIndexedCandidate(item: Zotero.Item): IndexedPaperCandidate | null 
     year,
     attachments,
     modifiedAt: toModifiedTimestamp(item.dateModified),
-    collectionIDs: getCollectionIDs(item),
     normalized: {
       title: normalizePaperSearchText(title),
       shortTitle: normalizePaperSearchText(shortTitle),
@@ -322,40 +273,15 @@ function buildIndexedCandidate(item: Zotero.Item): IndexedPaperCandidate | null 
   };
 }
 
-function buildIndexedCollection(
-  collection: Zotero.Collection,
-): IndexedCollection {
-  return {
-    collectionId: collection.id,
-    name: normalizeText(collection.name) || `Collection ${collection.id}`,
-    parentID:
-      Number.isFinite(Number(collection.parentID)) && Number(collection.parentID) > 0
-        ? Math.floor(Number(collection.parentID))
-        : 0,
-    childCollectionIDs: collection
-      .getChildCollections(true, false)
-      .map((id) => Number(id))
-      .filter((id) => Number.isFinite(id) && id > 0)
-      .map((id) => Math.floor(id)),
-    childItemIDs: collection
-      .getChildItems(true, false)
-      .map((id) => Number(id))
-      .filter((id) => Number.isFinite(id) && id > 0)
-      .map((id) => Math.floor(id)),
-  };
-}
-
 async function buildPaperSearchLibraryIndex(
   libraryID: number,
 ): Promise<PaperSearchLibraryIndex> {
   let items: Zotero.Item[] = [];
-  let collections: Zotero.Collection[] = [];
   try {
     items = await Zotero.Items.getAll(libraryID, true, false, false);
-    collections = Zotero.Collections.getByLibrary(libraryID, true) || [];
   } catch (err) {
     ztoolkit.log("LLM: Failed to build paper picker index", err);
-    return { libraryID, candidates: [], collections: [] };
+    return { libraryID, candidates: [] };
   }
 
   const candidates: IndexedPaperCandidate[] = [];
@@ -369,7 +295,6 @@ async function buildPaperSearchLibraryIndex(
   return {
     libraryID,
     candidates,
-    collections: collections.map((collection) => buildIndexedCollection(collection)),
   };
 }
 
@@ -625,48 +550,10 @@ function scoreCandidate(
   };
 }
 
-export function parsePaperSearchSlashToken(
-  input: string,
-  caret: number,
-): PaperSearchSlashToken | null {
-  const safeInput = sanitizeText(typeof input === "string" ? input : "");
-  const normalizedCaret = Number.isFinite(caret)
-    ? Math.max(0, Math.min(safeInput.length, Math.floor(caret)))
-    : safeInput.length;
-
-  let slashIndex = safeInput.lastIndexOf("/", normalizedCaret - 1);
-  while (slashIndex >= 0) {
-    if (slashIndex === 0 || /\s/u.test(safeInput[slashIndex - 1] || "")) {
-      let tokenEnd = slashIndex + 1;
-      while (tokenEnd < safeInput.length && !/\s/u.test(safeInput[tokenEnd] || "")) {
-        tokenEnd += 1;
-      }
-      if (normalizedCaret > tokenEnd) {
-        return null;
-      }
-      return {
-        query: sanitizeText(
-          safeInput.slice(slashIndex + 1, Math.min(normalizedCaret, tokenEnd)),
-        ),
-        slashStart: slashIndex,
-        caretEnd: normalizedCaret,
-      };
-    }
-    slashIndex = safeInput.lastIndexOf("/", slashIndex - 1);
-  }
-  return null;
-}
-
-/**
- * Detects an `@token` at or before the caret position.
- * Mirrors parsePaperSearchSlashToken but uses `@` as the trigger character.
- * The returned value reuses the PaperSearchSlashToken shape (slashStart refers
- * to the `@` character position).
- */
 export function parseAtSearchToken(
   input: string,
   caret: number,
-): PaperSearchSlashToken | null {
+): PaperSearchToken | null {
   const safeInput = sanitizeText(typeof input === "string" ? input : "");
   const normalizedCaret = Number.isFinite(caret)
     ? Math.max(0, Math.min(safeInput.length, Math.floor(caret)))
@@ -686,106 +573,13 @@ export function parseAtSearchToken(
         query: sanitizeText(
           safeInput.slice(atIndex + 1, Math.min(normalizedCaret, tokenEnd)),
         ),
-        slashStart: atIndex,
+        tokenStart: atIndex,
         caretEnd: normalizedCaret,
       };
     }
     atIndex = safeInput.lastIndexOf("@", atIndex - 1);
   }
   return null;
-}
-
-export async function browsePaperCollectionCandidates(
-  libraryID: number,
-  excludeContextItemId?: number | null,
-): Promise<PaperBrowseCollectionCandidate[]> {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
-  const libraryIndex = await getPaperSearchLibraryIndex(Math.floor(libraryID));
-  const visibleCandidates = new Map<number, PaperSearchGroupCandidate>();
-  for (const candidate of libraryIndex.candidates) {
-    const visible = buildVisibleCandidate(candidate, excludeContextItemId);
-    if (visible) {
-      visibleCandidates.set(candidate.itemId, visible);
-    }
-  }
-
-  const collectionMap = new Map<number, PaperBrowseCollectionCandidate>();
-  for (const collection of libraryIndex.collections) {
-    collectionMap.set(collection.collectionId, {
-      collectionId: collection.collectionId,
-      name: collection.name,
-      childCollections: [],
-      papers: [],
-    });
-  }
-
-  for (const collection of libraryIndex.collections) {
-    const node = collectionMap.get(collection.collectionId);
-    if (!node) continue;
-    for (const childCollectionID of collection.childCollectionIDs) {
-      const child = collectionMap.get(childCollectionID);
-      if (child) {
-        node.childCollections.push(child);
-      }
-    }
-    for (const childItemID of collection.childItemIDs) {
-      const candidate = visibleCandidates.get(childItemID);
-      if (candidate) {
-        node.papers.push(candidate);
-      }
-    }
-  }
-
-  const topLevelCollections: PaperBrowseCollectionCandidate[] = [];
-  for (const collection of libraryIndex.collections) {
-    const node = collectionMap.get(collection.collectionId);
-    if (!node) continue;
-    if (!collection.parentID || !collectionMap.has(collection.parentID)) {
-      topLevelCollections.push(node);
-    }
-  }
-
-  const unfiledPapers = libraryIndex.candidates
-    .filter((candidate) => candidate.collectionIDs.length === 0)
-    .map((candidate) => visibleCandidates.get(candidate.itemId) || null)
-    .filter((candidate): candidate is PaperSearchGroupCandidate => Boolean(candidate))
-    .sort((a, b) =>
-      a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
-    );
-
-  if (unfiledPapers.length) {
-    topLevelCollections.push({
-      collectionId: 0,
-      name: resolveLibraryDisplayName(libraryID),
-      childCollections: [],
-      papers: unfiledPapers,
-    });
-  }
-
-  return topLevelCollections;
-}
-
-export async function listLibraryPaperCandidates(
-  libraryID: number,
-  excludeContextItemId?: number | null,
-  limit?: number,
-): Promise<PaperSearchGroupCandidate[]> {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
-  const libraryIndex = await getPaperSearchLibraryIndex(Math.floor(libraryID));
-  const visibleCandidates = libraryIndex.candidates
-    .map((candidate) => buildVisibleCandidate(candidate, excludeContextItemId))
-    .filter(
-      (candidate): candidate is PaperSearchGroupCandidate => Boolean(candidate),
-    )
-    .sort((a, b) => {
-      const modifiedDelta = b.modifiedAt - a.modifiedAt;
-      if (modifiedDelta !== 0) return modifiedDelta;
-      return a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
-    });
-  if (Number.isFinite(limit) && typeof limit === "number" && limit > 0) {
-    return visibleCandidates.slice(0, Math.floor(limit));
-  }
-  return visibleCandidates;
 }
 
 export async function searchPaperCandidates(
@@ -846,64 +640,4 @@ export async function searchPaperCandidates(
   return rankedCandidates
     .slice(0, normalizedLimit)
     .map((entry) => entry.candidate);
-}
-
-const DEFAULT_COLLECTION_SEARCH_LIMIT = 5;
-
-export async function searchCollectionCandidates(
-  libraryID: number,
-  query: string,
-  limit = DEFAULT_COLLECTION_SEARCH_LIMIT,
-): Promise<PaperBrowseCollectionCandidate[]> {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
-  const normalizedQuery = normalizePaperSearchText(query);
-  if (!normalizedQuery) return [];
-  const normalizedLimit = Number.isFinite(limit)
-    ? Math.max(1, Math.floor(limit))
-    : DEFAULT_COLLECTION_SEARCH_LIMIT;
-  const queryTokens = getSearchTokens(normalizedQuery);
-  if (!queryTokens.length) return [];
-
-  const index = await getPaperSearchLibraryIndex(Math.floor(libraryID));
-  const ranked: Array<{
-    collection: IndexedCollection;
-    score: number;
-    matchedTokenCount: number;
-  }> = [];
-
-  for (const collection of index.collections) {
-    const normalizedName = normalizePaperSearchText(collection.name);
-    if (!normalizedName) continue;
-    const scoreState: PaperSearchScore = { score: 0, matchedTokens: new Set() };
-    const nameScore = scoreField(
-      scoreState,
-      normalizedName,
-      normalizedQuery,
-      queryTokens,
-      { exact: 1000, prefix: 900, contains: 700, tokenBonus: 80 },
-    );
-    if (nameScore <= 0) continue;
-    ranked.push({
-      collection,
-      score: nameScore,
-      matchedTokenCount: scoreState.matchedTokens.size,
-    });
-  }
-
-  ranked.sort((a, b) => {
-    const scoreDelta = b.score - a.score;
-    if (scoreDelta !== 0) return scoreDelta;
-    const matchedTokenDelta = b.matchedTokenCount - a.matchedTokenCount;
-    if (matchedTokenDelta !== 0) return matchedTokenDelta;
-    return a.collection.name.localeCompare(b.collection.name, undefined, {
-      sensitivity: "base",
-    });
-  });
-
-  return ranked.slice(0, normalizedLimit).map((e) => ({
-    collectionId: e.collection.collectionId,
-    name: e.collection.name,
-    childCollections: [],
-    papers: [],
-  }));
 }

@@ -87,7 +87,7 @@ describe("sendFlowController", function () {
       touchPaperConversationTitle: async () => undefined,
       getSelectedProfile: () => null,
       getCurrentModelName: () => "",
-      isScreenshotUnsupportedModel: () => false,
+      isImageContextUnsupportedModel: () => false,
       getSelectedReasoning: () => undefined,
       getAdvancedModelParams: () => undefined,
       getActiveEditSession: () => null,

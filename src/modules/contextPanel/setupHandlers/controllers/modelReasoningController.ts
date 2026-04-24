@@ -10,7 +10,7 @@ import {
   type PdfSupport,
 } from "../../../../providers";
 
-export function isScreenshotUnsupportedModel(modelName: string): boolean {
+export function isImageContextUnsupportedModel(modelName: string): boolean {
   return isTextOnlyModel(modelName);
 }
 
@@ -30,9 +30,9 @@ export function getModelPdfSupport(
   }).pdf;
 }
 
-export function getScreenshotDisabledHint(modelName: string): string {
+export function getImageContextDisabledHint(modelName: string): string {
   const label = modelName.trim() || "current model";
-  return `Screenshots are disabled for ${label}`;
+  return `Image context is disabled for ${label}`;
 }
 
 export function getReasoningLevelDisplayLabel(

@@ -46,11 +46,8 @@ const zhCN: Record<string, string> = {
   "Capture the visible page as an image": "将可见页面截图发送",
   "Send multiple PDF pages": "发送多个 PDF 页面",
   "Select pages from the open PDF": "选择打开 PDF 中的页面",
-  "Select collection": "选择文献集",
-  "Add a Zotero collection as context": "将 Zotero 文献集添加为上下文",
   "Literature review": "文献综述",
   "Launch a literature review workflow": "启动文献综述工作流",
-  "Browse and select a collection to add its papers as context.": "浏览并选择一个文献集，将其中的论文添加为上下文。",
   "Edit the prompt and press Send to start your literature review.": "编辑提示词并按发送开始你的文献综述。",
   "Please conduct a literature review on the following topic:\n\n[Enter your research topic here]\n\nPlease search my library, identify relevant papers, summarize key findings, and highlight research gaps.": "请对以下主题进行文献综述：\n\n[在此输入你的研究主题]\n\n请搜索我的文献库，找出相关论文，总结主要发现，并指出研究空白。",
   "Capturing PDF pages...": "正在捕获 PDF 页面...",
@@ -58,20 +55,18 @@ const zhCN: Record<string, string> = {
   "Select PDF pages": "选择 PDF 页面",
   "Send current entire PDF": "发送当前整个 PDF",
   "Add the open PDF file to context": "将打开的 PDF 文件添加到上下文",
-  "Selected screenshot preview": "已选截图预览",
+  "Selected image preview": "已选图片预览",
   "Expand figures": "展开图片",
-  "Clear selected screenshots": "清除已选截图",
+  "Clear selected images": "清除已选图片",
   "Expand files": "展开文件",
   "Clear uploaded files": "清除已上传文件",
-  "Ask about this paper... Type / for actions, @ to add papers": "询问关于这篇论文的问题... 输入 / 查看操作，@ 添加论文",
+  "Ask about this paper... Use + to add context, @ to search papers": "询问关于这篇论文的问题... 用 + 添加上下文，@ 搜索论文",
   "Open a PDF first": "请先打开一个 PDF",
-  "Include selected reader text": "包含选中的阅读器文本",
-  "Select figure screenshot": "选择图片截图",
-  "Context actions": "上下文操作",
+  "Add context": "添加上下文",
   "Reasoning": "推理",
   "Send": "发送",
   "Cancel": "取消",
-  "No active paper context. Type / to add papers.": "没有活跃的论文上下文。输入 / 添加论文。",
+  "No active paper context. Use + to add context or @ to search papers.": "没有活跃的论文上下文。用 + 添加上下文，或用 @ 搜索论文。",
   "Ready": "就绪",
   "Select an item or open a PDF": "选择一个条目或打开 PDF",
 
@@ -117,9 +112,7 @@ const zhCN: Record<string, string> = {
   "File unpinned": "文件已取消固定",
   "Selected text removed": "已移除选中文本",
   "Cancelled": "已取消",
-  "Select a region...": "选择一个区域...",
   "Selection cancelled": "选择已取消",
-  "Screenshot failed": "截图失败",
   "Capturing PDF page...": "正在截取 PDF 页面...",
   "Loading PDF...": "正在加载 PDF...",
   "No PDF page found — open a PDF in the reader first": "未找到 PDF 页面 — 请先在阅读器中打开 PDF",
@@ -129,7 +122,7 @@ const zhCN: Record<string, string> = {
   "No PDF found — open a PDF or select an item with a PDF attachment": "未找到 PDF — 请打开 PDF 或选择带有 PDF 附件的条目",
   "PDF added to context": "PDF 已添加到上下文",
   "Failed to load PDF": "加载 PDF 失败",
-  "Reference picker ready. Browse collections or type to search papers.": "参考文献选择器已就绪。浏览分类或输入搜索论文。",
+  "Type after @ to search papers.": "在 @ 后输入内容以搜索论文。",
   "Paper mode only accepts text from this paper": "论文模式仅接受来自此论文的文本",
   "Edit target changed. Please edit latest prompt again.": "编辑目标已更改。请重新编辑最新的提示。",
   "Deleted one turn": "已删除一轮对话",
@@ -142,8 +135,8 @@ const zhCN: Record<string, string> = {
   "Collapse figures panel": "收起图片面板",
   "Text context pinned for next sends": "文本上下文已固定于后续发送",
   "Text context unpinned": "文本上下文已取消固定",
-  "Screenshot pinned for next sends": "截图已固定于后续发送",
-  "Screenshot unpinned": "截图已取消固定",
+  "Image pinned for next sends": "图片已固定于后续发送",
+  "Image unpinned": "图片已取消固定",
   "Paper set to always send full text.": "论文已设为始终发送全文。",
   "Paper set to retrieval mode.": "论文已设为检索模式。",
   "Paper context added. Full text will be sent on the next turn.": "论文上下文已添加。全文将在下一轮发送。",
@@ -153,7 +146,7 @@ const zhCN: Record<string, string> = {
 
   // ── Constants / count labels ────────────────────────────────────────────
   "Add Text": "添加文本",
-  "Screenshots": "截图",
+  "Add selected text to LLM panel": "将选中文本添加到 LLM 面板",
   "Figure": "图片",
   "Figures": "图片",
   "Files": "文件",
@@ -199,8 +192,6 @@ const zhCN: Record<string, string> = {
   "Custom instructions for the AI assistant...": "为 AI 助手设置自定义指令...",
   "Add custom instructions to the default system prompt (leave empty to use default only)": "在默认系统提示词基础上添加自定义指令（留空则仅使用默认）",
   "View default system prompt": "查看默认系统提示词",
-  'Show "Add Text" in reader selection popup': '在阅读器选区弹出菜单中显示"添加文本"',
-  "Disable this if you prefer not to show the Add Text option in Zotero's text selection popup menu.": '如果你不想在 Zotero 文本选区弹出菜单中显示"添加文本"选项，请禁用此项。',
   "MinerU PDF Parsing": "MinerU PDF 解析",
   "Extract high-quality structured text from PDFs with preserved math formulas, tables, and figures. MinerU dramatically improves how the AI understands your papers.": "从 PDF 中提取高质量结构化文本，保留数学公式、表格和图片。MinerU 显著提升 AI 对论文的理解能力。",
   "Enable MinerU PDF Parsing": "启用 MinerU PDF 解析",
@@ -329,7 +320,7 @@ export function getWebChatWelcomeHtml(targetLabel?: string, targetDomain?: strin
           <ul class="llm-welcome-list">
             <li>你的问题将通过浏览器扩展直接发送到 <strong>${domain}</strong>。请确保扩展已安装并且对应的标签页已打开。</li>
             <li>右键点击论文标签可切换是否发送 <strong>PDF 全文</strong>。紫色 = 发送，灰色 = 跳过。</li>
-            <li>使用截图按钮可附加<strong>图片上下文</strong>到你的消息中。</li>
+            <li>在模型支持视觉输入时，可附加图片文件或 PDF 页面。</li>
             <li>点击 <strong>Exit</strong> 按钮可退出 WebChat 模式，恢复到常规 API 模式。</li>
           </ul>
         </div>
@@ -344,7 +335,7 @@ export function getWebChatWelcomeHtml(targetLabel?: string, targetDomain?: strin
         <ul class="llm-welcome-list">
           <li>Your questions are sent directly to <strong>${domain}</strong> via the browser extension. Make sure the extension is installed and a ${label} tab is open.</li>
           <li>Right-click a paper chip to toggle sending its <strong>full PDF</strong>. Purple = send, grey = skip.</li>
-          <li>Use the screenshot button to attach <strong>figure context</strong> to your message.</li>
+          <li>Attach image files or PDF pages when the model supports vision.</li>
           <li>Click the <strong>Exit</strong> button to leave WebChat mode and return to regular API mode.</li>
         </ul>
       </div>
@@ -361,9 +352,9 @@ export function getWelcomeHtml(): string {
           <div class="llm-welcome-title">开始对话 — 以下是你可以做的。</div>
           <ul class="llm-welcome-list">
             <li><strong>论文对话</strong>回答关于当前打开 PDF 的问题，并在第一次提问前自动预载当前论文上下文。</li>
-            <li>输入 <strong>/</strong> 打开快捷操作：附加文件、添加参考文献、发送当前 PDF 页面或发送整个 PDF。输入 <strong>@</strong> 从文献库添加论文作为上下文。</li>
+            <li>点击 <strong>+</strong> 打开添加菜单：附加文件、选择参考文献、发送当前 PDF 页面或发送整个 PDF。输入 <strong>@关键词</strong> 从文献库搜索论文作为上下文。</li>
             <li>如果启用了 <strong>MinerU</strong>，插件会优先使用增强 Markdown 和图像信息；没有缓存时会自动回退到 PDF 文本。</li>
-            <li>内联添加上下文：在 PDF 阅读器中选择文本作为<strong>文本上下文</strong>，使用截图按钮作为<strong>图片上下文</strong>，或使用 <strong>@</strong> 作为<strong>论文上下文</strong>。右键点击论文标签可强制发送全文；再次右键点击切换回检索模式。</li>
+            <li>内联添加上下文：在 PDF 阅读器中选择文本后点击 <strong>Add Text</strong>，或使用 <strong>@</strong> 添加论文上下文。右键点击论文标签可强制发送全文；再次右键点击切换回检索模式。</li>
           </ul>
         </div>
       </div>
@@ -376,9 +367,9 @@ export function getWelcomeHtml(): string {
         <div class="llm-welcome-title">Start chatting — here's what you can do.</div>
         <ul class="llm-welcome-list">
           <li><strong>Paper chat</strong> answers questions about the currently open PDF and preloads that paper before your first question.</li>
-          <li>Type <strong>/</strong> to open quick actions: attach files, add a reference, send the current PDF page, or send the entire PDF. Type <strong>@</strong> to add a paper from your library as context.</li>
+          <li>Click <strong>+</strong> to attach files, select references, send the current PDF page, or send the entire PDF. Type <strong>@query</strong> to search your library for paper context.</li>
           <li>If <strong>MinerU</strong> is enabled, the plugin prefers enhanced markdown and figure-aware context, then falls back to PDF text when no cache is available.</li>
-          <li>Add context inline: select text in the PDF reader for <strong>text context</strong>, use the screenshot button for <strong>figure context</strong>, or use <strong>@</strong> for <strong>paper context</strong>. Right-click a paper chip to force sending its full text; right-click again to switch it back to retrieval mode.</li>
+          <li>Add context inline: select text in the PDF reader and click <strong>Add Text</strong>, or use <strong>@</strong> for <strong>paper context</strong>. Right-click a paper chip to force sending its full text; right-click again to switch it back to retrieval mode.</li>
         </ul>
       </div>
     </div>
@@ -393,7 +384,7 @@ export function getPaperChatStartPageHtml(): string {
         <div class="llm-start-page-subtitle">从这里开始，读懂这篇论文的一切</div>
         <div class="llm-start-page-desc">
           <p>论文对话回答关于当前活跃论文的问题。论文将在你提问前预加载到上下文中。</p>
-          <p>内联添加上下文：<strong>文本</strong>、<strong>截图</strong>或 <strong>@论文</strong>。左键点击论文标签发送 PDF；右键点击切换全文/检索模式。</p>
+          <p>内联添加上下文：选中文本后点击 <strong>Add Text</strong>，或使用 <strong>@论文</strong>。左键点击论文标签发送 PDF；右键点击切换全文/检索模式。</p>
           <p>如果启用了 <strong>MinerU</strong>，这里会优先使用增强 Markdown 和图像信息；没有缓存时会自动回退到 PDF 文本。</p>
         </div>
       </div>
@@ -405,7 +396,7 @@ export function getPaperChatStartPageHtml(): string {
       <div class="llm-start-page-subtitle">Understand everything of this paper, from here</div>
       <div class="llm-start-page-desc">
         <p>Paper chat answers questions about your current active paper. The paper will be pre-loaded into context before your first question.</p>
-        <p>Add context inline: <strong>text</strong>, <strong>screenshots</strong>, or <strong>@papers</strong>. Left-click a paper chip to send its PDF; right-click to toggle between full-text and retrieval mode.</p>
+        <p>Add context inline: select text and click <strong>Add Text</strong>, or use <strong>@papers</strong>. Left-click a paper chip to send its PDF; right-click to toggle between full-text and retrieval mode.</p>
         <p>If <strong>MinerU</strong> is enabled, the panel prefers enhanced markdown and figure-aware context; otherwise it falls back to standard PDF text.</p>
       </div>
     </div>

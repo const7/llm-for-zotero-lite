@@ -22,8 +22,8 @@ Core workflow kept:
 - ask questions in the reader side panel
 - stream answers
 - keep paper conversation history
-- use current-paper context, reference picker, retrieval, prompt presets,
-  screenshots, and file attachments
+- use current-paper context, reference picker, retrieval, prompt presets, and
+  file/image attachments
 
 Provider paths kept:
 

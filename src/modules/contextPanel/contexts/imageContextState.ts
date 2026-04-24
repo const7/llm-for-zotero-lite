@@ -1,5 +1,5 @@
 /**
- * Image/screenshot context state — pure state operations with no DOM dependencies.
+ * Image context state — pure state operations with no DOM dependencies.
  */
 
 import {

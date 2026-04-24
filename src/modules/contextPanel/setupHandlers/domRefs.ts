@@ -24,8 +24,6 @@ export type PanelDomRefs = {
   historyUndo: HTMLDivElement | null;
   historyUndoText: HTMLSpanElement | null;
   historyUndoBtn: HTMLButtonElement | null;
-  selectTextBtn: HTMLButtonElement | null;
-  screenshotBtn: HTMLButtonElement | null;
   uploadBtn: HTMLButtonElement | null;
   uploadInput: HTMLInputElement | null;
   slashMenu: HTMLDivElement | null;
@@ -122,12 +120,6 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     ) as HTMLSpanElement | null,
     historyUndoBtn: body.querySelector(
       "#llm-history-undo-btn",
-    ) as HTMLButtonElement | null,
-    selectTextBtn: body.querySelector(
-      "#llm-select-text",
-    ) as HTMLButtonElement | null,
-    screenshotBtn: body.querySelector(
-      "#llm-screenshot",
     ) as HTMLButtonElement | null,
     uploadBtn: body.querySelector(
       "#llm-upload-file",

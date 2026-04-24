@@ -13,7 +13,6 @@ import { MAX_SELECTED_TEXT_CONTEXTS } from "./constants";
 import {
   selectedTextCache,
   selectedTextPreviewExpandedCache,
-  recentReaderSelectionCache,
   pinnedSelectedTextKeys,
 } from "./state";
 import type {
@@ -24,11 +23,6 @@ import type {
   PaperContextRef,
 } from "./types";
 import { formatPaperCitationLabel } from "./paperAttribution";
-import {
-  getFirstSelectionFromReader,
-  getSelectionFromDocument,
-} from "./readerSelection";
-import { resolveCurrentSelectionPageLocationFromReader } from "./livePdfSelectionLocator";
 import {
   buildPinnedSelectedTextKey,
   isPinnedSelectedText,
@@ -379,55 +373,6 @@ export function getItemSelectionCacheKeys(
   return Array.from(keys);
 }
 
-export function getActiveReaderSelectionText(
-  panelDoc: Document,
-  currentItem?: Zotero.Item | null,
-): string {
-  const reader = getActiveReaderForSelectedTab();
-  const fromReader = getFirstSelectionFromReader(reader, normalizeSelectedText);
-  if (fromReader) return fromReader;
-
-  // 3. Check the panel document and its iframes
-  const fromPanelDoc = getSelectionFromDocument(
-    panelDoc,
-    normalizeSelectedText,
-  );
-  if (fromPanelDoc) return fromPanelDoc;
-
-  const iframes = Array.from(
-    panelDoc.querySelectorAll("iframe"),
-  ) as HTMLIFrameElement[];
-  for (const frame of iframes) {
-    const fromFrame = getSelectionFromDocument(
-      frame.contentDocument,
-      normalizeSelectedText,
-    );
-    if (fromFrame) return fromFrame;
-  }
-
-  // 4. Cache fallback — populated by the renderTextSelectionPopup event
-  //    handler which also tracks popup lifecycle via a sentinel element.
-  //    When the popup is dismissed the sentinel becomes disconnected and
-  //    the cache entry is automatically cleared, preventing stale results.
-  const itemId = reader?._item?.id || reader?.itemID;
-  if (typeof itemId === "number") {
-    const readerItem = Zotero.Items.get(itemId) || null;
-    const readerKeys = getItemSelectionCacheKeys(readerItem);
-    for (const key of readerKeys) {
-      const fromCache = recentReaderSelectionCache.get(key) || "";
-      if (fromCache) return fromCache;
-    }
-  }
-
-  const panelKeys = getItemSelectionCacheKeys(currentItem || null);
-  for (const key of panelKeys) {
-    const fromCache = recentReaderSelectionCache.get(key) || "";
-    if (fromCache) return fromCache;
-  }
-
-  return "";
-}
-
 function normalizeSelectedTextContexts(value: unknown): SelectedTextContext[] {
   if (Array.isArray(value)) {
     const out: SelectedTextContext[] = [];
@@ -764,9 +709,6 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
   const previewList = body.querySelector(
     "#llm-selected-context-list",
   ) as HTMLDivElement | null;
-  const selectTextBtn = body.querySelector(
-    "#llm-select-text",
-  ) as HTMLButtonElement | null;
   if (!previewList) return;
 
   const selectedContexts = getSelectedTextContextEntries(itemId);
@@ -776,9 +718,6 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
     previewList.style.display = "none";
     previewList.innerHTML = "";
     selectedTextPreviewExpandedCache.delete(itemId);
-    if (selectTextBtn) {
-      selectTextBtn.classList.remove("llm-action-btn-active");
-    }
     return;
   }
 
@@ -900,8 +839,7 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
 
     const previewWarning = ownerDoc.createElement("div");
     previewWarning.className = "llm-selected-context-warning";
-    previewWarning.textContent =
-      "Recommend to use screenshots option for corrupted text";
+    previewWarning.textContent = "Use PDF page or image context for corrupted text";
     previewWarning.style.display = isCorrupted ? "block" : "none";
 
     previewExpanded.append(previewText, previewWarning);
@@ -909,41 +847,4 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
     previewList.appendChild(previewBox);
   }
 
-  if (selectTextBtn) {
-    selectTextBtn.classList.toggle(
-      "llm-action-btn-active",
-      selectedContexts.length > 0,
-    );
-  }
-}
-
-export async function includeSelectedTextFromReader(
-  body: Element,
-  item: Zotero.Item,
-  prefetchedText?: string,
-  options?: {
-    paperContext?: PaperContextRef | null;
-    targetItemId?: number | null;
-  },
-): Promise<boolean> {
-  const selectedText =
-    normalizeSelectedText(prefetchedText || "") ||
-    getActiveReaderSelectionText(body.ownerDocument as Document, item);
-  const targetItemId =
-    typeof options?.targetItemId === "number" && options.targetItemId > 0
-      ? Math.floor(options.targetItemId)
-      : item.id;
-  const reader = getActiveReaderForSelectedTab();
-  const location = await resolveCurrentSelectionPageLocationFromReader(
-    reader,
-    selectedText,
-  );
-  return addSelectedTextContext(body, targetItemId, selectedText, {
-    noSelectionStatusText: "No text selected in reader",
-    successStatusText: "Selected text included",
-    focusInput: true,
-    source: "pdf",
-    paperContext: options?.paperContext,
-    location,
-  });
 }

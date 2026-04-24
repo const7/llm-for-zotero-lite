@@ -52,13 +52,6 @@ export type OtherContextRef = {
   refKind: "figure" | "other";
 };
 
-/** A Zotero collection selected as context scope. */
-export type CollectionContextRef = {
-  collectionId: number;
-  name: string;
-  libraryID: number;
-};
-
 export type PaperConversationSummary = {
   conversationKey: number;
   libraryID: number;

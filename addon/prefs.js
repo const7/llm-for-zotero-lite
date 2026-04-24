@@ -7,7 +7,6 @@ pref("modelProviderGroups", "");
 pref("modelProviderGroupsMigrationVersion", 0);
 pref("lastUsedModelEntryId", "");
 pref("systemPrompt", "");
-pref("showPopupAddText", true);
 pref("temperaturePrimary", "0.3");
 pref("maxTokensPrimary", "4096");
 pref("temperatureSecondary", "0.3");

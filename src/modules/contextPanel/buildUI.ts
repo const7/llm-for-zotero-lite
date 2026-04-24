@@ -2,8 +2,6 @@ import { createElement } from "../../utils/domHelpers";
 import { t } from "../../utils/i18n";
 import {
   PREFERENCES_PANE_ID,
-  getSelectTextExpandedLabel,
-  getScreenshotExpandedLabel,
   UPLOAD_FILE_EXPANDED_LABEL,
   formatFigureCountLabel,
   formatFileCountLabel,
@@ -341,7 +339,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   paperPreview.append(paperPreviewList);
   contextPreviews.appendChild(paperPreview);
 
-  // Image preview area (shows selected screenshot)
+  // Image preview area (uploads, PDF page captures, MinerU figures)
   const imagePreview = createElement(doc, "div", "llm-image-preview", {
     id: "llm-image-preview",
   });
@@ -370,9 +368,9 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     id: "llm-remove-img",
     type: "button",
     textContent: "×",
-    title: t("Clear selected screenshots"),
+    title: t("Clear selected images"),
   });
-  removeImgBtn.setAttribute("aria-label", t("Clear selected screenshots"));
+  removeImgBtn.setAttribute("aria-label", t("Clear selected images"));
   imagePreviewHeader.append(imagePreviewMeta, removeImgBtn);
 
   const imagePreviewExpanded = createElement(
@@ -400,7 +398,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     "llm-image-preview-selected-img",
     {
       id: "llm-image-preview-selected-img",
-      alt: t("Selected screenshot preview"),
+      alt: t("Selected image preview"),
     },
   ) as HTMLImageElement;
   previewLargeWrap.appendChild(previewLargeImg);
@@ -533,7 +531,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   const inputBox = createElement(doc, "textarea", "llm-input", {
     id: "llm-input",
     placeholder: hasItem
-      ? t("Ask about this paper...")
+      ? t("Ask about this paper... Use + to add context, @ to search papers")
       : t("Open a PDF first"),
     disabled: !hasItem,
   });
@@ -544,35 +542,6 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   const actionsLeft = createElement(doc, "div", "llm-actions-left");
   const actionsRight = createElement(doc, "div", "llm-actions-right");
 
-  const selectTextBtn = createElement(
-    doc,
-    "button",
-    "llm-shortcut-btn llm-action-btn llm-action-btn-secondary llm-select-text-btn",
-    {
-      id: "llm-select-text",
-      textContent: getSelectTextExpandedLabel(),
-      title: t("Include selected reader text"),
-      disabled: !hasItem,
-    },
-  );
-  const selectTextSlot = createElement(doc, "div", "llm-action-slot");
-  selectTextSlot.appendChild(selectTextBtn);
-
-  // Screenshot button
-  const screenshotBtn = createElement(
-    doc,
-    "button",
-    "llm-shortcut-btn llm-action-btn llm-action-btn-secondary llm-screenshot-btn",
-    {
-      id: "llm-screenshot",
-      textContent: getScreenshotExpandedLabel(),
-      title: t("Select figure screenshot"),
-      disabled: !hasItem,
-    },
-  );
-  const screenshotSlot = createElement(doc, "div", "llm-action-slot");
-  screenshotSlot.appendChild(screenshotBtn);
-
   const uploadBtn = createElement(
     doc,
     "button",
@@ -581,13 +550,13 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       id: "llm-upload-file",
       type: "button",
       textContent: UPLOAD_FILE_EXPANDED_LABEL,
-      title: t("Context actions"),
+      title: t("Add context"),
       disabled: !hasItem,
     },
   );
   uploadBtn.setAttribute("aria-haspopup", "menu");
   uploadBtn.setAttribute("aria-expanded", "false");
-  uploadBtn.setAttribute("aria-label", t("Context actions"));
+  uploadBtn.setAttribute("aria-label", t("Add context"));
   const uploadInput = createElement(doc, "input", "", {
     id: "llm-upload-input",
     type: "file",
@@ -665,13 +634,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   });
   statusBar.append(statusLine, tokenUsage);
 
-  actionsLeft.append(
-    uploadSlot,
-    selectTextSlot,
-    screenshotSlot,
-    modelDropdown,
-    reasoningDropdown,
-  );
+  actionsLeft.append(uploadSlot, modelDropdown, reasoningDropdown);
   actionsRight.append(sendSlot);
   actionsRow.append(actionsLeft, actionsRight);
   composeArea.appendChild(actionsRow);

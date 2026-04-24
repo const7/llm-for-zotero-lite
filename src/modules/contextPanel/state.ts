@@ -6,7 +6,6 @@ import type {
   SelectedTextContext,
   PaperContextRef,
   OtherContextRef,
-  CollectionContextRef,
   PaperContextSendMode,
   PaperContentSourceMode,
 } from "./types";
@@ -136,7 +135,6 @@ export const selectedFileAttachmentCache = new Map<number, ChatAttachment[]>();
 export const selectedFilePreviewExpandedCache = new Map<number, boolean>();
 export const selectedPaperContextCache = new Map<number, PaperContextRef[]>();
 export const selectedOtherRefContextCache = new Map<number, OtherContextRef[]>();
-export const selectedCollectionContextCache = new Map<number, CollectionContextRef[]>();
 // Flat override maps: key = "ownerItemId:paperItemId:contextItemId"
 export const paperContextModeOverrides = new Map<string, PaperContextSendMode>();
 export const paperContentSourceOverrides = new Map<string, PaperContentSourceMode>();
@@ -230,7 +228,6 @@ export function clearAllState(): void {
   selectedFilePreviewExpandedCache.clear();
   selectedPaperContextCache.clear();
   selectedOtherRefContextCache.clear();
-  selectedCollectionContextCache.clear();
   paperContextModeOverrides.clear();
   paperContentSourceOverrides.clear();
   selectedPaperPreviewExpandedCache.clear();

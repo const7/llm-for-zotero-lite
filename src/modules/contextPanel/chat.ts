@@ -57,7 +57,6 @@ import {
   selectedImageCache,
   selectedFileAttachmentCache,
   selectedPaperContextCache,
-  selectedCollectionContextCache,
   paperContextModeOverrides,
   activeContextPanels,
   activeContextPanelStateSync,
@@ -222,9 +221,9 @@ function resolveMultimodalRetryHint(
     normalized.includes("input too long");
   if (looksLikeSizeOrTokenIssue) {
     if (imageCount >= 8) {
-      return " Try fewer screenshots (for example 4-6) or tighter crops.";
+      return " Try fewer images (for example 4-6) or tighter crops.";
     }
-    return " Try fewer screenshots or tighter crops.";
+    return " Try fewer images or tighter crops.";
   }
   const looksLikeVisionRejection =
     normalized.includes("model_not_supported") ||
@@ -2080,16 +2079,7 @@ export async function retryLatestAssistantResponse(
       signal: getAbortController(conversationKey)?.signal,
       setStatusSafely,
     });
-    let combinedContext = contextPlan.combinedContext;
-    // Append collection scope context if any collections are selected
-    const retrySelectedCollections =
-      selectedCollectionContextCache.get(item.id) || [];
-    if (retrySelectedCollections.length > 0) {
-      const collectionNames = retrySelectedCollections
-        .map((c) => c.name)
-        .join(", ");
-      combinedContext = `${combinedContext}\n\n[Selected Zotero collections as context scope: ${collectionNames}]`;
-    }
+    const combinedContext = contextPlan.combinedContext;
     retryPair.userMessage.paperContexts = contextPlan.paperContexts.length
       ? contextPlan.paperContexts
       : undefined;
@@ -2495,7 +2485,7 @@ export async function sendQuestion(
   await ensureConversationLoaded(item);
   const conversationKey = getConversationKey(item);
 
-  // Add user message with attached selected text / screenshots metadata
+  // Add user message with selected text / image context metadata
   if (!chatHistory.has(conversationKey)) {
     chatHistory.set(conversationKey, []);
   }
@@ -2798,14 +2788,7 @@ export async function sendQuestion(
       signal: getAbortController(conversationKey)?.signal,
       setStatusSafely,
     });
-    let combinedContext = contextPlan.combinedContext;
-    // Append collection scope context if any collections are selected
-    const selectedCollections =
-      selectedCollectionContextCache.get(item.id) || [];
-    if (selectedCollections.length > 0) {
-      const collectionNames = selectedCollections.map((c) => c.name).join(", ");
-      combinedContext = `${combinedContext}\n\n[Selected Zotero collections as context scope: ${collectionNames}]`;
-    }
+    const combinedContext = contextPlan.combinedContext;
     userMessage.paperContexts = contextPlan.paperContexts.length
       ? contextPlan.paperContexts
       : undefined;

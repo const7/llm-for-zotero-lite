@@ -10,7 +10,7 @@ type FileIntakeControllerDeps = {
   body: Element;
   getItem: () => Zotero.Item | null;
   getCurrentModel: () => string;
-  isScreenshotUnsupportedModel: (modelName: string) => boolean;
+  isImageContextUnsupportedModel: (modelName: string) => boolean;
   optimizeImageDataUrl: (win: Window, dataUrl: string) => Promise<string>;
   persistAttachmentBlob: (
     fileName: string,
@@ -180,7 +180,7 @@ export function createFileIntakeController(deps: FileIntakeControllerDeps): {
   const processIncomingFiles = async (incomingFiles: File[]) => {
     const item = deps.getItem();
     if (!item || !incomingFiles.length) return;
-    const imageUnsupported = deps.isScreenshotUnsupportedModel(
+    const imageUnsupported = deps.isImageContextUnsupportedModel(
       deps.getCurrentModel(),
     );
     const nextImages = [...(deps.selectedImageCache.get(item.id) || [])];

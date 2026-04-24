@@ -20,7 +20,6 @@ const MIGRATABLE_PREF_KEYS = [
   "apiKey",
   "model",
   "systemPrompt",
-  "showPopupAddText",
   "embeddingModel",
   "apiBasePrimary",
   "apiKeyPrimary",
