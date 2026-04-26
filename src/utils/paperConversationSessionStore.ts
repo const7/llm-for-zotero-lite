@@ -1,16 +1,7 @@
-import { config } from "../modules/contextPanel/constants";
-
-const LEGACY_PREF_KEY = "lastUsedPaperConversationMap";
 const PAPER_CONVERSATION_SESSION_TABLE =
   "llm_for_zotero_paper_conversation_state";
 const PAPER_CONVERSATION_SESSION_CONVERSATION_INDEX =
   "llm_for_zotero_paper_conversation_state_conversation_idx";
-
-type ZoteroPrefsAPI = {
-  get?: (key: string, global?: boolean) => unknown;
-  set?: (key: string, value: unknown, global?: boolean) => void;
-  clear?: (key: string, global?: boolean) => void;
-};
 
 const rememberedPaperConversationByPaper = new Map<string, number>();
 let initialized = false;
@@ -27,42 +18,6 @@ function buildPaperSessionStateKey(
   paperItemID: number,
 ): string {
   return `${Math.floor(libraryID)}:${Math.floor(paperItemID)}`;
-}
-
-function getZoteroPrefs(): ZoteroPrefsAPI | null {
-  return (
-    (Zotero as unknown as { Prefs?: ZoteroPrefsAPI } | undefined)?.Prefs || null
-  );
-}
-
-function readLegacyPrefMap(): Record<string, number> {
-  const raw = getZoteroPrefs()?.get?.(
-    `${config.prefsPrefix}.${LEGACY_PREF_KEY}`,
-    true,
-  );
-  if (typeof raw !== "string" || !raw.trim()) return {};
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const out: Record<string, number> = {};
-    for (const [key, value] of Object.entries(parsed)) {
-      const normalized = normalizePositiveInt(Number(value));
-      if (!normalized) continue;
-      out[key] = normalized;
-    }
-    return out;
-  } catch (_err) {
-    return {};
-  }
-}
-
-function clearLegacyPref(): void {
-  const fullKey = `${config.prefsPrefix}.${LEGACY_PREF_KEY}`;
-  const prefs = getZoteroPrefs();
-  if (typeof prefs?.clear === "function") {
-    prefs.clear(fullKey, true);
-    return;
-  }
-  prefs?.set?.(fullKey, "", true);
 }
 
 async function ensurePaperConversationSessionTable(): Promise<void> {
@@ -108,32 +63,6 @@ async function loadRememberedPaperConversationsFromDb(): Promise<void> {
   }
 }
 
-async function migrateLegacyPrefMap(): Promise<void> {
-  const legacyMap = readLegacyPrefMap();
-  const entries = Object.entries(legacyMap);
-  if (!entries.length) return;
-  const updatedAt = Date.now();
-  for (const [key, conversationKey] of entries) {
-    const [libraryRaw, paperRaw] = key.split(":");
-    const libraryID = normalizePositiveInt(Number(libraryRaw));
-    const paperItemID = normalizePositiveInt(Number(paperRaw));
-    const normalizedConversationKey = normalizePositiveInt(
-      Number(conversationKey),
-    );
-    if (!libraryID || !paperItemID || !normalizedConversationKey) continue;
-    await Zotero.DB.queryAsync(
-      `INSERT INTO ${PAPER_CONVERSATION_SESSION_TABLE}
-        (library_id, paper_item_id, conversation_key, updated_at)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(library_id, paper_item_id) DO UPDATE SET
-         conversation_key = excluded.conversation_key,
-         updated_at = excluded.updated_at`,
-      [libraryID, paperItemID, normalizedConversationKey, updatedAt],
-    );
-  }
-  clearLegacyPref();
-}
-
 async function persistRememberedPaperConversation(
   libraryID: number,
   paperItemID: number,
@@ -175,7 +104,6 @@ export async function initRememberedPaperConversationStore(): Promise<void> {
   if (initializationPromise) return initializationPromise;
   initializationPromise = (async () => {
     await ensurePaperConversationSessionTable();
-    await migrateLegacyPrefMap();
     await loadRememberedPaperConversationsFromDb();
     initialized = true;
   })();

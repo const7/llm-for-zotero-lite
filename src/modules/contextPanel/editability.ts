@@ -1,6 +1,6 @@
 import type { Message } from "./types";
 
-type EditabilityAssistantTurn = Pick<Message, "role" | "runMode"> | null | undefined;
+type EditabilityAssistantTurn = Pick<Message, "role"> | null | undefined;
 
 export function canEditUserPromptTurn(params: {
   isUser: boolean;
@@ -12,9 +12,9 @@ export function canEditUserPromptTurn(params: {
 }): boolean {
   return Boolean(
     params.isUser &&
-      params.hasItem &&
-      params.conversationIsIdle &&
-      params.assistantPair?.role === "assistant" &&
-      params.providerProtocol !== "web_sync",
+    params.hasItem &&
+    params.conversationIsIdle &&
+    params.assistantPair?.role === "assistant" &&
+    params.providerProtocol !== "web_sync",
   );
 }

@@ -22,7 +22,7 @@ type ImagePart = {
   };
 };
 
-export type InputCapMessageContent = string | (TextPart | ImagePart)[];
+type InputCapMessageContent = string | (TextPart | ImagePart)[];
 
 export type InputCapMessage = {
   role: "user" | "assistant" | "system";
@@ -34,8 +34,8 @@ type ModelInputLimitRule = {
   limit: number;
 };
 
-export const DEFAULT_MODEL_INPUT_TOKEN_LIMIT = DEFAULT_INPUT_TOKEN_CAP;
-export const TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4;
+const DEFAULT_MODEL_INPUT_TOKEN_LIMIT = DEFAULT_INPUT_TOKEN_CAP;
+const TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4;
 
 const IMAGE_PART_ESTIMATED_TOKENS = 1_024;
 const MESSAGE_OVERHEAD_ESTIMATED_TOKENS = 4;
@@ -333,7 +333,10 @@ export function applyModelInputTokenCap(
     inputTokenCapOverride,
     modelLimitTokens,
   );
-  const softLimitTokens = Math.max(1, Math.floor(limitTokens * TOKEN_SAFETY_RATIO));
+  const softLimitTokens = Math.max(
+    1,
+    Math.floor(limitTokens * TOKEN_SAFETY_RATIO),
+  );
   let working = cloneMessages(messages);
   const estimatedBeforeTokens = estimateConversationTokens(working);
   let estimatedAfterTokens = estimatedBeforeTokens;

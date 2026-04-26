@@ -1,16 +1,11 @@
 import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/llmClient";
+import type { ModelProviderAuthMode } from "../../utils/modelProviders";
+import type { ProviderProtocol } from "../../utils/providerProtocol";
 import type {
   SelectedTextSource,
-  ChatAttachmentCategory,
   ChatAttachment,
   AdvancedModelParams,
-  ActiveNoteSession,
   PaperContextRef,
-  NoteContextRef,
-  OtherContextRef,
-  CollectionContextRef,
-  GlobalConversationSummary,
-  PaperConversationSummary,
 } from "../../shared/types";
 
 export type {
@@ -18,12 +13,8 @@ export type {
   ChatAttachmentCategory,
   ChatAttachment,
   AdvancedModelParams,
-  ActiveNoteSession,
   PaperContextRef,
-  NoteContextRef,
   OtherContextRef,
-  CollectionContextRef,
-  GlobalConversationSummary,
   PaperConversationSummary,
 } from "../../shared/types";
 
@@ -31,7 +22,6 @@ export type SelectedTextContext = {
   text: string;
   source: SelectedTextSource;
   paperContext?: PaperContextRef;
-  noteContext?: NoteContextRef;
   contextItemId?: number;
   pageIndex?: number;
   pageLabel?: string;
@@ -41,23 +31,16 @@ export interface Message {
   role: "user" | "assistant";
   text: string;
   timestamp: number;
-  runMode?: "chat" | "agent";
-  agentRunId?: string;
-  selectedText?: string;
-  selectedTextExpanded?: boolean;
   selectedTexts?: string[];
   selectedTextSources?: SelectedTextSource[];
   selectedTextPaperContexts?: (PaperContextRef | undefined)[];
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
   selectedTextExpandedIndex?: number;
   screenshotImages?: string[];
   paperContexts?: PaperContextRef[];
   fullTextPaperContexts?: PaperContextRef[];
-  pinnedPaperContexts?: PaperContextRef[];
   paperContextsExpanded?: boolean;
   attachments?: ChatAttachment[];
   attachmentsExpanded?: boolean;
-  attachmentActiveIndex?: number;
   screenshotExpanded?: boolean;
   screenshotActiveIndex?: number;
   modelName?: string;
@@ -68,16 +51,16 @@ export interface Message {
   reasoningDetails?: string;
   reasoningOpen?: boolean;
   webchatRunState?: "done" | "incomplete" | "error";
-  webchatCompletionReason?: "settled" | "forced_cancel" | "timeout" | "error" | null;
+  webchatCompletionReason?:
+    | "settled"
+    | "forced_cancel"
+    | "timeout"
+    | "error"
+    | null;
   webchatChatUrl?: string;
   webchatChatId?: string;
 }
-
-export type ChatRuntimeMode = "chat" | "agent";
-export type PaperContextSendMode =
-  | "retrieval"
-  | "full-next"
-  | "full-sticky";
+export type PaperContextSendMode = "retrieval" | "full-next" | "full-sticky";
 
 export type PaperContentSourceMode = "text" | "mineru" | "pdf";
 
@@ -113,7 +96,6 @@ export type CustomShortcut = {
 };
 export type ResolvedContextSource = {
   contextItem: Zotero.Item | null;
-  statusText: string;
 };
 
 export type PdfContext = {
@@ -157,24 +139,11 @@ export type PdfChunkMeta = {
   leadingNoiseRemoved?: boolean;
 };
 
-export type ContextAssemblyMode = "full" | "retrieval";
 export type ContextAssemblyStrategy =
   | "paper-first-full"
   | "paper-manual-full"
   | "paper-explicit-retrieval"
-  | "paper-followup-retrieval"
-  | "general-full"
-  | "general-retrieval";
-
-export type ContextBudgetPlan = {
-  modelLimitTokens: number;
-  limitTokens: number;
-  softLimitTokens: number;
-  baseInputTokens: number;
-  outputReserveTokens: number;
-  reasoningReserveTokens: number;
-  contextBudgetTokens: number;
-};
+  | "paper-followup-retrieval";
 
 export type PaperContextCandidate = {
   paperKey: string;
@@ -195,29 +164,6 @@ export type PaperContextCandidate = {
   embeddingScore: number;
   hybridScore: number;
   evidenceScore: number;
-};
-
-export type MultiContextPlan = {
-  mode: ContextAssemblyMode;
-  strategy: ContextAssemblyStrategy;
-  contextText: string;
-  contextBudget: ContextBudgetPlan;
-  usedContextTokens: number;
-  selectedPaperCount: number;
-  selectedChunkCount: number;
-  assistantInstruction?: string;
-};
-
-export type GlobalPortalItem = {
-  __llmGlobalPortalItem: true;
-  id: number;
-  libraryID: number;
-  parentID?: number;
-  attachmentContentType?: string;
-  isAttachment: () => boolean;
-  getAttachments: () => number[];
-  getField: (field: string) => string;
-  isRegularItem: () => boolean;
 };
 
 export type PaperPortalItem = {
@@ -259,48 +205,24 @@ export type SendQuestionOptions = {
   model?: string;
   apiBase?: string;
   apiKey?: string;
+  authMode?: ModelProviderAuthMode;
+  providerProtocol?: ProviderProtocol;
+  modelEntryId?: string;
+  modelProviderLabel?: string;
   reasoning?: LLMReasoningConfig;
   advanced?: AdvancedModelParams;
   displayQuestion?: string;
   selectedTexts?: string[];
   selectedTextSources?: SelectedTextSource[];
   selectedTextPaperContexts?: (PaperContextRef | undefined)[];
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
   paperContexts?: PaperContextRef[];
   fullTextPaperContexts?: PaperContextRef[];
   attachments?: ChatAttachment[];
-  runtimeMode?: ChatRuntimeMode;
-  agentRunId?: string;
-  skipAgentDispatch?: boolean;
   pdfModePaperKeys?: Set<string>;
-  /** Skill IDs force-activated via slash menu selection. */
-  forcedSkillIds?: string[];
   /** System messages injected by provider-side PDF upload (Qwen fileid://, Kimi extracted text). */
   pdfUploadSystemMessages?: string[];
   /** [webchat] When true, attach the paper PDF to the ChatGPT query. */
   webchatSendPdf?: boolean;
   /** [webchat] When true, send the prompt into a fresh ChatGPT conversation. */
   webchatForceNewChat?: boolean;
-};
-
-export type EditRetryOptions = {
-  body: Element;
-  item: Zotero.Item;
-  displayQuestion: string;
-  selectedTexts?: string[];
-  selectedTextSources?: SelectedTextSource[];
-  selectedTextPaperContexts?: (PaperContextRef | undefined)[];
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
-  screenshotImages?: string[];
-  paperContexts?: PaperContextRef[];
-  fullTextPaperContexts?: PaperContextRef[];
-  attachments?: ChatAttachment[];
-  pdfUploadSystemMessages?: string[];
-  targetRuntimeMode?: ChatRuntimeMode;
-  expected?: { conversationKey: number; userTimestamp: number; assistantTimestamp: number };
-  model?: string;
-  apiBase?: string;
-  apiKey?: string;
-  reasoning?: LLMReasoningConfig;
-  advanced?: AdvancedModelParams;
 };

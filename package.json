@@ -1,24 +1,24 @@
 {
-  "name": "llm-for-zotero",
+  "name": "llm-for-zotero-lite",
   "type": "module",
-  "version": "3.7.32",
-  "description": "AI research agent rooted in your Zotero library",
+  "version": "1.0.0",
+  "description": "Lite AI research assistant rooted in your Zotero library",
   "config": {
-    "addonName": "llm-for-zotero",
-    "addonID": "zotero-llm@github.com.yilewang",
-    "addonRef": "llmforzotero",
-    "addonInstance": "LLMForZotero",
-    "prefsPrefix": "extensions.zotero.llmforzotero"
+    "addonName": "llm-for-zotero-lite",
+    "addonID": "zotero-llm-lite@github.com.const7",
+    "addonRef": "llmforzoterolite",
+    "addonInstance": "LLMForZoteroLite",
+    "prefsPrefix": "extensions.zotero.llmforzoterolite"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yilewang/llm-for-zotero.git"
+    "url": "git+https://github.com/const7/llm-for-zotero-lite.git"
   },
-  "author": "Yile Wang",
+  "author": "Kun CHEN",
   "bugs": {
-    "url": "https://github.com/yilewang/llm-for-zotero/issues"
+    "url": "https://github.com/const7/llm-for-zotero-lite/issues"
   },
-  "homepage": "https://github.com/yilewang/llm-for-zotero#readme",
+  "homepage": "https://github.com/const7/llm-for-zotero-lite#readme",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",
@@ -27,12 +27,12 @@
     "lint:fix": "prettier --write . && eslint . --fix",
     "release": "zotero-plugin release",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && zotero-plugin test",
+    "test": "npm run typecheck && npm run test:unit",
+    "test:zotero": "npm run typecheck && zotero-plugin test",
     "test:unit": "npx tsx node_modules/mocha/bin/mocha.js 'test/**/*.test.ts'",
     "update-deps": "npm update --save"
   },
   "dependencies": {
-    "fflate": "^0.8.2",
     "katex": "^0.16.28",
     "zotero-plugin-toolkit": "^5.1.0-beta.13"
   },
@@ -45,7 +45,6 @@
     "eslint": "^9.39.2",
     "mocha": "^11.7.5",
     "prettier": "^3.7.4",
-    "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "zotero-plugin-scaffold": "^0.8.2",

@@ -38,8 +38,16 @@ export function resolvePaperContextDisplayMetadata(
 } {
   let firstCreator = normalizeText(paperContext.firstCreator || "");
   let year = extractYearValue(paperContext.year);
-  if ((!firstCreator || !year) && typeof Zotero !== "undefined") {
-    const zoteroItem = Zotero.Items.get(paperContext.itemId);
+  const zoteroItems =
+    typeof Zotero !== "undefined"
+      ? (
+          Zotero as unknown as {
+            Items?: { get?: (id: number) => Zotero.Item | false | null };
+          }
+        ).Items
+      : null;
+  if ((!firstCreator || !year) && zoteroItems?.get) {
+    const zoteroItem = zoteroItems.get(paperContext.itemId) || null;
     if (zoteroItem?.isRegularItem?.()) {
       if (!firstCreator) {
         firstCreator = normalizeText(
@@ -77,7 +85,8 @@ export function formatPaperCitationLabel(
   const fallbackId =
     Number.isFinite(paperContext.itemId) && paperContext.itemId > 0
       ? Math.floor(paperContext.itemId)
-      : Number.isFinite(paperContext.contextItemId) && paperContext.contextItemId > 0
+      : Number.isFinite(paperContext.contextItemId) &&
+          paperContext.contextItemId > 0
         ? Math.floor(paperContext.contextItemId)
         : 0;
   return fallbackId > 0 ? `Paper ${fallbackId}` : "Paper";
@@ -108,45 +117,6 @@ export function buildPaperQuoteCitationGuidance(
     "- Use the EXACT source label provided for each paper. Do NOT translate or romanize author names.",
     "- Do not cite raw chunk ids, citation keys, or invented page numbers unless they are explicitly provided.",
   ];
-}
-
-export function formatPaperContextReferenceLabel(
-  paperContext: PaperContextRef | null | undefined,
-): string {
-  if (!paperContext) return "Paper";
-  const citation = formatPaperCitationLabel(paperContext);
-  const attachmentTitle = normalizeText(paperContext.attachmentTitle || "");
-  const paperTitle = normalizeText(paperContext.title || "");
-  const parts = [citation];
-  if (paperTitle) parts.push(paperTitle);
-  if (attachmentTitle) parts.push(`Attachment: ${attachmentTitle}`);
-  return parts.join(" - ");
-}
-
-export function formatOpenChatTextContextLabel(
-  paperContext: PaperContextRef | null | undefined,
-): string {
-  return `${formatPaperCitationLabel(paperContext)} - Text Context`;
-}
-
-export function resolvePaperContextRefFromNote(
-  noteItem: Zotero.Item | null | undefined,
-): PaperContextRef | null {
-  if (!noteItem || !(noteItem as any).isNote?.()) return null;
-  const noteItemId = Math.floor(Number(noteItem.id));
-  if (!noteItemId || noteItemId <= 0) return null;
-  let title = "";
-  try {
-    title = normalizeText((noteItem as any).getNoteTitle?.() || "");
-  } catch (_err) {
-    void _err;
-  }
-  if (!title) title = `Note ${noteItemId}`;
-  return {
-    itemId: noteItemId,
-    contextItemId: noteItemId,
-    title,
-  };
 }
 
 export function resolvePaperContextRefFromAttachment(
@@ -181,7 +151,9 @@ export function resolvePaperContextRefFromAttachment(
         `Paper ${normalizedPaperItemId}`,
     ),
   );
-  const citationKey = normalizeText(String(paperItem.getField("citationKey") || ""));
+  const citationKey = normalizeText(
+    String(paperItem.getField("citationKey") || ""),
+  );
   const attachmentTitle = getAttachmentDisplayTitle(contextItem);
   const firstCreator = normalizeText(
     String(
@@ -244,11 +216,16 @@ export function resolvePaperContextRefFromItem(
   );
   const citationKey = normalizeText(String(item.getField("citationKey") || ""));
   const firstCreator = normalizeText(
-    String(item.getField("firstCreator") || (item as Zotero.Item).firstCreator || ""),
+    String(
+      item.getField("firstCreator") || (item as Zotero.Item).firstCreator || "",
+    ),
   );
   const year = normalizeText(
     String(
-      item.getField("year") || item.getField("date") || item.getField("issued") || "",
+      item.getField("year") ||
+        item.getField("date") ||
+        item.getField("issued") ||
+        "",
     ),
   );
   return {

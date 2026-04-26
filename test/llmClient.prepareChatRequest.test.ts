@@ -9,8 +9,9 @@ import {
 
 describe("llmClient prepareChatRequest", function () {
   const originalZotero = globalThis.Zotero;
-  const originalToolkit = (globalThis as typeof globalThis & { ztoolkit?: unknown })
-    .ztoolkit;
+  const originalToolkit = (
+    globalThis as typeof globalThis & { ztoolkit?: unknown }
+  ).ztoolkit;
 
   beforeEach(function () {
     const prefStore = new Map<string, unknown>();
@@ -110,12 +111,12 @@ describe("llmClient prepareChatRequest", function () {
     assert.equal(input[input.length - 1]?.role, "user");
   });
 
-  it("merges non-agent chat system messages into a single leading system entry", async function () {
+  it("merges paper chat system messages into a single leading system entry", async function () {
     let capturedBody: Record<string, unknown> | null = null;
     (
       globalThis.Zotero.Prefs as { set: (key: string, value: unknown) => void }
     ).set(
-      "extensions.zotero.llmforzotero.systemPrompt",
+      "extensions.zotero.llmforzoterolite.systemPrompt",
       "You are a custom paper analyst.",
     );
     (
@@ -211,8 +212,8 @@ describe("llmClient prepareChatRequest", function () {
       key: string,
       value: unknown,
     ) => void;
-    setPref("extensions.zotero.llmforzotero.embeddingProvider", "");
-    setPref("extensions.zotero.llmforzotero.embeddingApiBase", "");
+    setPref("extensions.zotero.llmforzoterolite.embeddingProvider", "");
+    setPref("extensions.zotero.llmforzoterolite.embeddingApiBase", "");
     try {
       await callEmbeddings(["hello"]);
       assert.fail("expected callEmbeddings to throw");
@@ -229,17 +230,29 @@ describe("llmClient prepareChatRequest", function () {
       key: string,
       value: unknown,
     ) => void;
-    setPref("extensions.zotero.llmforzotero.embeddingProvider", "openai");
-    setPref("extensions.zotero.llmforzotero.embeddingApiBase", "https://api.openai.com/v1");
-    setPref("extensions.zotero.llmforzotero.embeddingApiKey", "sk-first");
-    setPref("extensions.zotero.llmforzotero.embeddingModel", "text-embedding-3-small");
+    setPref("extensions.zotero.llmforzoterolite.embeddingProvider", "openai");
+    setPref(
+      "extensions.zotero.llmforzoterolite.embeddingApiBase",
+      "https://api.openai.com/v1",
+    );
+    setPref("extensions.zotero.llmforzoterolite.embeddingApiKey", "sk-first");
+    setPref(
+      "extensions.zotero.llmforzoterolite.embeddingModel",
+      "text-embedding-3-small",
+    );
     const initial = getResolvedEmbeddingConfig();
 
-    setPref("extensions.zotero.llmforzotero.embeddingApiBase", "https://proxy.example/v1");
+    setPref(
+      "extensions.zotero.llmforzoterolite.embeddingApiBase",
+      "https://proxy.example/v1",
+    );
     const endpointChanged = getResolvedEmbeddingConfig();
 
-    setPref("extensions.zotero.llmforzotero.embeddingApiBase", "https://api.openai.com/v1");
-    setPref("extensions.zotero.llmforzotero.embeddingApiKey", "sk-second");
+    setPref(
+      "extensions.zotero.llmforzoterolite.embeddingApiBase",
+      "https://api.openai.com/v1",
+    );
+    setPref("extensions.zotero.llmforzoterolite.embeddingApiKey", "sk-second");
     const keyChanged = getResolvedEmbeddingConfig();
 
     assert.notEqual(initial.providerKey, endpointChanged.providerKey);
@@ -247,10 +260,12 @@ describe("llmClient prepareChatRequest", function () {
   });
 
   it("refreshes codex auth token on 401 and retries once", async function () {
-    const prefsKey = "extensions.zotero.llmforzotero.modelProviderGroups";
+    const prefsKey = "extensions.zotero.llmforzoterolite.modelProviderGroups";
     const versionKey =
-      "extensions.zotero.llmforzotero.modelProviderGroupsMigrationVersion";
-    (globalThis.Zotero.Prefs as { set: (key: string, value: unknown) => void }).set(
+      "extensions.zotero.llmforzoterolite.modelProviderGroupsMigrationVersion";
+    (
+      globalThis.Zotero.Prefs as { set: (key: string, value: unknown) => void }
+    ).set(
       prefsKey,
       JSON.stringify([
         {
@@ -258,14 +273,15 @@ describe("llmClient prepareChatRequest", function () {
           apiBase: "https://chatgpt.com/backend-api/codex/responses",
           apiKey: "",
           authMode: "codex_auth",
-          models: [{ id: "m1", model: "gpt-5.4", temperature: 0.3, maxTokens: 256 }],
+          models: [
+            { id: "m1", model: "gpt-5.4", temperature: 0.3, maxTokens: 256 },
+          ],
         },
       ]),
     );
-    (globalThis.Zotero.Prefs as { set: (key: string, value: unknown) => void }).set(
-      versionKey,
-      2,
-    );
+    (
+      globalThis.Zotero.Prefs as { set: (key: string, value: unknown) => void }
+    ).set(versionKey, 2);
 
     const authJson = JSON.stringify({
       tokens: { access_token: "old-access", refresh_token: "refresh-1" },
@@ -279,7 +295,10 @@ describe("llmClient prepareChatRequest", function () {
           ok: true,
           status: 200,
           statusText: "OK",
-          json: async () => ({ access_token: "new-access", refresh_token: "refresh-2" }),
+          json: async () => ({
+            access_token: "new-access",
+            refresh_token: "refresh-2",
+          }),
           text: async () => "",
         };
       }

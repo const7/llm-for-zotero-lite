@@ -1,16 +1,15 @@
 import { usesMaxCompletionTokens } from "./apiHelpers";
 import type { ModelProviderAuthMode } from "./modelProviders";
 import {
-  describeAgentCapabilityClass,
-  getAgentCapabilityClass,
+  describeProviderCapabilityClass,
+  getProviderCapabilityClass,
+  getProviderProtocolSpec,
   type ProviderProtocol,
 } from "./providerProtocol";
 import {
   buildProviderTransportHeaders,
   resolveProviderTransportEndpoint,
 } from "./providerTransport";
-import { createAgentModelAdapter } from "../agent/model/factory";
-import type { AgentRuntimeRequest } from "../agent/types";
 
 function extractTextFromCodexSSE(raw: string): string {
   const lines = raw.split(/\r?\n/);
@@ -65,7 +64,7 @@ function extractAnthropicText(data: unknown): string {
       if (!entry || typeof entry !== "object") return "";
       return (entry as { type?: unknown; text?: unknown }).type === "text" &&
         typeof (entry as { text?: unknown }).text === "string"
-        ? ((entry as { text: string }).text || "")
+        ? (entry as { text: string }).text || ""
         : "";
     })
     .join("");
@@ -76,9 +75,11 @@ function extractGeminiText(data: unknown): string {
   const candidates = (data as { candidates?: unknown }).candidates;
   if (!Array.isArray(candidates)) return "";
   const parts = (
-    candidates[0] as {
-      content?: { parts?: Array<{ text?: unknown }> };
-    } | undefined
+    candidates[0] as
+      | {
+          content?: { parts?: Array<{ text?: unknown }> };
+        }
+      | undefined
   )?.content?.parts;
   if (!Array.isArray(parts)) return "";
   return parts
@@ -197,26 +198,12 @@ function extractConnectionReply(params: {
   return extractGeminiText(params.jsonData) || "OK";
 }
 
-export function getProviderConnectionCapabilityLabel(params: {
-  protocol: ProviderProtocol;
-  authMode: ModelProviderAuthMode;
-  apiBase: string;
-  apiKey: string;
-  modelName: string;
-}): string {
-  const request: AgentRuntimeRequest = {
-    conversationKey: 0,
-    mode: "agent",
-    userText: "test",
-    model: params.modelName,
-    apiBase: params.apiBase,
-    apiKey: params.apiKey,
-    authMode: params.authMode,
-    providerProtocol: params.protocol,
-  };
-  const capabilities = createAgentModelAdapter(request).getCapabilities(request);
-  return describeAgentCapabilityClass(
-    getAgentCapabilityClass({
+function getProviderConnectionCapabilityLabel(
+  protocol: ProviderProtocol,
+): string {
+  const capabilities = getProviderProtocolSpec(protocol);
+  return describeProviderCapabilityClass(
+    getProviderCapabilityClass({
       toolCalls: capabilities.toolCalls,
       fileInputs: capabilities.fileInputs,
     }),
@@ -261,7 +248,7 @@ export async function runProviderConnectionTest(params: {
         protocol: params.protocol,
         rawText,
       }),
-      capabilityLabel: getProviderConnectionCapabilityLabel(params),
+      capabilityLabel: getProviderConnectionCapabilityLabel(params.protocol),
     };
   }
   const jsonData = await response.json();
@@ -271,6 +258,6 @@ export async function runProviderConnectionTest(params: {
       rawText: "",
       jsonData,
     }),
-    capabilityLabel: getProviderConnectionCapabilityLabel(params),
+    capabilityLabel: getProviderConnectionCapabilityLabel(params.protocol),
   };
 }

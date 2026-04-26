@@ -1,6 +1,5 @@
 import { assert } from "chai";
 import {
-  browsePaperCollectionCandidates,
   invalidatePaperSearchCache,
   searchPaperCandidates,
 } from "../src/modules/contextPanel/paperSearch";
@@ -23,7 +22,6 @@ type MockRegularItemOptions = {
   conferenceName?: string;
   dateModified?: string;
   attachmentIDs?: number[];
-  collectionIDs?: number[];
 };
 
 type MockAttachmentOptions = {
@@ -32,19 +30,9 @@ type MockAttachmentOptions = {
   filename?: string;
 };
 
-type MockCollectionOptions = {
-  id: number;
-  name: string;
-  parentID?: number;
-  childCollectionIDs?: number[];
-  childItemIDs?: number[];
-};
-
 type MockItem = Zotero.Item & {
   attachmentFilename?: string;
 };
-
-type MockCollection = Zotero.Collection;
 
 function makeCreator(firstName: string, lastName: string): MockCreator {
   return {
@@ -72,7 +60,6 @@ function makeRegularItem(options: MockRegularItemOptions): MockItem {
     conferenceName,
     dateModified = "2025-01-01T00:00:00Z",
     attachmentIDs = [],
-    collectionIDs = [],
   } = options;
   const fields = {
     title,
@@ -97,7 +84,7 @@ function makeRegularItem(options: MockRegularItemOptions): MockItem {
     isAttachment: () => false,
     isRegularItem: () => true,
     getAttachments: () => attachmentIDs,
-    getCollections: () => collectionIDs,
+    getCollections: () => [],
     getField: (field: string) => fields[field as keyof typeof fields] || "",
     getCreators: () => creators,
   } as unknown as MockItem;
@@ -121,30 +108,12 @@ function makeAttachment(options: MockAttachmentOptions): MockItem {
   } as unknown as MockItem;
 }
 
-function makeCollection(options: MockCollectionOptions): MockCollection {
-  const {
-    id,
-    name,
-    parentID = 0,
-    childCollectionIDs = [],
-    childItemIDs = [],
-  } = options;
-  return {
-    id,
-    name,
-    parentID,
-    getChildCollections: () => childCollectionIDs,
-    getChildItems: () => childItemIDs,
-  } as unknown as MockCollection;
-}
-
 describe("paperSearch", function () {
   const originalZotero = globalThis.Zotero;
   const originalToolkit = (globalThis as typeof globalThis & { ztoolkit?: any })
     .ztoolkit;
 
   let itemsById: Map<number, MockItem>;
-  let collectionsById: Map<number, MockCollection>;
   let getAllCount = 0;
 
   const installMockZotero = () => {
@@ -156,22 +125,16 @@ describe("paperSearch", function () {
         },
         get: (id: number) => itemsById.get(id) || null,
       },
-      Collections: {
-        getByLibrary: () => Array.from(collectionsById.values()),
-      },
-      Libraries: {
-        getName: () => "My Library",
-      },
     } as typeof Zotero;
-    (globalThis as typeof globalThis & { ztoolkit: { log: () => void } })
-      .ztoolkit = {
+    (
+      globalThis as typeof globalThis & { ztoolkit: { log: () => void } }
+    ).ztoolkit = {
       log: () => {},
     };
   };
 
   beforeEach(function () {
     itemsById = new Map<number, MockItem>();
-    collectionsById = new Map<number, MockCollection>();
     getAllCount = 0;
     invalidatePaperSearchCache();
     installMockZotero();
@@ -193,7 +156,10 @@ describe("paperSearch", function () {
         title: "Attention Is All You Need",
         citationKey: "Vaswani2017",
         firstCreator: "Ashish Vaswani",
-        creators: [makeCreator("Ashish", "Vaswani"), makeCreator("Noam", "Shazeer")],
+        creators: [
+          makeCreator("Ashish", "Vaswani"),
+          makeCreator("Noam", "Shazeer"),
+        ],
         date: "2017-06-01",
         publicationTitle: "NeurIPS",
         attachmentIDs: [101],
@@ -211,7 +177,10 @@ describe("paperSearch", function () {
         attachmentIDs: [102],
       }),
     );
-    itemsById.set(102, makeAttachment({ id: 102, title: "Vision Transformer" }));
+    itemsById.set(
+      102,
+      makeAttachment({ id: 102, title: "Vision Transformer" }),
+    );
 
     const results = await searchPaperCandidates(1, "transformer 2017 shazeer");
 
@@ -244,7 +213,7 @@ describe("paperSearch", function () {
     assert.equal(diacriticResults[0]?.itemId, 3);
   });
 
-  it("matches compact slash-style queries against spaced titles", async function () {
+  it("matches compact @ queries against spaced titles", async function () {
     itemsById.set(
       31,
       makeRegularItem({
@@ -254,7 +223,10 @@ describe("paperSearch", function () {
         attachmentIDs: [131],
       }),
     );
-    itemsById.set(131, makeAttachment({ id: 131, title: "Working Memory PDF" }));
+    itemsById.set(
+      131,
+      makeAttachment({ id: 131, title: "Working Memory PDF" }),
+    );
 
     const results = await searchPaperCandidates(1, "workingmemory");
 
@@ -287,72 +259,6 @@ describe("paperSearch", function () {
     assert.equal(results[0].itemId, 4);
   });
 
-  it("builds collection browse results with nested folders and unfiled papers", async function () {
-    itemsById.set(
-      6,
-      makeRegularItem({
-        id: 6,
-        title: "Folder Paper",
-        firstCreator: "Folder Author",
-        attachmentIDs: [106],
-        collectionIDs: [11],
-      }),
-    );
-    itemsById.set(106, makeAttachment({ id: 106, title: "Folder PDF" }));
-    itemsById.set(
-      7,
-      makeRegularItem({
-        id: 7,
-        title: "Loose Paper",
-        firstCreator: "Loose Author",
-        attachmentIDs: [107],
-      }),
-    );
-    itemsById.set(107, makeAttachment({ id: 107, title: "Loose PDF" }));
-
-    collectionsById.set(
-      10,
-      makeCollection({
-        id: 10,
-        name: "Neural",
-        childCollectionIDs: [11],
-      }),
-    );
-    collectionsById.set(
-      11,
-      makeCollection({
-        id: 11,
-        name: "Transformers",
-        parentID: 10,
-        childItemIDs: [6],
-      }),
-    );
-    collectionsById.set(
-      12,
-      makeCollection({
-        id: 12,
-        name: "Reinforcement Learning",
-      }),
-    );
-
-    const results = await browsePaperCollectionCandidates(1);
-    const neural = results.find((collection) => collection.collectionId === 10);
-    const unfiled = results.find((collection) => collection.collectionId === 0);
-
-    assert.deepEqual(
-      results.map((collection) => collection.name),
-      ["Neural", "Reinforcement Learning", "My Library"],
-    );
-    assert.isDefined(neural);
-    assert.deepEqual(
-      neural?.childCollections.map((collection) => collection.name),
-      ["Transformers"],
-    );
-    assert.equal(neural?.childCollections[0]?.papers[0]?.itemId, 6);
-    assert.isDefined(unfiled);
-    assert.equal(unfiled?.papers[0]?.itemId, 7);
-  });
-
   it("reuses the library index until the cache is invalidated", async function () {
     itemsById.set(
       8,
@@ -366,7 +272,7 @@ describe("paperSearch", function () {
     itemsById.set(108, makeAttachment({ id: 108, title: "Cache PDF" }));
 
     await searchPaperCandidates(1, "cache author");
-    await browsePaperCollectionCandidates(1);
+    await searchPaperCandidates(1, "cache");
     assert.equal(getAllCount, 1);
 
     invalidatePaperSearchCache(1);

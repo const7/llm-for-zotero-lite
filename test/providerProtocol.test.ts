@@ -1,7 +1,7 @@
 import { assert } from "chai";
 import {
-  describeAgentCapabilityClass,
-  getAgentCapabilityClass,
+  describeProviderCapabilityClass,
+  getProviderCapabilityClass,
   normalizeProviderProtocolForAuthMode,
 } from "../src/utils/providerProtocol";
 
@@ -17,7 +17,7 @@ describe("providerProtocol", function () {
     );
   });
 
-  it("infers legacy responses endpoints without upgrading non-responses URLs", function () {
+  it("infers responses endpoints without upgrading chat URLs", function () {
     assert.equal(
       normalizeProviderProtocolForAuthMode({
         authMode: "api_key",
@@ -34,22 +34,22 @@ describe("providerProtocol", function () {
     );
   });
 
-  it("formats agent capability labels", function () {
+  it("formats provider capability labels", function () {
     assert.equal(
-      describeAgentCapabilityClass(
-        getAgentCapabilityClass({ toolCalls: true, fileInputs: true }),
+      describeProviderCapabilityClass(
+        getProviderCapabilityClass({ toolCalls: true, fileInputs: true }),
       ),
-      "full agent",
+      "file input + tools",
     );
     assert.equal(
-      describeAgentCapabilityClass(
-        getAgentCapabilityClass({ toolCalls: true, fileInputs: false }),
+      describeProviderCapabilityClass(
+        getProviderCapabilityClass({ toolCalls: true, fileInputs: false }),
       ),
-      "agent without file upload",
+      "tools only",
     );
     assert.equal(
-      describeAgentCapabilityClass(
-        getAgentCapabilityClass({ toolCalls: false, fileInputs: false }),
+      describeProviderCapabilityClass(
+        getProviderCapabilityClass({ toolCalls: false, fileInputs: false }),
       ),
       "chat-only",
     );

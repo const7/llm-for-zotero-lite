@@ -1,7 +1,7 @@
 export const MODEL_MENU_OPEN_CLASS = "llm-model-menu-open";
 export const REASONING_MENU_OPEN_CLASS = "llm-reasoning-menu-open";
 export const RETRY_MODEL_MENU_OPEN_CLASS = "llm-model-menu-open";
-export const SLASH_MENU_OPEN_CLASS = "llm-slash-menu-open";
+export const ADD_MENU_OPEN_CLASS = "llm-add-menu-open";
 
 export function setFloatingMenuOpen(
   menu: HTMLDivElement | null,
@@ -41,7 +41,10 @@ export function positionFloatingMenu(
     ? Math.max(viewportMargin, ownerRect.top + viewportMargin)
     : viewportMargin;
   const boundaryRight = hasOwnerBounds
-    ? Math.min(win.innerWidth - viewportMargin, ownerRect.right - viewportMargin)
+    ? Math.min(
+        win.innerWidth - viewportMargin,
+        ownerRect.right - viewportMargin,
+      )
     : win.innerWidth - viewportMargin;
   const boundaryBottom = hasOwnerBounds
     ? Math.min(

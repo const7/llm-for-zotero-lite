@@ -1,7 +1,6 @@
 import { assert } from "chai";
 import {
   buildPaperQuoteCitationGuidance,
-  formatOpenChatTextContextLabel,
   formatPaperCitationLabel,
   formatPaperSourceLabel,
 } from "../src/modules/contextPanel/paperAttribution";
@@ -43,14 +42,5 @@ describe("paperAttribution", function () {
       buildPaperQuoteCitationGuidance(paper).join("\n"),
       "(Smith et al., 2021)",
     );
-  });
-
-  it("falls back deterministically when metadata is missing", function () {
-    const label = formatOpenChatTextContextLabel({
-      itemId: 42,
-      contextItemId: 99,
-      title: "Untitled",
-    });
-    assert.equal(label, "Paper 42 - Text Context");
   });
 });

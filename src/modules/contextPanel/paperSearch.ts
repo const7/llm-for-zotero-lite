@@ -15,20 +15,12 @@ export type PaperSearchGroupCandidate = Omit<
   attachments: PaperSearchAttachmentCandidate[];
   score: number;
   modifiedAt: number;
-  itemKind?: "standalone-note";
 };
 
-export type PaperSearchSlashToken = {
+export type PaperSearchToken = {
   query: string;
-  slashStart: number;
+  tokenStart: number;
   caretEnd: number;
-};
-
-export type PaperBrowseCollectionCandidate = {
-  collectionId: number;
-  name: string;
-  childCollections: PaperBrowseCollectionCandidate[];
-  papers: PaperSearchGroupCandidate[];
 };
 
 type IndexedPaperAttachment = {
@@ -46,8 +38,6 @@ type IndexedPaperCandidate = {
   year?: string;
   attachments: IndexedPaperAttachment[];
   modifiedAt: number;
-  collectionIDs: number[];
-  itemKind?: "standalone-note";
   normalized: {
     title: string;
     shortTitle: string;
@@ -59,18 +49,9 @@ type IndexedPaperCandidate = {
   };
 };
 
-type IndexedCollection = {
-  collectionId: number;
-  name: string;
-  parentID: number;
-  childCollectionIDs: number[];
-  childItemIDs: number[];
-};
-
 type PaperSearchLibraryIndex = {
   libraryID: number;
   candidates: IndexedPaperCandidate[];
-  collections: IndexedCollection[];
 };
 
 type PaperSearchScore = {
@@ -79,23 +60,11 @@ type PaperSearchScore = {
 };
 
 const DEFAULT_PAPER_SEARCH_LIMIT = 20;
-const MATCH_FIELD_PRIORITY = [
-  "citationKey",
-  "doi",
-  "title",
-  "creator",
-  "venue",
-  "year",
-  "attachmentTitle",
-] as const;
-
 const paperSearchLibraryIndexCache = new Map<number, PaperSearchLibraryIndex>();
 const paperSearchLibraryLoadTasks = new Map<
   number,
   Promise<PaperSearchLibraryIndex>
 >();
-const allItemsLibraryIndexCache = new Map<number, AllItemsLibraryIndex>();
-const allItemsLibraryLoadTasks = new Map<number, Promise<AllItemsLibraryIndex>>();
 
 function normalizeText(value: unknown): string {
   if (typeof value !== "string") return "";
@@ -209,7 +178,10 @@ function getCreatorDisplayName(
   creator: _ZoteroTypes.Item.Creator | null | undefined,
 ): string {
   if (!creator) return "";
-  const parts = [normalizeText(creator.firstName), normalizeText(creator.lastName)]
+  const parts = [
+    normalizeText(creator.firstName),
+    normalizeText(creator.lastName),
+  ]
     .filter(Boolean)
     .join(" ")
     .trim();
@@ -247,7 +219,9 @@ function collectVenue(item: Zotero.Item): string {
     "proceedingsTitle",
     "conferenceName",
   ];
-  const values = fields.map((field) => getItemFieldText(item, field)).filter(Boolean);
+  const values = fields
+    .map((field) => getItemFieldText(item, field))
+    .filter(Boolean);
   if (!values.length) return "";
   const deduped: string[] = [];
   const seen = new Set<string>();
@@ -260,38 +234,9 @@ function collectVenue(item: Zotero.Item): string {
   return deduped.join(" ");
 }
 
-function getCollectionIDs(item: Zotero.Item): number[] {
-  try {
-    return item
-      .getCollections()
-      .map((id) => Number(id))
-      .filter((id) => Number.isFinite(id) && id > 0)
-      .map((id) => Math.floor(id));
-  } catch (_err) {
-    return [];
-  }
-}
-
-function resolveLibraryDisplayName(libraryID: number): string {
-  try {
-    const libraries = (Zotero as unknown as {
-      Libraries?: {
-        getName?: (targetLibraryID: number) => unknown;
-        get?: (targetLibraryID: number) => { name?: unknown } | null | undefined;
-      };
-    }).Libraries;
-    const directName = normalizeText(libraries?.getName?.(libraryID));
-    if (directName) return directName;
-    const library = libraries?.get?.(libraryID);
-    const objectName = normalizeText(library?.name);
-    if (objectName) return objectName;
-  } catch (_err) {
-    void _err;
-  }
-  return "My Library";
-}
-
-function buildIndexedCandidate(item: Zotero.Item): IndexedPaperCandidate | null {
+function buildIndexedCandidate(
+  item: Zotero.Item,
+): IndexedPaperCandidate | null {
   if (!item?.isRegularItem?.()) return null;
   const attachments = buildIndexedAttachments(getPdfChildAttachments(item));
   if (!attachments.length) return null;
@@ -313,7 +258,6 @@ function buildIndexedCandidate(item: Zotero.Item): IndexedPaperCandidate | null 
     year,
     attachments,
     modifiedAt: toModifiedTimestamp(item.dateModified),
-    collectionIDs: getCollectionIDs(item),
     normalized: {
       title: normalizePaperSearchText(title),
       shortTitle: normalizePaperSearchText(shortTitle),
@@ -326,40 +270,15 @@ function buildIndexedCandidate(item: Zotero.Item): IndexedPaperCandidate | null 
   };
 }
 
-function buildIndexedCollection(
-  collection: Zotero.Collection,
-): IndexedCollection {
-  return {
-    collectionId: collection.id,
-    name: normalizeText(collection.name) || `Collection ${collection.id}`,
-    parentID:
-      Number.isFinite(Number(collection.parentID)) && Number(collection.parentID) > 0
-        ? Math.floor(Number(collection.parentID))
-        : 0,
-    childCollectionIDs: collection
-      .getChildCollections(true, false)
-      .map((id) => Number(id))
-      .filter((id) => Number.isFinite(id) && id > 0)
-      .map((id) => Math.floor(id)),
-    childItemIDs: collection
-      .getChildItems(true, false)
-      .map((id) => Number(id))
-      .filter((id) => Number.isFinite(id) && id > 0)
-      .map((id) => Math.floor(id)),
-  };
-}
-
 async function buildPaperSearchLibraryIndex(
   libraryID: number,
 ): Promise<PaperSearchLibraryIndex> {
   let items: Zotero.Item[] = [];
-  let collections: Zotero.Collection[] = [];
   try {
     items = await Zotero.Items.getAll(libraryID, true, false, false);
-    collections = Zotero.Collections.getByLibrary(libraryID, true) || [];
   } catch (err) {
     ztoolkit.log("LLM: Failed to build paper picker index", err);
-    return { libraryID, candidates: [], collections: [] };
+    return { libraryID, candidates: [] };
   }
 
   const candidates: IndexedPaperCandidate[] = [];
@@ -373,7 +292,6 @@ async function buildPaperSearchLibraryIndex(
   return {
     libraryID,
     candidates,
-    collections: collections.map((collection) => buildIndexedCollection(collection)),
   };
 }
 
@@ -407,14 +325,10 @@ export function invalidatePaperSearchCache(libraryID?: number): void {
     const normalizedLibraryID = Math.floor(libraryID);
     paperSearchLibraryIndexCache.delete(normalizedLibraryID);
     paperSearchLibraryLoadTasks.delete(normalizedLibraryID);
-    allItemsLibraryIndexCache.delete(normalizedLibraryID);
-    allItemsLibraryLoadTasks.delete(normalizedLibraryID);
     return;
   }
   paperSearchLibraryIndexCache.clear();
   paperSearchLibraryLoadTasks.clear();
-  allItemsLibraryIndexCache.clear();
-  allItemsLibraryLoadTasks.clear();
 }
 
 function buildVisibleCandidate(
@@ -428,11 +342,14 @@ function buildVisibleCandidate(
       ? Math.floor(excludeContextItemId)
       : null;
   const attachments = candidate.attachments
-    .filter((attachment) => !excludeId || attachment.contextItemId !== excludeId)
+    .filter(
+      (attachment) => !excludeId || attachment.contextItemId !== excludeId,
+    )
     .map((attachment) => ({
       contextItemId: attachment.contextItemId,
       title: attachment.title,
       score: 0,
+      contentType: attachment.contentType,
     }));
   if (!attachments.length) return null;
   return {
@@ -515,7 +432,11 @@ function scoreField(
   return phraseScore + tokenScore;
 }
 
-function scoreAttachmentTitle(title: string, query: string, tokens: string[]): number {
+function scoreAttachmentTitle(
+  title: string,
+  query: string,
+  tokens: string[],
+): number {
   const normalizedTitle = normalizePaperSearchText(title);
   if (!normalizedTitle) return 0;
   const scoreState: PaperSearchScore = {
@@ -570,7 +491,10 @@ function scoreCandidate(
     scoreNormalizedField(candidate.normalized.shortTitle, query, 1, 1, 1) > 0
   ) {
     score += 500;
-    for (const token of getMatchingTokens(candidate.normalized.shortTitle, tokens)) {
+    for (const token of getMatchingTokens(
+      candidate.normalized.shortTitle,
+      tokens,
+    )) {
       scoreState.matchedTokens.add(token);
     }
   }
@@ -588,7 +512,10 @@ function scoreCandidate(
       scoreState.matchedTokens.add(token);
     }
   } else {
-    const yearTokenMatches = getMatchingTokens(candidate.normalized.year, tokens);
+    const yearTokenMatches = getMatchingTokens(
+      candidate.normalized.year,
+      tokens,
+    );
     if (yearTokenMatches.length > 0) {
       score += yearTokenMatches.length * 40;
       for (const token of yearTokenMatches) {
@@ -622,7 +549,9 @@ function scoreCandidate(
     ]
       .filter(Boolean)
       .join(" ");
-    if (getMatchingTokens(titleAndCreatorBlob, tokens).length === tokens.length) {
+    if (
+      getMatchingTokens(titleAndCreatorBlob, tokens).length === tokens.length
+    ) {
       score += 120;
     }
   }
@@ -632,48 +561,10 @@ function scoreCandidate(
   };
 }
 
-export function parsePaperSearchSlashToken(
-  input: string,
-  caret: number,
-): PaperSearchSlashToken | null {
-  const safeInput = sanitizeText(typeof input === "string" ? input : "");
-  const normalizedCaret = Number.isFinite(caret)
-    ? Math.max(0, Math.min(safeInput.length, Math.floor(caret)))
-    : safeInput.length;
-
-  let slashIndex = safeInput.lastIndexOf("/", normalizedCaret - 1);
-  while (slashIndex >= 0) {
-    if (slashIndex === 0 || /\s/u.test(safeInput[slashIndex - 1] || "")) {
-      let tokenEnd = slashIndex + 1;
-      while (tokenEnd < safeInput.length && !/\s/u.test(safeInput[tokenEnd] || "")) {
-        tokenEnd += 1;
-      }
-      if (normalizedCaret > tokenEnd) {
-        return null;
-      }
-      return {
-        query: sanitizeText(
-          safeInput.slice(slashIndex + 1, Math.min(normalizedCaret, tokenEnd)),
-        ),
-        slashStart: slashIndex,
-        caretEnd: normalizedCaret,
-      };
-    }
-    slashIndex = safeInput.lastIndexOf("/", slashIndex - 1);
-  }
-  return null;
-}
-
-/**
- * Detects an `@token` at or before the caret position.
- * Mirrors parsePaperSearchSlashToken but uses `@` as the trigger character.
- * The returned value reuses the PaperSearchSlashToken shape (slashStart refers
- * to the `@` character position).
- */
 export function parseAtSearchToken(
   input: string,
   caret: number,
-): PaperSearchSlashToken | null {
+): PaperSearchToken | null {
   const safeInput = sanitizeText(typeof input === "string" ? input : "");
   const normalizedCaret = Number.isFinite(caret)
     ? Math.max(0, Math.min(safeInput.length, Math.floor(caret)))
@@ -683,7 +574,10 @@ export function parseAtSearchToken(
   while (atIndex >= 0) {
     if (atIndex === 0 || /\s/u.test(safeInput[atIndex - 1] || "")) {
       let tokenEnd = atIndex + 1;
-      while (tokenEnd < safeInput.length && !/\s/u.test(safeInput[tokenEnd] || "")) {
+      while (
+        tokenEnd < safeInput.length &&
+        !/\s/u.test(safeInput[tokenEnd] || "")
+      ) {
         tokenEnd += 1;
       }
       if (normalizedCaret > tokenEnd) {
@@ -693,106 +587,13 @@ export function parseAtSearchToken(
         query: sanitizeText(
           safeInput.slice(atIndex + 1, Math.min(normalizedCaret, tokenEnd)),
         ),
-        slashStart: atIndex,
+        tokenStart: atIndex,
         caretEnd: normalizedCaret,
       };
     }
     atIndex = safeInput.lastIndexOf("@", atIndex - 1);
   }
   return null;
-}
-
-export async function browsePaperCollectionCandidates(
-  libraryID: number,
-  excludeContextItemId?: number | null,
-): Promise<PaperBrowseCollectionCandidate[]> {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
-  const libraryIndex = await getPaperSearchLibraryIndex(Math.floor(libraryID));
-  const visibleCandidates = new Map<number, PaperSearchGroupCandidate>();
-  for (const candidate of libraryIndex.candidates) {
-    const visible = buildVisibleCandidate(candidate, excludeContextItemId);
-    if (visible) {
-      visibleCandidates.set(candidate.itemId, visible);
-    }
-  }
-
-  const collectionMap = new Map<number, PaperBrowseCollectionCandidate>();
-  for (const collection of libraryIndex.collections) {
-    collectionMap.set(collection.collectionId, {
-      collectionId: collection.collectionId,
-      name: collection.name,
-      childCollections: [],
-      papers: [],
-    });
-  }
-
-  for (const collection of libraryIndex.collections) {
-    const node = collectionMap.get(collection.collectionId);
-    if (!node) continue;
-    for (const childCollectionID of collection.childCollectionIDs) {
-      const child = collectionMap.get(childCollectionID);
-      if (child) {
-        node.childCollections.push(child);
-      }
-    }
-    for (const childItemID of collection.childItemIDs) {
-      const candidate = visibleCandidates.get(childItemID);
-      if (candidate) {
-        node.papers.push(candidate);
-      }
-    }
-  }
-
-  const topLevelCollections: PaperBrowseCollectionCandidate[] = [];
-  for (const collection of libraryIndex.collections) {
-    const node = collectionMap.get(collection.collectionId);
-    if (!node) continue;
-    if (!collection.parentID || !collectionMap.has(collection.parentID)) {
-      topLevelCollections.push(node);
-    }
-  }
-
-  const unfiledPapers = libraryIndex.candidates
-    .filter((candidate) => candidate.collectionIDs.length === 0)
-    .map((candidate) => visibleCandidates.get(candidate.itemId) || null)
-    .filter((candidate): candidate is PaperSearchGroupCandidate => Boolean(candidate))
-    .sort((a, b) =>
-      a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
-    );
-
-  if (unfiledPapers.length) {
-    topLevelCollections.push({
-      collectionId: 0,
-      name: resolveLibraryDisplayName(libraryID),
-      childCollections: [],
-      papers: unfiledPapers,
-    });
-  }
-
-  return topLevelCollections;
-}
-
-export async function listLibraryPaperCandidates(
-  libraryID: number,
-  excludeContextItemId?: number | null,
-  limit?: number,
-): Promise<PaperSearchGroupCandidate[]> {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
-  const libraryIndex = await getPaperSearchLibraryIndex(Math.floor(libraryID));
-  const visibleCandidates = libraryIndex.candidates
-    .map((candidate) => buildVisibleCandidate(candidate, excludeContextItemId))
-    .filter(
-      (candidate): candidate is PaperSearchGroupCandidate => Boolean(candidate),
-    )
-    .sort((a, b) => {
-      const modifiedDelta = b.modifiedAt - a.modifiedAt;
-      if (modifiedDelta !== 0) return modifiedDelta;
-      return a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
-    });
-  if (Number.isFinite(limit) && typeof limit === "number" && limit > 0) {
-    return visibleCandidates.slice(0, Math.floor(limit));
-  }
-  return visibleCandidates;
 }
 
 export async function searchPaperCandidates(
@@ -853,364 +654,4 @@ export async function searchPaperCandidates(
   return rankedCandidates
     .slice(0, normalizedLimit)
     .map((entry) => entry.candidate);
-}
-
-// ── All-items index (non-PDF-filtered, includes standalone notes) ─────────────
-
-type AllItemsLibraryIndex = {
-  libraryID: number;
-  candidates: IndexedPaperCandidate[];
-  collections: IndexedCollection[];
-};
-
-const ZOTERO_NOTE_CONTENT_TYPE = "application/x-zotero-note";
-
-function buildIndexedItemCandidate(item: Zotero.Item): IndexedPaperCandidate | null {
-  // Standalone notes — represent as a single synthetic attachment pointing to itself
-  if ((item as any).isNote?.() && !item.parentID) {
-    const title =
-      normalizeText(
-        (item as any).getNoteTitle?.() || item.getDisplayTitle?.() || "",
-      ) || `Note ${item.id}`;
-    return {
-      itemId: item.id,
-      title,
-      itemKind: "standalone-note",
-      attachments: [
-        {
-          contextItemId: item.id,
-          title,
-          normalizedTitle: normalizePaperSearchText(title),
-          contentType: ZOTERO_NOTE_CONTENT_TYPE,
-        },
-      ],
-      modifiedAt: toModifiedTimestamp(item.dateModified),
-      collectionIDs: getCollectionIDs(item),
-      normalized: {
-        title: normalizePaperSearchText(title),
-        shortTitle: "",
-        citationKey: "",
-        doi: "",
-        creator: "",
-        venue: "",
-        year: "",
-      },
-    };
-  }
-  if (!item?.isRegularItem?.()) return null;
-  // All file attachments
-  const allAtts: Zotero.Item[] = [];
-  for (const attachmentId of item.getAttachments()) {
-    const att = Zotero.Items.get(attachmentId);
-    if (att && att.isAttachment?.()) allAtts.push(att);
-  }
-  // Child notes — represented as attachment-like entries with a special content type
-  const noteAttachments: IndexedPaperAttachment[] = [];
-  const noteIds: number[] = (item as any).getNotes?.() || [];
-  for (const noteId of noteIds) {
-    const noteItem = Zotero.Items.get(noteId as number);
-    if (!noteItem || !(noteItem as any).isNote?.()) continue;
-    const noteTitle =
-      normalizeText(
-        (noteItem as any).getNoteTitle?.() ||
-          noteItem.getDisplayTitle?.() ||
-          "",
-      ) || `Note ${noteItem.id}`;
-    noteAttachments.push({
-      contextItemId: noteItem.id,
-      title: noteTitle,
-      normalizedTitle: normalizePaperSearchText(noteTitle),
-      contentType: ZOTERO_NOTE_CONTENT_TYPE,
-    });
-  }
-
-  const attachments = [...buildIndexedAttachments(allAtts), ...noteAttachments];
-
-  const title = getItemFieldText(item, "title") || `Item ${item.id}`;
-  const citationKey = getItemFieldText(item, "citationKey") || undefined;
-  const creators = collectCreators(item);
-  const firstCreator = creators[0] || undefined;
-  const year = extractYear(getItemFieldText(item, "date")) || undefined;
-  const shortTitle = getItemFieldText(item, "shortTitle");
-  const doi = getItemFieldText(item, "DOI");
-  const venue = collectVenue(item);
-
-  return {
-    itemId: item.id,
-    title,
-    citationKey,
-    firstCreator,
-    year,
-    attachments,
-    modifiedAt: toModifiedTimestamp(item.dateModified),
-    collectionIDs: getCollectionIDs(item),
-    normalized: {
-      title: normalizePaperSearchText(title),
-      shortTitle: normalizePaperSearchText(shortTitle),
-      citationKey: normalizePaperSearchText(citationKey || ""),
-      doi: normalizePaperSearchText(doi),
-      creator: normalizePaperSearchText(creators.join(" ")),
-      venue: normalizePaperSearchText(venue),
-      year: normalizePaperSearchText(year || ""),
-    },
-  };
-}
-
-async function buildAllItemsLibraryIndex(libraryID: number): Promise<AllItemsLibraryIndex> {
-  let items: Zotero.Item[] = [];
-  let collections: Zotero.Collection[] = [];
-  try {
-    const allItems: Zotero.Item[] = await Zotero.Items.getAll(libraryID, true, false, false);
-    items = allItems.filter((item) => {
-      if ((item as any).isNote?.()) return !item.parentID;
-      if (item.isAttachment?.()) return false;
-      return item.isRegularItem?.() ?? false;
-    });
-    collections = Zotero.Collections.getByLibrary(libraryID, true) || [];
-  } catch (err) {
-    ztoolkit.log("LLM: Failed to build all-items index", err);
-    return { libraryID, candidates: [], collections: [] };
-  }
-  const candidates: IndexedPaperCandidate[] = [];
-  for (const item of items) {
-    const candidate = buildIndexedItemCandidate(item);
-    if (candidate) candidates.push(candidate);
-  }
-  return {
-    libraryID,
-    candidates,
-    collections: collections.map((c) => buildIndexedCollection(c)),
-  };
-}
-
-async function getAllItemsLibraryIndex(libraryID: number): Promise<AllItemsLibraryIndex> {
-  const cached = allItemsLibraryIndexCache.get(libraryID);
-  if (cached) return cached;
-  const pending = allItemsLibraryLoadTasks.get(libraryID);
-  if (pending) return pending;
-  const loadTask = buildAllItemsLibraryIndex(libraryID)
-    .then((index) => {
-      allItemsLibraryIndexCache.set(libraryID, index);
-      return index;
-    })
-    .finally(() => {
-      allItemsLibraryLoadTasks.delete(libraryID);
-    });
-  allItemsLibraryLoadTasks.set(libraryID, loadTask);
-  return loadTask;
-}
-
-export function invalidateAllItemsSearchCache(libraryID?: number): void {
-  if (
-    typeof libraryID === "number" &&
-    Number.isFinite(libraryID) &&
-    libraryID > 0
-  ) {
-    const id = Math.floor(libraryID);
-    allItemsLibraryIndexCache.delete(id);
-    allItemsLibraryLoadTasks.delete(id);
-    return;
-  }
-  allItemsLibraryIndexCache.clear();
-  allItemsLibraryLoadTasks.clear();
-}
-
-function buildVisibleItemCandidate(
-  candidate: IndexedPaperCandidate,
-): PaperSearchGroupCandidate {
-  return {
-    itemId: candidate.itemId,
-    title: candidate.title,
-    citationKey: candidate.citationKey,
-    firstCreator: candidate.firstCreator,
-    year: candidate.year,
-    itemKind: candidate.itemKind,
-    attachments: candidate.attachments.map((att) => ({
-      contextItemId: att.contextItemId,
-      title: att.title,
-      score: 0,
-      contentType: att.contentType,
-    })),
-    score: 0,
-    modifiedAt: candidate.modifiedAt,
-  };
-}
-
-export async function listAllItemCandidates(
-  libraryID: number,
-  limit?: number,
-): Promise<PaperSearchGroupCandidate[]> {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
-  const index = await getAllItemsLibraryIndex(Math.floor(libraryID));
-  const candidates = index.candidates
-    .map((c) => buildVisibleItemCandidate(c))
-    .sort((a, b) => {
-      const delta = b.modifiedAt - a.modifiedAt;
-      if (delta !== 0) return delta;
-      return a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
-    });
-  if (Number.isFinite(limit) && typeof limit === "number" && limit > 0) {
-    return candidates.slice(0, Math.floor(limit));
-  }
-  return candidates;
-}
-
-export async function searchAllItemCandidates(
-  libraryID: number,
-  query: string,
-  limit = DEFAULT_PAPER_SEARCH_LIMIT,
-): Promise<PaperSearchGroupCandidate[]> {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
-  const normalizedQuery = normalizePaperSearchText(query);
-  if (!normalizedQuery) return [];
-  const normalizedLimit = Number.isFinite(limit)
-    ? Math.max(1, Math.floor(limit))
-    : DEFAULT_PAPER_SEARCH_LIMIT;
-  const queryTokens = getSearchTokens(normalizedQuery);
-  if (!queryTokens.length) return [];
-
-  const index = await getAllItemsLibraryIndex(Math.floor(libraryID));
-  const rankedCandidates: Array<{ candidate: PaperSearchGroupCandidate; matchedTokenCount: number }> = [];
-
-  for (const indexedCandidate of index.candidates) {
-    const visibleCandidate = buildVisibleItemCandidate(indexedCandidate);
-    const scored = scoreCandidate(indexedCandidate, visibleCandidate, normalizedQuery, queryTokens);
-    if (!scored) continue;
-    visibleCandidate.score = scored.score;
-    rankedCandidates.push({ candidate: visibleCandidate, matchedTokenCount: scored.matchedTokenCount });
-  }
-
-  rankedCandidates.sort((a, b) => {
-    const scoreDelta = b.candidate.score - a.candidate.score;
-    if (scoreDelta !== 0) return scoreDelta;
-    const matchedTokenDelta = b.matchedTokenCount - a.matchedTokenCount;
-    if (matchedTokenDelta !== 0) return matchedTokenDelta;
-    return b.candidate.modifiedAt - a.candidate.modifiedAt;
-  });
-
-  return rankedCandidates.slice(0, normalizedLimit).map((e) => e.candidate);
-}
-
-export { ZOTERO_NOTE_CONTENT_TYPE };
-
-const DEFAULT_COLLECTION_SEARCH_LIMIT = 5;
-
-export async function searchCollectionCandidates(
-  libraryID: number,
-  query: string,
-  limit = DEFAULT_COLLECTION_SEARCH_LIMIT,
-): Promise<PaperBrowseCollectionCandidate[]> {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
-  const normalizedQuery = normalizePaperSearchText(query);
-  if (!normalizedQuery) return [];
-  const normalizedLimit = Number.isFinite(limit)
-    ? Math.max(1, Math.floor(limit))
-    : DEFAULT_COLLECTION_SEARCH_LIMIT;
-  const queryTokens = getSearchTokens(normalizedQuery);
-  if (!queryTokens.length) return [];
-
-  const index = await getAllItemsLibraryIndex(Math.floor(libraryID));
-  const ranked: Array<{
-    collection: IndexedCollection;
-    score: number;
-    matchedTokenCount: number;
-  }> = [];
-
-  for (const collection of index.collections) {
-    const normalizedName = normalizePaperSearchText(collection.name);
-    if (!normalizedName) continue;
-    const scoreState: PaperSearchScore = { score: 0, matchedTokens: new Set() };
-    const nameScore = scoreField(
-      scoreState,
-      normalizedName,
-      normalizedQuery,
-      queryTokens,
-      { exact: 1000, prefix: 900, contains: 700, tokenBonus: 80 },
-    );
-    if (nameScore <= 0) continue;
-    ranked.push({
-      collection,
-      score: nameScore,
-      matchedTokenCount: scoreState.matchedTokens.size,
-    });
-  }
-
-  ranked.sort((a, b) => {
-    const scoreDelta = b.score - a.score;
-    if (scoreDelta !== 0) return scoreDelta;
-    const matchedTokenDelta = b.matchedTokenCount - a.matchedTokenCount;
-    if (matchedTokenDelta !== 0) return matchedTokenDelta;
-    return a.collection.name.localeCompare(b.collection.name, undefined, {
-      sensitivity: "base",
-    });
-  });
-
-  return ranked.slice(0, normalizedLimit).map((e) => ({
-    collectionId: e.collection.collectionId,
-    name: e.collection.name,
-    childCollections: [],
-    papers: [],
-  }));
-}
-
-export async function browseAllItemCandidates(
-  libraryID: number,
-): Promise<PaperBrowseCollectionCandidate[]> {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return [];
-  const index = await getAllItemsLibraryIndex(Math.floor(libraryID));
-  const visibleCandidates = new Map<number, PaperSearchGroupCandidate>();
-  for (const candidate of index.candidates) {
-    visibleCandidates.set(candidate.itemId, buildVisibleItemCandidate(candidate));
-  }
-
-  const collectionMap = new Map<number, PaperBrowseCollectionCandidate>();
-  for (const collection of index.collections) {
-    collectionMap.set(collection.collectionId, {
-      collectionId: collection.collectionId,
-      name: collection.name,
-      childCollections: [],
-      papers: [],
-    });
-  }
-
-  for (const collection of index.collections) {
-    const node = collectionMap.get(collection.collectionId);
-    if (!node) continue;
-    for (const childCollectionID of collection.childCollectionIDs) {
-      const child = collectionMap.get(childCollectionID);
-      if (child) node.childCollections.push(child);
-    }
-    for (const childItemID of collection.childItemIDs) {
-      const candidate = visibleCandidates.get(childItemID);
-      if (candidate) node.papers.push(candidate);
-    }
-  }
-
-  const topLevelCollections: PaperBrowseCollectionCandidate[] = [];
-  for (const collection of index.collections) {
-    const node = collectionMap.get(collection.collectionId);
-    if (!node) continue;
-    if (!collection.parentID || !collectionMap.has(collection.parentID)) {
-      topLevelCollections.push(node);
-    }
-  }
-
-  const unfiledItems = index.candidates
-    .filter((candidate) => candidate.collectionIDs.length === 0)
-    .map((candidate) => visibleCandidates.get(candidate.itemId) || null)
-    .filter((c): c is PaperSearchGroupCandidate => Boolean(c))
-    .sort((a, b) =>
-      a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
-    );
-
-  if (unfiledItems.length) {
-    topLevelCollections.push({
-      collectionId: 0,
-      name: resolveLibraryDisplayName(libraryID),
-      childCollections: [],
-      papers: unfiledItems,
-    });
-  }
-
-  return topLevelCollections;
 }

@@ -11,42 +11,12 @@ import {
 } from "./paperAttribution";
 export { normalizeSelectedTextSource } from "./normalizers";
 
-export const DEFAULT_SELECTED_TEXT_PROMPT =
-  "Please explain this selected text.";
-export const DEFAULT_FILE_ANALYSIS_PROMPT = "Please analyze attached files.";
+const DEFAULT_SELECTED_TEXT_PROMPT = "Please explain this selected text.";
+const DEFAULT_FILE_ANALYSIS_PROMPT = "Please analyze attached files.";
 
 export function getSelectedTextSourceIcon(source: SelectedTextSource): string {
   if (source === "model") return "🧠";
-  if (source === "note") return "📝";
-  if (source === "note-edit") return "✍🏻";
   return "📋";
-}
-
-function buildQuestionWithSelectedNoteText(
-  selectedText: string,
-  userPrompt: string,
-): string {
-  const normalizedPrompt = userPrompt.trim() || DEFAULT_SELECTED_TEXT_PROMPT;
-  return [
-    "Selected text from a Zotero note:",
-    `"""\n${selectedText}\n"""`,
-    "",
-    `User question:\n${normalizedPrompt}`,
-  ].join("\n");
-}
-
-function buildQuestionWithNoteEditingText(
-  selectedText: string,
-  userPrompt: string,
-): string {
-  const normalizedPrompt = userPrompt.trim() || DEFAULT_SELECTED_TEXT_PROMPT;
-  return [
-    "Selected text from the current Zotero note editor (editing focus):",
-    `"""\n${selectedText}\n"""`,
-    "The user selected this snippet inside the active note and wants help editing it in place.",
-    "",
-    `User question:\n${normalizedPrompt}`,
-  ].join("\n");
 }
 
 export function sanitizeText(text: string) {
@@ -152,7 +122,7 @@ export function isLikelyCorruptedSelectedText(text: string): boolean {
   return false;
 }
 
-export function buildQuestionWithSelectedText(
+function buildQuestionWithSelectedText(
   selectedText: string,
   userPrompt: string,
 ): string {
@@ -194,28 +164,10 @@ export function buildQuestionWithSelectedTextContexts(
   ) {
     return buildQuestionWithSelectedText(normalizedTexts[0], normalizedPrompt);
   }
-  if (normalizedTexts.length === 1 && normalizedSources[0] === "note-edit") {
-    return buildQuestionWithNoteEditingText(
-      normalizedTexts[0],
-      normalizedPrompt,
-    );
-  }
-  if (normalizedTexts.length === 1 && normalizedSources[0] === "note") {
-    return buildQuestionWithSelectedNoteText(
-      normalizedTexts[0],
-      normalizedPrompt,
-    );
-  }
   const contextBlocks = normalizedTexts.map((text, index) => {
     const source = normalizedSources[index];
     const sourceLabel =
-      source === "model"
-        ? "model_response 🧠"
-        : source === "note"
-          ? "zotero_note 📝"
-        : source === "note-edit"
-          ? "note_editor ✍🏻"
-          : "pdf_reader 📋";
+      source === "model" ? "model_response 🧠" : "pdf_reader 📋";
     const paperLabel =
       includePaperAttribution && source === "pdf"
         ? formatPaperCitationLabel(selectedTextPaperContexts[index])
@@ -231,7 +183,8 @@ export function buildQuestionWithSelectedTextContexts(
     return `Text Context ${index + 1} [source=${sourceLabel}]${paperPart}${citationPart}:\n"""\n${text}\n"""`;
   });
   const guidance =
-    includePaperAttribution && selectedTextPaperContexts.some((entry) => !!entry)
+    includePaperAttribution &&
+    selectedTextPaperContexts.some((entry) => !!entry)
       ? `${buildPaperQuoteCitationGuidance().join("\n")}\n\n`
       : "";
   return `Selected text contexts with explicit sources:\n${guidance}${contextBlocks.join(
@@ -268,7 +221,12 @@ export function buildModelPromptWithFileContext(
   const metaBlocks: string[] = [];
   for (const attachment of fileAttachments) {
     // PDF-paper attachments are sent as binary file_ref — skip text metadata
-    if (typeof attachment.id === "string" && (attachment.id.startsWith("pdf-paper-") || attachment.id.startsWith("pdf-page-"))) continue;
+    if (
+      typeof attachment.id === "string" &&
+      (attachment.id.startsWith("pdf-paper-") ||
+        attachment.id.startsWith("pdf-page-"))
+    )
+      continue;
     metaBlocks.push(
       `- ${attachment.name} (${attachment.mimeType || "application/octet-stream"}, ${(attachment.sizeBytes / 1024 / 1024).toFixed(2)} MB)`,
     );
@@ -285,15 +243,6 @@ export function buildModelPromptWithFileContext(
     blocks.push(`\nAttached file contents:\n${textBlocks.join("\n\n")}`);
   }
   return blocks.join("\n");
-}
-
-export function escapeNoteHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 export function formatTime(timestamp: number) {
@@ -351,10 +300,11 @@ export function setStatus(
   statusEl.className = `llm-status llm-status-${variant}`;
 }
 
-export function formatTokenCount(tokens: number): string {
+function formatTokenCount(tokens: number): string {
   if (tokens < 0) return "0";
   if (tokens < 1000) return `${tokens}`;
-  if (tokens < 10000) return `${(tokens / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  if (tokens < 10000)
+    return `${(tokens / 1000).toFixed(1).replace(/\.0$/, "")}k`;
   return `${Math.round(tokens / 1000)}k`;
 }
 
@@ -365,18 +315,6 @@ export function setTokenUsage(el: HTMLElement, sessionTokens: number): void {
 
 export function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
-}
-
-export function getCurrentLocalTimestamp(): string {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    month: "2-digit",
-    day: "2-digit",
-    year: "numeric",
-    hour12: false,
-  }).format(new Date());
 }
 
 /**

@@ -1,9 +1,7 @@
 import {
   callEmbeddings,
-  EmbeddingUnsupportedError,
   getResolvedEmbeddingConfig,
   checkEmbeddingAvailability,
-  getEmbeddingUnavailableReason,
 } from "../../utils/llmClient";
 import { estimateTextTokens } from "../../utils/modelInputCap";
 import {
@@ -21,10 +19,8 @@ import {
 } from "./constants";
 import {
   buildPaperQuoteCitationGuidance,
-  formatPaperCitationLabel,
   formatPaperSourceLabel,
 } from "./paperAttribution";
-import { readNoteSnapshot } from "./notes";
 import { pdfTextCache, pdfTextLoadingTasks } from "./state";
 import { readCachedMineruMd, ensureManifest } from "./mineruCache";
 import type { MineruManifest, ManifestSection } from "./mineruCache";
@@ -121,17 +117,14 @@ function htmlTableToMarkdown(tableHtml: string): string {
 
 function convertHtmlTablesToMarkdown(mdText: string): string {
   // Match <table>...</table> blocks (possibly spanning multiple lines)
-  return mdText.replace(
-    /<table[^>]*>[\s\S]*?<\/table>/gi,
-    (tableBlock) => {
-      try {
-        const md = htmlTableToMarkdown(tableBlock);
-        return md || tableBlock; // Keep original if conversion produces nothing
-      } catch {
-        return tableBlock; // Keep original on error
-      }
-    },
-  );
+  return mdText.replace(/<table[^>]*>[\s\S]*?<\/table>/gi, (tableBlock) => {
+    try {
+      const md = htmlTableToMarkdown(tableBlock);
+      return md || tableBlock; // Keep original if conversion produces nothing
+    } catch {
+      return tableBlock; // Keep original on error
+    }
+  });
 }
 
 async function cachePDFText(item: Zotero.Item) {
@@ -169,8 +162,8 @@ async function cachePDFText(item: Zotero.Item) {
           pdfText = result.text;
           sourceType = "zotero-worker";
         }
-      } catch (e) {
-        ztoolkit.log("PDF extraction failed:", e);
+      } catch {
+        // Fall back to an empty context for this paper.
       }
     }
 
@@ -194,9 +187,17 @@ async function cachePDFText(item: Zotero.Item) {
         // Using pdfText (post-conversion) would misalign because convertHtmlTablesToMarkdown
         // changes character counts.
         const rawMd = cachedMd!;
-        const rawChunks = splitWithManifestSections(rawMd, manifest.sections, CHUNK_TARGET_LENGTH);
-        chunkMeta = buildChunkMetadataFromManifest(rawChunks, rawMd, manifest.sections);
-        chunks = rawChunks.map(chunk => convertHtmlTablesToMarkdown(chunk));
+        const rawChunks = splitWithManifestSections(
+          rawMd,
+          manifest.sections,
+          CHUNK_TARGET_LENGTH,
+        );
+        chunkMeta = buildChunkMetadataFromManifest(
+          rawChunks,
+          rawMd,
+          manifest.sections,
+        );
+        chunks = rawChunks.map((chunk) => convertHtmlTablesToMarkdown(chunk));
         // Update chunkMeta text fields to reflect converted content
         for (let i = 0; i < chunks.length; i++) {
           chunkMeta[i].text = chunks[i];
@@ -231,11 +232,9 @@ async function cachePDFText(item: Zotero.Item) {
         docFreq: {},
         avgChunkLength: 0,
         fullLength: 0,
-
       });
     }
-  } catch (e) {
-    ztoolkit.log("Error caching PDF:", e);
+  } catch {
     pdfTextCache.set(item.id, {
       title: "",
       chunks: [],
@@ -244,7 +243,6 @@ async function cachePDFText(item: Zotero.Item) {
       docFreq: {},
       avgChunkLength: 0,
       fullLength: 0,
-
     });
   }
 }
@@ -267,112 +265,15 @@ export async function ensurePDFTextCached(item: Zotero.Item): Promise<void> {
   await task;
 }
 
-async function cacheNoteText(item: Zotero.Item) {
-  if (pdfTextCache.has(item.id)) return;
-  try {
-    const snapshot = readNoteSnapshot(item);
-    const text = snapshot?.text || "";
-    const title = sanitizePdfText(snapshot?.title || text.split("\n")[0] || "").slice(0, 120);
-    if (text) {
-      const chunks = splitIntoChunks(text, CHUNK_TARGET_LENGTH);
-      const chunkMeta = buildChunkMetadata(chunks);
-      const { chunkStats, docFreq, avgChunkLength } = buildChunkIndex(chunks);
-      pdfTextCache.set(item.id, {
-        title,
-        chunks,
-        chunkMeta,
-        chunkStats,
-        docFreq,
-        avgChunkLength,
-        fullLength: text.length,
-
-      });
-    } else {
-      pdfTextCache.set(item.id, {
-        title,
-        chunks: [],
-        chunkMeta: [],
-        chunkStats: [],
-        docFreq: {},
-        avgChunkLength: 0,
-        fullLength: 0,
-
-      });
-    }
-  } catch (e) {
-    ztoolkit.log("Error caching note:", e);
-    pdfTextCache.set(item.id, {
-      title: "",
-      chunks: [],
-      chunkMeta: [],
-      chunkStats: [],
-      docFreq: {},
-      avgChunkLength: 0,
-      fullLength: 0,
-
-    });
-  }
-}
-
-export async function ensureNoteTextCached(item: Zotero.Item): Promise<void> {
-  if (pdfTextCache.has(item.id)) return;
-  const existingTask = pdfTextLoadingTasks.get(item.id);
-  if (existingTask) {
-    await existingTask;
-    return;
-  }
-  const task = (async () => {
-    try {
-      await cacheNoteText(item);
-    } finally {
-      pdfTextLoadingTasks.delete(item.id);
-    }
-  })();
-  pdfTextLoadingTasks.set(item.id, task);
-  await task;
-}
-
-/**
- * Reset embedding failure markers on all cached PdfContexts.
- * Called when the user changes embedding provider config in preferences,
- * so subsequent queries re-attempt embeddings with the new settings.
- */
 export function resetEmbeddingFailedFlags(): void {
   pdfTextCache.forEach((ctx) => {
     ctx.embeddingFailureKey = undefined;
   });
 }
 
-export function invalidateCachedContextText(itemId: number): void {
-  if (!Number.isFinite(itemId) || itemId <= 0) return;
-  const normalizedItemId = Math.floor(itemId);
-  pdfTextCache.delete(normalizedItemId);
-  pdfTextLoadingTasks.delete(normalizedItemId);
-  // Clear retrieval candidate cache — cached candidates carry stale chunk
-  // text and scores after a MinerU refresh.  Lazy import to avoid circular
-  // dependency (multiContextPlanner imports from pdfContext).
-  import("./multiContextPlanner")
-    .then(({ clearRetrievalCandidateCache }) =>
-      clearRetrievalCandidateCache(normalizedItemId),
-    )
-    .catch(() => {});
-  // Clear embedding cache — chunks will change when MinerU content is refreshed,
-  // so cached embeddings are stale. Do NOT delete MinerU files themselves:
-  // this function is called right after writeMineruCacheFiles(), so deleting
-  // the MinerU directory would destroy the freshly written content.
-  import("./embeddingCache")
-    .then(({ clearEmbeddingCache }) => clearEmbeddingCache(normalizedItemId))
-    .catch((e) => {
-      ztoolkit.log("Embedding cache invalidation failed:", e);
-    });
-}
-
 // ── Markdown-aware chunking (MinerU only) ─────────────────────────────────────
 
-function splitMarkdownIntoChunks(
-  text: string,
-  targetLength: number,
-): string[] {
+function splitMarkdownIntoChunks(text: string, targetLength: number): string[] {
   if (!text) return [];
   const normalized = text.replace(/\r\n?/g, "\n").trim();
   if (!normalized) return [];
@@ -419,15 +320,16 @@ function splitMarkdownIntoChunks(
         if (!p) continue;
         if (p.length > targetLength) {
           // Oversized paragraph: flush and slice with sentence-aware overlap
-          if (subChunk.trim()) { chunks.push(subChunk.trim()); subChunk = ""; }
+          if (subChunk.trim()) {
+            chunks.push(subChunk.trim());
+            subChunk = "";
+          }
           let start = 0;
           while (start < p.length) {
             const prevStart = start;
             const rawEnd = Math.min(start + targetLength, p.length);
             const end =
-              rawEnd < p.length
-                ? findSentenceBoundary(p, rawEnd, 200)
-                : rawEnd;
+              rawEnd < p.length ? findSentenceBoundary(p, rawEnd, 200) : rawEnd;
             const slice = p.slice(start, end).trim();
             if (slice) chunks.push(slice);
             if (end >= p.length) break;
@@ -446,9 +348,7 @@ function splitMarkdownIntoChunks(
       if (subChunk.trim()) chunks.push(subChunk.trim());
     } else if (accumulator.length + section.length + 2 <= targetLength) {
       // Small enough to accumulate
-      accumulator = accumulator
-        ? `${accumulator}\n\n${section}`
-        : section;
+      accumulator = accumulator ? `${accumulator}\n\n${section}` : section;
     } else {
       // Would exceed budget — flush and start new
       flushAccumulator();
@@ -496,7 +396,7 @@ function findSentenceBoundary(
   return bestDist <= maxDrift ? bestPos : targetPos;
 }
 
-// ── Plain-text chunking (PDFWorker, notes) ────────────────────────────────────
+// ── Plain-text chunking (PDFWorker) ───────────────────────────────────────────
 
 function splitIntoChunks(text: string, targetLength: number): string[] {
   if (!text) return [];
@@ -522,9 +422,7 @@ function splitIntoChunks(text: string, targetLength: number): string[] {
         const prevStart = start;
         const rawEnd = Math.min(start + targetLength, p.length);
         const end =
-          rawEnd < p.length
-            ? findSentenceBoundary(p, rawEnd, 200)
-            : rawEnd;
+          rawEnd < p.length ? findSentenceBoundary(p, rawEnd, 200) : rawEnd;
         const slice = p.slice(start, end).trim();
         if (slice) chunks.push(slice);
         if (end >= p.length) break;
@@ -611,11 +509,17 @@ function buildChunkMetadataFromManifest(
     const lower = heading.toLowerCase().trim();
     if (/^abstract/.test(lower)) return "abstract";
     if (/^introduction/.test(lower)) return "introduction";
-    if (/^method/.test(lower) || /^materials?\s+and\s+method/.test(lower) || /^experimental/.test(lower)) return "methods";
+    if (
+      /^method/.test(lower) ||
+      /^materials?\s+and\s+method/.test(lower) ||
+      /^experimental/.test(lower)
+    )
+      return "methods";
     if (/^results?/.test(lower)) return "results";
     if (/^discussion/.test(lower)) return "discussion";
     if (/^conclusion/.test(lower)) return "conclusion";
-    if (/^reference/.test(lower) || /^bibliography/.test(lower)) return "references";
+    if (/^reference/.test(lower) || /^bibliography/.test(lower))
+      return "references";
     if (/^appendix/.test(lower) || /^supplement/.test(lower)) return "appendix";
     if (/^fig(?:ure)?\.?\s*\d/i.test(lower)) return "figure-caption";
     if (/^table\s*\d/i.test(lower)) return "table-caption";
@@ -730,7 +634,10 @@ function sanitizePdfText(value: string): string {
 
 // ── Markdown heading detection (MinerU only) ─────────────────────────────────
 
-const MARKDOWN_HEADING_MAP: Record<string, { label: string; kind: PdfChunkKind }> = {
+const MARKDOWN_HEADING_MAP: Record<
+  string,
+  { label: string; kind: PdfChunkKind }
+> = {
   abstract: { label: "Abstract", kind: "abstract" },
   introduction: { label: "Introduction", kind: "introduction" },
   "related work": { label: "Related Work", kind: "introduction" },
@@ -769,11 +676,12 @@ function matchMarkdownSectionHeading(
     .slice(0, 3);
   for (const line of lines) {
     // Match: # Title, ## Title, ### Title (with optional numbering after #)
-    const md = line.match(
-      /^#{1,4}\s+(?:\d+(?:\.\d+)*\s*)?(.+?)\s*$/,
-    );
+    const md = line.match(/^#{1,4}\s+(?:\d+(?:\.\d+)*\s*)?(.+?)\s*$/);
     if (md) {
-      const heading = md[1].replace(/[:.;\-–—]+$/, "").trim().toLowerCase();
+      const heading = md[1]
+        .replace(/[:.;\-–—]+$/, "")
+        .trim()
+        .toLowerCase();
       const match = MARKDOWN_HEADING_MAP[heading];
       if (match) return match;
     }
@@ -871,7 +779,10 @@ function looksLikeTableCaption(text: string): boolean {
   return TABLE_CAPTION_PATTERN.test(sanitizePdfText(text));
 }
 
-function cleanLeadingEvidenceNoise(text: string, chunkKind: PdfChunkKind): {
+function cleanLeadingEvidenceNoise(
+  text: string,
+  chunkKind: PdfChunkKind,
+): {
   text: string;
   removedLeadingNoise: boolean;
 } {
@@ -882,17 +793,14 @@ function cleanLeadingEvidenceNoise(text: string, chunkKind: PdfChunkKind): {
   } else if (chunkKind === "table-caption") {
     cleaned = cleaned.replace(TABLE_CAPTION_PATTERN, "").trim();
   }
-  cleaned = cleaned.replace(/^[-–—:;,.()\[\]]+\s*/, "").trim();
+  cleaned = cleaned.replace(/^[-–—:;,.()[\]]+\s*/, "").trim();
   cleaned = cleaned.replace(/^(?:\d{1,3}\s+){1,3}(?=[A-Za-z])/u, "").trim();
-  cleaned = cleaned.replace(
-    /^(?:[a-z][a-z-]{1,24}\.)\s+(?=[A-Z])/u,
-    "",
-  );
+  cleaned = cleaned.replace(/^(?:[a-z][a-z-]{1,24}\.)\s+(?=[A-Z])/u, "");
   cleaned = cleaned.replace(
     /^(?:page|p)\s*\d{1,4}(?:\s+of\s+\d{1,4})?\s*/i,
     "",
   );
-  cleaned = cleaned.replace(/^[-–—:;,.()\[\]]+\s*/, "").trim();
+  cleaned = cleaned.replace(/^[-–—:;,.()[\]]+\s*/, "").trim();
   return {
     text: cleaned || original,
     removedLeadingNoise: Boolean(cleaned && cleaned !== original),
@@ -925,7 +833,10 @@ function resolveChunkKind(params: {
   if (sectionHeading?.kind) {
     return sectionHeading.kind;
   }
-  if (looksLikeReferenceEntry(normalizedText) || looksLikeCitationList(normalizedText)) {
+  if (
+    looksLikeReferenceEntry(normalizedText) ||
+    looksLikeCitationList(normalizedText)
+  ) {
     return "references";
   }
   if (looksLikeFigureCaption(chunkText)) {
@@ -940,28 +851,6 @@ function resolveChunkKind(params: {
   return normalizedText ? "body" : "unknown";
 }
 
-function getSupportLevelLabel(chunkKind: PdfChunkKind | undefined): string {
-  switch (chunkKind) {
-    case "abstract":
-    case "results":
-    case "discussion":
-    case "conclusion":
-      return "likely direct";
-    case "methods":
-    case "introduction":
-    case "body":
-    case "figure-caption":
-    case "table-caption":
-      return "contextual";
-    case "references":
-      return "background only";
-    case "appendix":
-      return "weak or peripheral";
-    default:
-      return "contextual";
-  }
-}
-
 export function buildChunkMetadata(
   chunks: string[],
   sourceType?: "mineru" | "zotero-worker",
@@ -969,9 +858,11 @@ export function buildChunkMetadata(
   const chunkMeta: PdfChunkMeta[] = [];
   let activeSection: SectionHeadingMatch | undefined;
   for (const [chunkIndex, chunkText] of chunks.entries()) {
-    const explicitSection = sourceType === "mineru"
-      ? (matchMarkdownSectionHeading(chunkText) || matchSectionHeading(chunkText))
-      : matchSectionHeading(chunkText);
+    const explicitSection =
+      sourceType === "mineru"
+        ? matchMarkdownSectionHeading(chunkText) ||
+          matchSectionHeading(chunkText)
+        : matchSectionHeading(chunkText);
     if (explicitSection) {
       activeSection = explicitSection;
     }
@@ -997,61 +888,6 @@ export function buildChunkMetadata(
     });
   }
   return chunkMeta;
-}
-
-function buildCompactPaperSourceLabel(ref: PaperContextRef): string {
-  const verbose = normalizeEvidenceText(formatPaperCitationLabel(ref));
-  if (verbose && !/^paper\b/i.test(verbose)) {
-    return verbose
-      .replace(/\set al\.,?/gi, "")
-      .replace(/,/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-  if (ref.citationKey) {
-    return normalizeEvidenceText(ref.citationKey);
-  }
-  return /^paper\b/i.test(verbose) ? verbose : "Paper";
-}
-
-function buildEvidenceAnchor(
-  chunkText: string,
-  sectionLabel?: string,
-  chunkKind: PdfChunkKind = "body",
-  fallbackAnchor?: string,
-): string {
-  if (fallbackAnchor) {
-    return fallbackAnchor;
-  }
-  const textWithoutHeading = trimLeadingSectionHeading(chunkText, sectionLabel);
-  const cleaned = cleanLeadingEvidenceNoise(textWithoutHeading, chunkKind);
-  return buildEvidenceAnchorFromText(cleaned.text);
-}
-
-export function formatSuggestedEvidenceCitation(
-  paper: PaperContextRef,
-  candidate: Pick<
-    PaperContextCandidate,
-    "chunkText" | "sectionLabel" | "chunkKind" | "anchorText"
-  >,
-): string {
-  const citationParts = [buildCompactPaperSourceLabel(paper)];
-  const sectionLabel =
-    candidate.sectionLabel ||
-    matchSectionHeading(candidate.chunkText)?.label;
-  if (sectionLabel) {
-    citationParts.push(sectionLabel);
-  }
-  const anchor = buildEvidenceAnchor(
-    candidate.chunkText,
-    sectionLabel,
-    candidate.chunkKind || "body",
-    candidate.anchorText,
-  );
-  if (anchor) {
-    citationParts.push(`"${anchor}"`);
-  }
-  return `(${citationParts.join(", ")})`;
 }
 
 function tokenizeText(text: string): string[] {
@@ -1155,10 +991,7 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-
-async function embedTexts(
-  texts: string[],
-): Promise<number[][]> {
+async function embedTexts(texts: string[]): Promise<number[][]> {
   const all: number[][] = [];
   for (let i = 0; i < texts.length; i += EMBEDDING_BATCH_SIZE) {
     const batch = texts.slice(i, i + EMBEDDING_BATCH_SIZE);
@@ -1218,7 +1051,12 @@ async function ensureEmbeddings(
     // Layer 2: Disk cache — check before calling the API
     if (itemId != null) {
       try {
-        const cached = await loadCachedEmbeddings(itemId, chunkHash, embeddingModel, providerKey);
+        const cached = await loadCachedEmbeddings(
+          itemId,
+          chunkHash,
+          embeddingModel,
+          providerKey,
+        );
         if (cached && cached.length === chunkCount) return cached;
       } catch {
         /* disk cache miss or read error — continue to API */
@@ -1229,17 +1067,7 @@ async function ensureEmbeddings(
     try {
       return await embedTexts(pdfContext.chunks);
     } catch (err) {
-      if (err instanceof EmbeddingUnsupportedError) {
-        ztoolkit.log(
-          `[Semantic Search] Provider "${(err as EmbeddingUnsupportedError).providerLabel}" does not support embeddings. ` +
-            "Configure a separate embedding provider in Settings → Customization. Falling back to keyword search.",
-        );
-      } else {
-        ztoolkit.log(
-          "[Semantic Search] Embedding generation failed:",
-          err,
-        );
-      }
+      void err;
       return null;
     }
   })();
@@ -1259,10 +1087,14 @@ async function ensureEmbeddings(
     // Persist to disk cache in background (fire-and-forget)
     if (itemId != null && result.length > 0) {
       const dims = result[0].length;
-      saveCachedEmbeddings(itemId, chunkHash, embeddingModel, providerKey, dims, result).catch(
-        (err) =>
-          ztoolkit.log("[Semantic Search] Embedding cache write failed:", err),
-      );
+      saveCachedEmbeddings(
+        itemId,
+        chunkHash,
+        embeddingModel,
+        providerKey,
+        dims,
+        result,
+      ).catch(() => {});
     }
     return result.length === chunkCount;
   }
@@ -1272,45 +1104,6 @@ async function ensureEmbeddings(
     pdfContext.embeddingFailureKey = embeddingAttemptKey;
   }
   return false;
-}
-
-/**
- * Pre-generate embeddings for a paper in the background.
- * Called from the multi-context planner so embeddings are cached even when
- * the system uses full-text mode (which skips the retrieval pipeline).
- * Fire-and-forget — callers should NOT await this.
- */
-export function preGenerateEmbeddings(
-  pdfContext: PdfContext | undefined,
-  itemId: number,
-): void {
-  if (!pdfContext || !pdfContext.chunks.length) return;
-  if (!shouldTryEmbeddings()) return;
-  let embeddingConfig: ReturnType<typeof getResolvedEmbeddingConfig>;
-  try {
-    embeddingConfig = getResolvedEmbeddingConfig();
-  } catch {
-    return;
-  }
-  // Already loaded or in-flight for this exact embedding config — nothing to do
-  if (
-    pdfContext.embeddings?.length &&
-    pdfContext.embeddingCacheKey === embeddingConfig.cacheKey
-  ) {
-    return;
-  }
-  if (
-    pdfContext.embeddingPromise &&
-    pdfContext.embeddingPromiseKey === embeddingConfig.attemptKey
-  ) {
-    return;
-  }
-
-  ensureEmbeddings(pdfContext, itemId).catch((err) => {
-    if (typeof ztoolkit !== "undefined") {
-      ztoolkit.log("[Semantic Search] Background embedding pre-generation failed:", err);
-    }
-  });
 }
 
 export function buildPaperKey(ref: PaperContextRef): string {
@@ -1430,14 +1223,7 @@ function shouldTryEmbeddings(): boolean {
   if (enabledPref !== true && enabledPref !== "true") return false;
 
   // Delegate to the centralized availability check in llmClient.
-  const available = checkEmbeddingAvailability();
-  if (!available && typeof ztoolkit !== "undefined") {
-    const reason = getEmbeddingUnavailableReason();
-    if (reason) {
-      ztoolkit.log(`[Semantic Search] Embeddings unavailable: ${reason}`);
-    }
-  }
-  return available;
+  return checkEmbeddingAvailability();
 }
 
 // ── Intent-driven evidence heuristics ────────────────────────────────────────
@@ -1470,9 +1256,7 @@ function detectQueryIntent(question: string): QueryIntent {
     )
   )
     return "comparative";
-  if (
-    /\b(?:cit(?:e|ation|ed)|refer(?:ence|red)|bibliograph)\b/i.test(question)
-  )
+  if (/\b(?:cit(?:e|ation|ed)|refer(?:ence|red)|bibliograph)\b/i.test(question))
     return "citation";
   if (
     /\b(?:how many|sample size|number of|percentage|ratio|count|statistic)\b/i.test(
@@ -1645,7 +1429,8 @@ export async function buildPaperRetrievalCandidates(
       try {
         const queryEmbedding =
           options?.precomputedQueryEmbedding ||
-          (await callEmbeddings([question]))[0] || [];
+          (await callEmbeddings([question]))[0] ||
+          [];
         if (queryEmbedding.length) {
           rawEmbeddingScores = pdfContext.embeddings.map((vec) =>
             cosineSimilarity(queryEmbedding, vec),
@@ -1658,8 +1443,8 @@ export async function buildPaperRetrievalCandidates(
             embedRank![idx] = rank + 1;
           });
         }
-      } catch (err) {
-        ztoolkit.log("Query embedding failed:", err);
+      } catch {
+        // Keyword retrieval remains available when semantic retrieval fails.
       }
     }
   }
@@ -1670,7 +1455,9 @@ export async function buildPaperRetrievalCandidates(
 
   const scored = chunkStats.map((chunk, idx) => {
     const bm25Score = bm25Scores[idx] || 0;
-    const embeddingScore = rawEmbeddingScores ? rawEmbeddingScores[idx] || 0 : 0;
+    const embeddingScore = rawEmbeddingScores
+      ? rawEmbeddingScores[idx] || 0
+      : 0;
     const hybridScore = embedRank
       ? 1 / (RRF_K + bm25Rank[idx]) + 1 / (RRF_K + embedRank[idx])
       : 1 / (RRF_K + bm25Rank[idx]);
@@ -1782,7 +1569,9 @@ export function renderEvidencePack(params: {
       lines.push("", "Evidence:");
       for (const [candidateIndex, candidate] of paperCandidates.entries()) {
         lines.push(`Evidence snippet ${candidateIndex + 1}`);
-        lines.push(`Section: ${candidate.sectionLabel || "Unlabeled body text"}`);
+        lines.push(
+          `Section: ${candidate.sectionLabel || "Unlabeled body text"}`,
+        );
         lines.push(`Source label: ${formatPaperSourceLabel(paper)}`);
         lines.push("Quoted evidence:");
         lines.push(formatMarkdownBlockquote(buildEvidenceQuoteText(candidate)));
@@ -1796,34 +1585,4 @@ export function renderEvidencePack(params: {
 
   if (blocks.length <= 1) return "";
   return blocks.join("\n\n---\n\n");
-}
-
-export function renderClaimEvidencePack(params: {
-  paper: PaperContextRef;
-  candidates: PaperContextCandidate[];
-}): string {
-  const { paper, candidates } = params;
-  if (!candidates.length) return "";
-  const lines = [
-    "Claim Evidence:",
-    "",
-    ...buildPaperQuoteCitationGuidance(),
-    "The full paper remains available in paper chat.",
-    "Use the evidence snippets below as the primary grounding for this claim assessment.",
-    "Do not treat references or background citations as direct empirical evidence.",
-    "If the evidence is indirect or mixed, say so explicitly.",
-    "",
-  ];
-  candidates.forEach((candidate, index) => {
-    lines.push(`Evidence snippet ${index + 1}`);
-    lines.push(
-      `Support level: ${getSupportLevelLabel(candidate.chunkKind).toLowerCase()}`,
-    );
-    lines.push(`Section: ${candidate.sectionLabel || "Unlabeled body text"}`);
-    lines.push(`Source label: ${formatPaperSourceLabel(paper)}`);
-    lines.push("Quoted evidence:");
-    lines.push(formatMarkdownBlockquote(buildEvidenceQuoteText(candidate)));
-    lines.push("");
-  });
-  return lines.join("\n").trimEnd();
 }

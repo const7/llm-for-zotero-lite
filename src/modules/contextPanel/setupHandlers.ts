@@ -1,14 +1,11 @@
 import { createElement } from "../../utils/domHelpers";
 import { t } from "../../utils/i18n";
-import { getAllSkills } from "../../agent/skills";
-import type { AgentSkill } from "../../agent/skills/skillLoader";
 import type { RuntimeModelEntry } from "../../utils/modelProviders";
 import {
   getLastUsedModelEntryId,
   getModelEntryById,
 } from "../../utils/modelProviders";
 import {
-  config,
   AUTO_SCROLL_BOTTOM_THRESHOLD,
   MAX_SELECTED_IMAGES,
   MAX_SELECTED_PAPER_CONTEXTS,
@@ -19,10 +16,6 @@ import {
   FONT_SCALE_MAX_PERCENT,
   FONT_SCALE_STEP_PERCENT,
   FONT_SCALE_DEFAULT_PERCENT,
-  getSelectTextExpandedLabel,
-  SELECT_TEXT_COMPACT_LABEL,
-  getScreenshotExpandedLabel,
-  SCREENSHOT_COMPACT_LABEL,
   UPLOAD_FILE_EXPANDED_LABEL,
   UPLOAD_FILE_COMPACT_LABEL,
   REASONING_COMPACT_LABEL,
@@ -30,14 +23,13 @@ import {
   ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX,
   ACTION_LAYOUT_MODEL_WRAP_MIN_CHARS,
   ACTION_LAYOUT_MODEL_FULL_MAX_LINES,
-  GLOBAL_HISTORY_LIMIT,
+  PAPER_HISTORY_LIMIT,
   PREFERENCES_PANE_ID,
   MAX_UPLOAD_PDF_SIZE_BYTES,
 } from "./constants";
 import {
   selectedModelCache,
   selectedReasoningCache,
-  selectedRuntimeModeCache,
   selectedImageCache,
   selectedFileAttachmentCache,
   selectedImagePreviewExpandedCache,
@@ -45,7 +37,6 @@ import {
   selectedFilePreviewExpandedCache,
   selectedPaperContextCache,
   selectedOtherRefContextCache,
-  selectedCollectionContextCache,
   paperContextModeOverrides,
   selectedPaperPreviewExpandedCache,
   pinnedSelectedTextKeys,
@@ -64,13 +55,9 @@ import {
   setPromptMenuTarget,
   chatHistory,
   loadedConversationKeys,
-  currentRequestId,
-  activeGlobalConversationByLibrary,
-  activeConversationModeByLibrary,
   activePaperConversationByPaper,
   draftInputCache,
   activeContextPanels,
-  activeContextPanelRawItems,
   activeContextPanelStateSync,
   inlineEditTarget,
   setInlineEditTarget,
@@ -79,9 +66,6 @@ import {
   setInlineEditInputSection,
   setInlineEditSavedDraft,
   pdfTextCache,
-  addAutoLockedGlobalConversationKey,
-  removeAutoLockedGlobalConversationKey,
-  isAutoLockedGlobalConversation,
 } from "./state";
 import {
   sanitizeText,
@@ -92,20 +76,14 @@ import {
   resolvePromptText,
   getSelectedTextWithinBubble,
   getAttachmentTypeLabel,
-  normalizeSelectedTextSource,
 } from "./textUtils";
-import {
-  normalizeAttachmentContentHash,
-  normalizeSelectedTextPaperContexts,
-} from "./normalizers";
+import { normalizeAttachmentContentHash } from "./normalizers";
 import {
   positionMenuBelowButton,
   positionMenuAtPointer,
 } from "./menuPositioning";
 import {
   getAvailableModelEntries,
-  getStringPref,
-  getAgentModeEnabled,
   getSelectedModelEntryForItem,
   applyPanelFontScale,
   getAdvancedModelParamsForEntry,
@@ -115,8 +93,6 @@ import {
   getLastUsedPaperConversationKey,
   setLastUsedPaperConversationKey,
   removeLastUsedPaperConversationKey,
-  getLockedGlobalConversationKey,
-  setLockedGlobalConversationKey,
   buildPaperStateKey,
 } from "./prefHelpers";
 import {
@@ -129,42 +105,31 @@ import {
   persistChatScrollSnapshot,
   isScrollUpdateSuspended,
   withScrollGuard,
-  copyTextToClipboard,
   copyRenderedMarkdownToClipboard,
   refreshConversationPanels,
   detectReasoningProvider,
   getReasoningOptions,
   getSelectedReasoningForItem,
   retryLatestAssistantResponse,
-  editLatestUserMessageAndRetry,
   editUserTurnAndRetry,
   findLatestRetryPair,
-  type EditLatestTurnMarker,
 } from "./chat";
 import { shouldBackfillOlderChatMessages } from "./chatRenderWindow";
 import {
   getActiveReaderForSelectedTab,
-  getActiveReaderSelectionText,
   getActiveContextAttachmentFromTabs,
   addSelectedTextContext,
-  appendSelectedTextContextForItem,
   applySelectedTextPreview,
   formatSelectedTextContextPageLabel,
   getSelectedTextContextEntries,
-  getSelectedTextContexts,
   getSelectedTextExpandedIndex,
-  isNoteContextExpanded,
-  refreshNoteChipPreview,
-  refreshActiveNoteChipPreview,
   resolveContextSourceItem,
-  setNoteContextExpanded,
   setSelectedTextContextEntries,
   setSelectedTextExpandedIndex,
 } from "./contextResolution";
-import { buildUI } from "./buildUI";
+import { renderShortcuts } from "./shortcuts";
 import {
   flashPageInLivePdfReader,
-  resolveCurrentSelectionPageLocationFromReader,
   scrollToExactQuoteInReader,
 } from "./livePdfSelectionLocator";
 import {
@@ -196,16 +161,8 @@ import {
   clearSelectedTextState as clearSelectedTextState_,
   retainPinnedTextState as retainPinnedTextState_,
 } from "./contexts/textContextState";
-import { captureScreenshotSelection, optimizeImageDataUrl } from "./screenshot";
-import { captureCurrentPdfPage } from "./pdfPageCapture";
-import {
-  createNoteFromAssistantText,
-  createStandaloneNoteFromAssistantText,
-  createNoteFromChatHistory,
-  createStandaloneNoteFromChatHistory,
-  buildChatHistoryNotePayload,
-  readNoteSnapshot,
-} from "./notes";
+import { optimizeImageDataUrl } from "./imageOptimize";
+import { renderAllPdfPages } from "./pdfPageCapture";
 import {
   persistAttachmentBlob,
   readAttachmentBytes,
@@ -214,43 +171,33 @@ import {
   removeAttachmentFile,
   removeConversationAttachmentFiles,
 } from "./attachmentStorage";
-import { clearConversationSummary as clearConversationSummaryFromCache } from "./conversationSummaryCache";
 import {
   clearConversation as clearStoredConversation,
   clearConversationTitle,
-  createGlobalConversation,
   createPaperConversation,
   deleteTurnMessages,
-  deleteGlobalConversation,
   deletePaperConversation,
-  ensureGlobalConversationExists,
-  getGlobalConversationUserTurnCount,
-  getLatestEmptyGlobalConversation,
   loadConversation,
   getPaperConversation,
-  listGlobalConversations,
   listPaperConversations,
   ensurePaperV1Conversation,
-  setGlobalConversationTitle,
   setPaperConversationTitle,
   touchPaperConversationTitle,
-  touchGlobalConversationTitle,
 } from "../../utils/chatStore";
 import {
   ATTACHMENT_GC_MIN_AGE_MS,
-  clearOwnerAttachmentRefs,
+  clearConversationAttachmentRefs,
   collectAndDeleteUnreferencedBlobs,
-  replaceOwnerAttachmentRefs,
+  replaceConversationAttachmentRefs,
 } from "../../utils/attachmentRefStore";
 import type {
   Message,
-  ChatRuntimeMode,
   ReasoningLevelSelection,
   ReasoningOption,
   AdvancedModelParams,
+  ChatAttachment,
   PaperContextRef,
   OtherContextRef,
-  CollectionContextRef,
   PaperContextSendMode,
   PaperContentSourceMode,
   SelectedTextContext,
@@ -258,40 +205,25 @@ import type {
 import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/llmClient";
 import type { ReasoningConfig as LLMReasoningConfig } from "../../utils/llmClient";
 import {
-  browseAllItemCandidates,
-  searchAllItemCandidates,
-  searchCollectionCandidates,
-  ZOTERO_NOTE_CONTENT_TYPE,
+  searchPaperCandidates,
   normalizePaperSearchText,
-  parsePaperSearchSlashToken,
   parseAtSearchToken,
-  type PaperBrowseCollectionCandidate,
   type PaperSearchAttachmentCandidate,
   type PaperSearchGroupCandidate,
-  type PaperSearchSlashToken,
+  type PaperSearchToken,
 } from "./paperSearch";
-import { getAgentApi, initAgentSubsystem } from "../../agent/index";
-import { renderPendingActionCard } from "./agentTrace/render";
-import type {
-  AgentPendingAction,
-  AgentConfirmationResolution,
-} from "../../agent/types";
 import {
-  createGlobalPortalItem,
   createPaperPortalItem,
-  isGlobalPortalItem,
-  resolveActiveNoteSession,
-  resolveDisplayConversationKind,
   resolveConversationBaseItem,
   resolveInitialPanelItemState,
   resolveActiveLibraryID,
 } from "./portalScope";
 import { getPanelDomRefs } from "./setupHandlers/domRefs";
 import {
+  ADD_MENU_OPEN_CLASS,
   MODEL_MENU_OPEN_CLASS,
   REASONING_MENU_OPEN_CLASS,
   RETRY_MODEL_MENU_OPEN_CLASS,
-  SLASH_MENU_OPEN_CLASS,
   isFloatingMenuOpen,
   positionFloatingMenu,
   setFloatingMenuOpen,
@@ -299,16 +231,15 @@ import {
 import {
   getReasoningLevelDisplayLabel,
   isReasoningDisplayLabelActive,
-  getScreenshotDisabledHint,
-  isScreenshotUnsupportedModel,
+  isImageContextUnsupportedModel,
   getModelPdfSupport,
 } from "./setupHandlers/controllers/modelReasoningController";
 import {
-  GLOBAL_HISTORY_UNDO_WINDOW_MS,
+  PAPER_HISTORY_UNDO_WINDOW_MS,
   type ConversationHistoryEntry,
   type HistorySwitchTarget,
   type PendingHistoryDeletion,
-  formatGlobalHistoryTimestamp,
+  formatPaperHistoryTimestamp,
   formatHistoryRowDisplayTitle,
   normalizeConversationTitleSeed,
   normalizeHistoryTitle,
@@ -341,23 +272,17 @@ import {
 } from "./setupHandlers/controllers/fileIntakeController";
 import { createSendFlowController } from "./setupHandlers/controllers/sendFlowController";
 import { createClearConversationController } from "./setupHandlers/controllers/clearConversationController";
-import { clearAllAgentToolCaches } from "../../agent/tools";
 import { loadConversationHistoryScope } from "./historyLoader";
-import {
-  shouldNotifyConversationHistoryConsumers,
-  shouldReloadConversationHistoryMenu,
-  type ConversationHistoryRefreshMode,
-} from "./historyRefreshPolicy";
+
+type ConversationHistoryRefreshMode = "selection" | "mutation" | "menu-open";
 
 /** Monotonic counter incremented every time setupHandlers rebuilds a panel. */
 let setupHandlersGeneration = 0;
 
-export type SetupHandlersHooks = {
+type SetupHandlersHooks = {
   onConversationHistoryChanged?: () => void;
   onWebChatModeChanged?: (isWebChat: boolean) => void;
-  /** Called by standalone to clear force-new-chat intent before loading a session. */
   clearWebChatNewChatIntent?: () => void;
-  /** Called by standalone to resolve the currently selected model consistently. */
   getCurrentModelName?: () => string | null;
 };
 
@@ -369,13 +294,6 @@ export function setupHandlers(
   const resolvedInitialState = resolveInitialPanelItemState(initialItem);
   let item = resolvedInitialState.item;
   let basePaperItem = resolvedInitialState.basePaperItem;
-  const resolveLibraryIdFromItem = (
-    targetItem: Zotero.Item | null | undefined,
-  ): number => {
-    const parsed = Number(targetItem?.libraryID);
-    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
-    return resolveActiveLibraryID() || 0;
-  };
 
   const {
     inputBox,
@@ -386,42 +304,27 @@ export function setupHandlers(
     modelSlot,
     modelMenu,
     reasoningBtn,
-    runtimeModeBtn,
     reasoningSlot,
     reasoningMenu,
     actionsRow,
     actionsLeft,
-    actionsRight,
-    popoutBtn,
     settingsBtn,
-    exportBtn,
     clearBtn,
     titleStatic,
     historyBar,
     historyNewBtn,
-    historyNewMenu,
-    historyNewOpenBtn,
-    historyNewPaperBtn,
     historyToggleBtn,
-    historyModeIndicator,
     historyMenu,
-    modeCapsule,
-    modeChipBtn,
-    modeLockBtn,
     historyRowMenu,
     historyRowRenameBtn,
     historyUndo,
     historyUndoText,
     historyUndoBtn,
-    selectTextBtn,
-    screenshotBtn,
     uploadBtn,
     uploadInput,
-    slashMenu,
-    slashUploadOption,
-    slashReferenceOption,
-    slashPdfPageOption,
-    slashPdfMultiplePagesOption,
+    addMenu,
+    addUploadOption,
+    addReferenceOption,
     imagePreview,
     selectedContextList,
     previewStrip,
@@ -439,18 +342,11 @@ export function setupHandlers(
     paperPreviewList,
     paperPicker,
     paperPickerList,
-    actionPicker,
-    actionPickerList,
-    actionHitlPanel,
     responseMenu,
     responseMenuCopyBtn,
-    responseMenuNoteBtn,
     responseMenuDeleteBtn,
     promptMenu,
     promptMenuDeleteBtn,
-    exportMenu,
-    exportMenuCopyBtn,
-    exportMenuNoteBtn,
     retryModelMenu,
     status,
     chatBox,
@@ -478,6 +374,7 @@ export function setupHandlers(
   panelRoot.dataset.handlersAttached = thisGen;
 
   activeContextPanels.set(body, () => item);
+  void renderShortcuts(body, item);
 
   // Disconnect previous ResizeObservers to prevent accumulation across
   // successive setupHandlers calls (each call creates fresh observers).
@@ -493,7 +390,7 @@ export function setupHandlers(
   // navigation), which destroys the cancel/send button DOM mid-stream.
   // Re-apply the generating state immediately so the user never sees a stale
   // idle UI while a request is still running in the background.
-  // Only lock the UI if the CURRENT conversation has a pending request.
+  // Only disable the composer if the current conversation has a pending request.
   const earlyConversationKey = item ? getConversationKey(item) : null;
   if (earlyConversationKey !== null && isRequestPending(earlyConversationKey)) {
     if (sendBtn) sendBtn.style.display = "none";
@@ -512,23 +409,16 @@ export function setupHandlers(
   const ElementCtor = panelDoc.defaultView?.Element;
   const isElementNode = (value: unknown): value is Element =>
     Boolean(ElementCtor && value instanceof ElementCtor);
-  const headerTop = body.querySelector(
-    ".llm-header-top",
-  ) as HTMLDivElement | null;
   panelRoot.tabIndex = 0;
   applyPanelFontScale(panelRoot);
 
-  const resolveCurrentNoteSession = () => resolveActiveNoteSession(item);
-  const isNoteSession = () => Boolean(resolveCurrentNoteSession());
   const notifyConversationHistoryChanged = () => {
     try {
       hooks?.onConversationHistoryChanged?.();
     } catch (err) {
-      ztoolkit.log("LLM: standalone history hook failed", err);
+      ztoolkit.log("LLM: conversation history hook failed", err);
     }
   };
-  const isGlobalMode = () => resolveDisplayConversationKind(item) === "global";
-  const isPaperMode = () => resolveDisplayConversationKind(item) === "paper";
   const getCurrentLibraryID = (): number => {
     const fromItem =
       item && Number.isFinite(item.libraryID) && item.libraryID > 0
@@ -537,73 +427,7 @@ export function setupHandlers(
     if (fromItem > 0) return fromItem;
     return resolveActiveLibraryID() || 0;
   };
-  const getCurrentRuntimeMode = (): ChatRuntimeMode => {
-    if (!item) return "chat";
-    const key = getConversationKey(item);
-    return selectedRuntimeModeCache.get(key) || "chat";
-  };
-  const updateRuntimeModeButton = () => {
-    if (!runtimeModeBtn) return;
-    const agentFeatureEnabled = getAgentModeEnabled();
-    // [webchat] Agent mode not available in webchat — hide toggle
-    let webChatActive = false;
-    try {
-      webChatActive = isWebChatMode();
-    } catch {
-      /* not ready */
-    }
-    // Hide the entire toggle when agent feature is disabled or in webchat mode.
-    const shouldHide = !agentFeatureEnabled || webChatActive;
-    runtimeModeBtn.style.display = shouldHide ? "none" : "";
-    if (shouldHide) {
-      // Force chat mode when the feature is hidden so state stays consistent.
-      if (item) selectedRuntimeModeCache.set(getConversationKey(item), "chat");
-      panelRoot.dataset.runtimeMode = "chat";
-      return;
-    }
-    const mode = getCurrentRuntimeMode();
-    const enabled = mode === "agent";
-    const label = runtimeModeBtn.querySelector(
-      ".llm-agent-toggle-label",
-    ) as HTMLSpanElement | null;
-    if (label) {
-      label.textContent = t("Agent (beta)");
-    }
-    runtimeModeBtn.classList.toggle("llm-agent-toggle-enabled", enabled);
-    runtimeModeBtn.dataset.mode = mode;
-    runtimeModeBtn.title = enabled
-      ? t("Agent mode ON. Click to switch to Chat mode")
-      : t("Agent mode OFF. Click to switch to Agent mode");
-    runtimeModeBtn.setAttribute(
-      "aria-label",
-      mode === "agent" ? t("Switch to Chat mode") : t("Switch to Agent mode"),
-    );
-    runtimeModeBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
-    panelRoot.dataset.runtimeMode = mode;
-  };
-  const setCurrentRuntimeMode = (mode: ChatRuntimeMode) => {
-    if (!item) return;
-    selectedRuntimeModeCache.set(getConversationKey(item), mode);
-    updateRuntimeModeButton();
-  };
-  const resolveCurrentNoteParentItem = (): Zotero.Item | null => {
-    const noteSession = resolveCurrentNoteSession();
-    if (!noteSession?.parentItemId) return null;
-    const parentItem = Zotero.Items.get(noteSession.parentItemId) || null;
-    return parentItem?.isRegularItem?.() ? parentItem : null;
-  };
   const resolveCurrentPaperBaseItem = (): Zotero.Item | null => {
-    const noteSession = resolveCurrentNoteSession();
-    if (noteSession?.noteKind === "item") {
-      const parentItem = resolveCurrentNoteParentItem();
-      if (parentItem) {
-        basePaperItem = parentItem;
-        return parentItem;
-      }
-    }
-    if (noteSession) {
-      return null;
-    }
     if (basePaperItem?.isRegularItem?.()) return basePaperItem;
     const resolvedFromItem = resolveConversationBaseItem(item);
     if (resolvedFromItem?.isRegularItem?.()) {
@@ -634,167 +458,46 @@ export function setupHandlers(
         : "";
     const libraryID = getCurrentLibraryID();
     panelRoot.dataset.libraryId = libraryID > 0 ? `${libraryID}` : "";
-    const noteSession = resolveCurrentNoteSession();
-    const mode: "global" | "paper" | null = item
-      ? resolveDisplayConversationKind(item)
-      : null;
-    panelRoot.dataset.conversationKind = mode || "";
-    const currentBasePaperItemID =
-      mode === "paper" ? Number(resolveCurrentPaperBaseItem()?.id || 0) : 0;
+    panelRoot.dataset.conversationKind = item ? "paper" : "";
+    const currentBasePaperItemID = Number(
+      resolveCurrentPaperBaseItem()?.id || 0,
+    );
     panelRoot.dataset.basePaperItemId =
       Number.isFinite(currentBasePaperItemID) && currentBasePaperItemID > 0
         ? `${Math.floor(currentBasePaperItemID)}`
         : "";
-    panelRoot.dataset.noteKind = noteSession?.noteKind || "";
-    panelRoot.dataset.noteId = noteSession?.noteId
-      ? `${noteSession.noteId}`
-      : "";
-    panelRoot.dataset.noteTitle = noteSession?.title || "";
-    panelRoot.dataset.noteParentItemId = noteSession?.parentItemId
-      ? `${noteSession.parentItemId}`
-      : "";
     if (historyNewBtn) {
-      historyNewBtn.style.display = noteSession ? "none" : "";
+      historyNewBtn.style.display = "";
     }
     if (historyToggleBtn) {
-      historyToggleBtn.style.display = noteSession ? "none" : "";
+      historyToggleBtn.style.display = "";
     }
-    if (item && libraryID > 0 && mode && !noteSession) {
-      activeConversationModeByLibrary.set(libraryID, mode);
-      if (mode === "global") {
-        activeGlobalConversationByLibrary.set(libraryID, item.id);
-      } else if (
-        Number.isFinite(conversationKey) &&
-        (conversationKey as number) > 0 &&
-        Number.isFinite(currentBasePaperItemID) &&
-        currentBasePaperItemID > 0
-      ) {
-        const normalizedConversationKey = Math.floor(conversationKey as number);
-        const paperStateKey = buildPaperStateKey(
-          libraryID,
-          Math.floor(currentBasePaperItemID),
-        );
-        activePaperConversationByPaper.set(
-          paperStateKey,
-          normalizedConversationKey,
-        );
-        setLastUsedPaperConversationKey(
-          libraryID,
-          Math.floor(currentBasePaperItemID),
-          normalizedConversationKey,
-        );
-      }
-    }
-    if (historyModeIndicator) {
-      // Keep historyModeIndicator (which is the clock history button) accessible.
-      // Its label is static "Conversation history" — no text update needed.
-    }
-    // Update mode capsule data-active state
-    if (modeCapsule) {
-      modeCapsule.dataset.mode = mode || "";
-    }
-    if (modeChipBtn) {
-      // [webchat] Don't overwrite — applyWebChatModeUI manages the chip in webchat mode
-      if (!modeChipBtn.querySelector(".llm-webchat-dot")) {
-        const currentLabel = noteSession
-          ? "Note editing"
-          : mode === "global"
-            ? "Library chat"
-            : "Paper chat";
-        modeChipBtn.textContent = currentLabel;
-        modeChipBtn.title = noteSession
-          ? currentLabel
-          : mode === "global"
-            ? "Switch to paper chat"
-            : "Switch to library chat";
-        modeChipBtn.setAttribute(
-          "aria-label",
-          noteSession
-            ? currentLabel
-            : mode === "global"
-              ? "Switch to paper chat"
-              : "Switch to library chat",
-        );
-      }
-    }
-    // Lock button: visible only in open-chat mode; reflect lock state
-    if (modeLockBtn) {
-      modeLockBtn.style.display =
-        mode === "global" && !noteSession ? "flex" : "none";
-      const libraryID = getCurrentLibraryID();
-      const lockedKey =
-        libraryID > 0 ? getLockedGlobalConversationKey(libraryID) : null;
-      const currentKey =
-        conversationKey !== null ? Math.floor(conversationKey as number) : null;
-      const isLocked =
-        lockedKey !== null && currentKey !== null && lockedKey === currentKey;
-      modeLockBtn.dataset.locked = isLocked ? "true" : "false";
-      modeLockBtn.title = isLocked
-        ? "Unlock library chat default"
-        : "Lock library chat as default";
-      modeLockBtn.setAttribute(
-        "aria-label",
-        isLocked
-          ? "Unlock library chat default"
-          : "Lock library chat as default",
+    if (
+      item &&
+      libraryID > 0 &&
+      Number.isFinite(conversationKey) &&
+      (conversationKey as number) > 0 &&
+      Number.isFinite(currentBasePaperItemID) &&
+      currentBasePaperItemID > 0
+    ) {
+      const normalizedConversationKey = Math.floor(conversationKey as number);
+      const paperStateKey = buildPaperStateKey(
+        libraryID,
+        Math.floor(currentBasePaperItemID),
+      );
+      activePaperConversationByPaper.set(
+        paperStateKey,
+        normalizedConversationKey,
+      );
+      setLastUsedPaperConversationKey(
+        libraryID,
+        Math.floor(currentBasePaperItemID),
+        normalizedConversationKey,
       );
     }
-    updateRuntimeModeButton();
   };
   syncConversationIdentity();
 
-  // Keep the agent mode toggle in sync when the preference is changed in the
-  // Preferences window (which runs in a separate window context).
-  {
-    const agentPrefKey = `${config.prefsPrefix}.enableAgentMode`;
-    let observerId: symbol | undefined;
-    const onAgentPrefChange = () => {
-      if (!(body as Element).isConnected) {
-        // Panel is gone – clean up the observer.
-        try {
-          if (observerId !== undefined)
-            (Zotero as any).Prefs.unregisterObserver(observerId);
-        } catch {
-          // no-op
-        }
-        return;
-      }
-      updateRuntimeModeButton();
-    };
-    try {
-      observerId = (Zotero as any).Prefs.registerObserver(
-        agentPrefKey,
-        onAgentPrefChange,
-        true,
-      );
-    } catch {
-      // Zotero.Prefs.registerObserver not available – no live sync
-    }
-  }
-
-  // Auto-activate agent mode in standalone library chat
-  {
-    const isStandalone = (body as HTMLElement).dataset?.standalone === "true";
-    if (isStandalone && isGlobalMode()) {
-      const agentEnabled = getAgentModeEnabled();
-      const key = item ? getConversationKey(item) : null;
-      if (key && !selectedRuntimeModeCache.has(key)) {
-        if (agentEnabled) {
-          setCurrentRuntimeMode("agent");
-        } else if (status) {
-          setStatus(
-            status,
-            t(
-              "Tip: Enable Agent mode in Preferences for a better library chat experience.",
-            ),
-            "ready",
-          );
-        }
-      }
-    }
-  }
-
-  let activeEditSession: EditLatestTurnMarker | null = null;
   let attachmentGcTimer: number | null = null;
   const scheduleAttachmentGc = (delayMs = 5_000) => {
     const win = body.ownerDocument?.defaultView;
@@ -940,7 +643,6 @@ export function setupHandlers(
   // handler on chatBox already keeps the snapshot up to date for programmatic
   // scroll changes.
 
-  let retryMenuAnchor: HTMLButtonElement | null = null;
   const closeResponseMenu = () => {
     if (responseMenu) responseMenu.style.display = "none";
     setResponseMenuTarget(null);
@@ -949,11 +651,7 @@ export function setupHandlers(
     if (promptMenu) promptMenu.style.display = "none";
     setPromptMenuTarget(null);
   };
-  const closeExportMenu = () => {
-    if (exportMenu) exportMenu.style.display = "none";
-  };
   let historyRowMenuTarget: {
-    kind: "paper" | "global";
     conversationKey: number;
   } | null = null;
   const closeHistoryRowMenu = () => {
@@ -961,7 +659,6 @@ export function setupHandlers(
     historyRowMenuTarget = null;
   };
   const closeHistoryNewMenu = () => {
-    if (historyNewMenu) historyNewMenu.style.display = "none";
     if (historyNewBtn) {
       historyNewBtn.setAttribute("aria-expanded", "false");
     }
@@ -972,36 +669,31 @@ export function setupHandlers(
     if (historyToggleBtn) {
       historyToggleBtn.setAttribute("aria-expanded", "false");
     }
-    globalHistoryLoadSeq += 1;
-    latestConversationHistory = [];
+    paperHistoryLoadSeq += 1;
+    latestPaperHistoryEntries = [];
     historySearchLoadSeq += 1;
     historySearchQuery = "";
     historySearchExpanded = false;
-    historySearchLoading = false;
     historySearchDocumentCache.clear();
     historySearchDocumentTasks.clear();
     closeHistoryRowMenu();
   };
-  const closeSlashMenu = () => {
-    slashMenuActiveIndex = -1;
-    clearAgentSlashItems();
-    if (slashMenu) {
-      Array.from(slashMenu.querySelectorAll(".llm-action-picker-item")).forEach(
+  const closeAddMenu = () => {
+    addMenuActiveIndex = -1;
+    if (addMenu) {
+      Array.from(addMenu.querySelectorAll(".llm-action-picker-item")).forEach(
         (el) => (el as HTMLButtonElement).removeAttribute("aria-selected"),
       );
     }
-    setFloatingMenuOpen(slashMenu, SLASH_MENU_OPEN_CLASS, false);
+    setFloatingMenuOpen(addMenu, ADD_MENU_OPEN_CLASS, false);
     if (uploadBtn) {
       uploadBtn.setAttribute("aria-expanded", "false");
     }
   };
   const isHistoryMenuOpen = () =>
     Boolean(historyMenu && historyMenu.style.display !== "none");
-  const isHistoryNewMenuOpen = () =>
-    Boolean(historyNewMenu && historyNewMenu.style.display !== "none");
   const closeRetryModelMenu = () => {
     setFloatingMenuOpen(retryModelMenu, RETRY_MODEL_MENU_OPEN_CLASS, false);
-    retryMenuAnchor = null;
   };
 
   // Show floating "Quote" action when selecting assistant response text.
@@ -1296,7 +988,7 @@ export function setupHandlers(
   };
   popupHost.__llmSelectionPopupCleanup = disposeSelectionPopup;
 
-  if (responseMenu && responseMenuCopyBtn && responseMenuNoteBtn) {
+  if (responseMenu && responseMenuCopyBtn) {
     if (!responseMenu.dataset.listenerAttached) {
       responseMenu.dataset.listenerAttached = "true";
       // Stop propagation for both pointer and mouse events so that the
@@ -1317,74 +1009,10 @@ export function setupHandlers(
         const target = responseMenuTarget;
         closeResponseMenu();
         if (!target) return;
-        // Render through renderMarkdownForNote and copy both HTML
-        // (for rich-text paste into Zotero notes) and plain text
-        // (for plain-text editors).  Uses the selection if present,
-        // otherwise the full response.
+        // Copy both rendered HTML and plain markdown. Uses the selection if
+        // present, otherwise the full response.
         await copyRenderedMarkdownToClipboard(body, target.contentText);
         if (status) setStatus(status, t("Copied response"), "ready");
-      });
-      responseMenuNoteBtn.addEventListener("click", async (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        // Capture all needed values immediately before any async work,
-        // so that even if responseMenuTarget is cleared we still have them.
-        const target = responseMenuTarget;
-        closeResponseMenu();
-        if (!target) {
-          ztoolkit.log("LLM: Note save – no responseMenuTarget");
-          return;
-        }
-        const {
-          item: targetItem,
-          contentText,
-          modelName,
-          paperContexts,
-        } = target;
-        if (!targetItem || !contentText) {
-          ztoolkit.log("LLM: Note save – missing item or contentText");
-          return;
-        }
-        try {
-          const targetNoteSession = resolveActiveNoteSession(targetItem);
-          if (
-            isGlobalPortalItem(targetItem) ||
-            targetNoteSession?.noteKind === "standalone"
-          ) {
-            const libraryID =
-              Number.isFinite(targetItem.libraryID) && targetItem.libraryID > 0
-                ? Math.floor(targetItem.libraryID)
-                : getCurrentLibraryID();
-            await createStandaloneNoteFromAssistantText(
-              libraryID,
-              contentText,
-              modelName,
-              paperContexts,
-            );
-            if (status) {
-              setStatus(status, t("Created a new note"), "ready");
-            }
-            return;
-          }
-          const saveResult = await createNoteFromAssistantText(
-            targetItem,
-            contentText,
-            modelName,
-            paperContexts,
-          );
-          if (status) {
-            setStatus(
-              status,
-              saveResult === "appended"
-                ? t("Appended to existing note")
-                : t("Created a new note"),
-              "ready",
-            );
-          }
-        } catch (err) {
-          ztoolkit.log("Create note failed:", err);
-          if (status) setStatus(status, t("Failed to create note"), "error");
-        }
       });
       if (responseMenuDeleteBtn) {
         responseMenuDeleteBtn.addEventListener("click", async (e: Event) => {
@@ -1458,129 +1086,17 @@ export function setupHandlers(
     }
   }
 
-  if (exportMenu && exportMenuCopyBtn && exportMenuNoteBtn) {
-    if (!exportMenu.dataset.listenerAttached) {
-      exportMenu.dataset.listenerAttached = "true";
-      exportMenu.addEventListener("pointerdown", (e: Event) => {
-        e.stopPropagation();
-      });
-      exportMenu.addEventListener("mousedown", (e: Event) => {
-        e.stopPropagation();
-      });
-      exportMenu.addEventListener("contextmenu", (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-      });
-      exportMenuCopyBtn.addEventListener("click", async (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!item) return;
-        await ensureConversationLoaded(item);
-        const conversationKey = getConversationKey(item);
-        const history = chatHistory.get(conversationKey) || [];
-        const payload = buildChatHistoryNotePayload(history);
-        if (!payload.noteText) {
-          if (status)
-            setStatus(status, t("No chat history detected."), "ready");
-          closeExportMenu();
-          return;
-        }
-        // Match single-response "copy as md": copy markdown/plain text only.
-        await copyTextToClipboard(body, payload.noteText);
-        if (status) setStatus(status, t("Copied chat as md"), "ready");
-        closeExportMenu();
-      });
-      exportMenuNoteBtn.addEventListener("click", async (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const currentItem = item;
-        const currentLibraryID = getCurrentLibraryID();
-        closeExportMenu();
-        if (!currentItem) return;
-        try {
-          await ensureConversationLoaded(currentItem);
-          const conversationKey = getConversationKey(currentItem);
-          const history = chatHistory.get(conversationKey) || [];
-          const payload = buildChatHistoryNotePayload(history);
-          if (!payload.noteText) {
-            if (status)
-              setStatus(status, t("No chat history detected."), "ready");
-            return;
-          }
-          if (isGlobalMode()) {
-            await createStandaloneNoteFromChatHistory(
-              currentLibraryID,
-              history,
-            );
-          } else {
-            await createNoteFromChatHistory(currentItem, history);
-          }
-          if (status)
-            setStatus(status, t("Saved chat history to new note"), "ready");
-        } catch (err) {
-          ztoolkit.log("Save chat history note failed:", err);
-          if (status)
-            setStatus(status, t("Failed to save chat history"), "error");
-        }
-      });
-    }
-  }
-
-  if (exportBtn) {
-    exportBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (exportBtn.disabled || !exportMenu || !item) return;
-      closeRetryModelMenu();
-      closeSlashMenu();
-      closeResponseMenu();
-      closePromptMenu();
-      closeHistoryNewMenu();
-      closeHistoryMenu();
-      if (exportMenu.style.display !== "none") {
-        closeExportMenu();
-        return;
-      }
-      positionMenuBelowButton(body, exportMenu, exportBtn);
-    });
-  }
-
-  if (popoutBtn) {
-    popoutBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      try {
-        const {
-          isStandaloneWindowActive,
-          openStandaloneChat,
-        } = require("./standaloneWindow");
-        if (isStandaloneWindowActive()) {
-          // Toggle off: close the standalone window
-          addon.data.standaloneWindow?.close();
-        } else {
-          openStandaloneChat({
-            initialItem: item,
-            sourceBody: body,
-          });
-        }
-      } catch (err) {
-        ztoolkit.log("LLM: Failed to toggle standalone window", err);
-      }
-    });
-  }
-
   if (settingsBtn) {
     settingsBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
       try {
         closeRetryModelMenu();
-        closeSlashMenu();
+        closeAddMenu();
         closeResponseMenu();
         closePromptMenu();
         closeHistoryNewMenu();
         closeHistoryMenu();
-        closeExportMenu();
         const paneId =
           settingsBtn.dataset.preferencesPaneId || PREFERENCES_PANE_ID;
         Zotero.Utilities.Internal.openPreferences(paneId);
@@ -1738,9 +1254,7 @@ export function setupHandlers(
       normalizePaperContextEntries(
         selectedPaperContextCache.get(currentItem.id) || [],
       );
-    const autoLoadedPaperContext = isGlobalPortalItem(currentItem)
-      ? null
-      : resolveAutoLoadedPaperContext();
+    const autoLoadedPaperContext = resolveAutoLoadedPaperContext();
     return normalizePaperContextEntries([
       ...(autoLoadedPaperContext ? [autoLoadedPaperContext] : []),
       ...selectedPapers,
@@ -1879,36 +1393,9 @@ export function setupHandlers(
   const runWithChatScrollGuard = (fn: () => void) => {
     withScrollGuard(chatBox, conversationKey, fn);
   };
-  const EDIT_STALE_STATUS_TEXT = t(
-    "Edit target changed. Please edit latest prompt again.",
-  );
-  const getLatestEditablePair = async () => {
-    if (!item) return null;
-    await ensureConversationLoaded(item);
-    const key = getConversationKey(item);
-    const history = chatHistory.get(key) || [];
-    const pair = findLatestRetryPair(history);
-    if (!pair) return null;
-    return { conversationKey: key, pair };
-  };
 
   const resolveAutoLoadedPaperContext = (): PaperContextRef | null => {
     if (!item) return null;
-    const noteSession = resolveCurrentNoteSession();
-    if (noteSession?.noteKind === "standalone") return null;
-    if (noteSession?.noteKind === "item") {
-      const parentItem = resolveCurrentNoteParentItem();
-      if (!parentItem) return null;
-      const activeReaderAttachment = getActiveContextAttachmentFromTabs();
-      if (activeReaderAttachment?.parentID === parentItem.id) {
-        return (
-          resolvePaperContextRefFromAttachment(activeReaderAttachment) ||
-          resolvePaperContextRefFromItem(parentItem)
-        );
-      }
-      return resolvePaperContextRefFromItem(parentItem);
-    }
-    if (isGlobalMode()) return null;
     const contextSource = resolveContextSourceItem(item);
     return (
       resolvePaperContextRefFromAttachment(contextSource.contextItem) ||
@@ -1916,32 +1403,6 @@ export function setupHandlers(
     );
   };
 
-  let paperChipMenu: HTMLDivElement | null = null;
-  let paperChipMenuAnchor: HTMLDivElement | null = null;
-  let paperChipMenuSticky = false;
-  let paperChipMenuTarget: PaperContextRef | null = null;
-  let paperChipMenuHideTimer: number | null = null;
-  const clearPaperChipMenuHideTimer = () => {
-    if (paperChipMenuHideTimer === null) return;
-    const win = body.ownerDocument?.defaultView;
-    if (win) {
-      win.clearTimeout(paperChipMenuHideTimer);
-    } else {
-      clearTimeout(
-        paperChipMenuHideTimer as unknown as ReturnType<typeof setTimeout>,
-      );
-    }
-    paperChipMenuHideTimer = null;
-  };
-  const closePaperChipMenu = () => {
-    clearPaperChipMenuHideTimer();
-    if (paperChipMenu) {
-      paperChipMenu.style.display = "none";
-    }
-    paperChipMenuAnchor = null;
-    paperChipMenuTarget = null;
-    paperChipMenuSticky = false;
-  };
   const buildPaperChipAttachmentText = (
     paperContext: PaperContextRef,
   ): string => {
@@ -2030,155 +1491,6 @@ export function setupHandlers(
     }
     card.appendChild(rowMain);
     return card;
-  };
-  const ensurePaperChipMenu = (): HTMLDivElement | null => {
-    if (paperChipMenu?.isConnected) return paperChipMenu;
-    const ownerDoc = body.ownerDocument;
-    if (!ownerDoc) return null;
-    const menu = createElement(
-      ownerDoc,
-      "div",
-      "llm-model-menu llm-paper-chip-menu",
-    );
-    menu.style.display = "none";
-    menu.addEventListener("mouseenter", () => {
-      clearPaperChipMenuHideTimer();
-    });
-    menu.addEventListener("mouseleave", () => {
-      if (!paperChipMenuSticky) {
-        const win = body.ownerDocument?.defaultView;
-        if (!win) {
-          closePaperChipMenu();
-          return;
-        }
-        clearPaperChipMenuHideTimer();
-        paperChipMenuHideTimer = win.setTimeout(() => {
-          closePaperChipMenu();
-        }, 100);
-      }
-    });
-    menu.addEventListener("click", (e: Event) => {
-      const target = e.target as Element | null;
-      if (!target) return;
-      const card = target.closest(
-        ".llm-paper-chip-menu-row",
-      ) as HTMLButtonElement | null;
-      if (!card || !paperChipMenuTarget) return;
-      e.preventDefault();
-      e.stopPropagation();
-      void focusPaperContextInActiveTab(paperChipMenuTarget)
-        .then((focused) => {
-          if (!focused && status) {
-            setStatus(status, t("Could not focus this paper"), "error");
-          }
-        })
-        .catch((err) => {
-          ztoolkit.log("LLM: Failed to focus paper context from menu", err);
-          if (status) {
-            setStatus(status, t("Could not focus this paper"), "error");
-          }
-        });
-    });
-    body.appendChild(menu);
-    paperChipMenu = menu;
-    return menu;
-  };
-  const positionPaperChipMenuAboveAnchor = (
-    menu: HTMLDivElement,
-    anchor: HTMLElement,
-  ) => {
-    const win = body.ownerDocument?.defaultView;
-    if (!win) return;
-
-    const viewportMargin = 8;
-    const gap = 6;
-    const panelRect = body.getBoundingClientRect();
-    const minLeftBound = Math.max(
-      viewportMargin,
-      Math.round(panelRect.left) + 2,
-    );
-    const minTopBound = Math.max(viewportMargin, Math.round(panelRect.top) + 2);
-    const maxRightBound = Math.round(panelRect.right) - 2;
-    const maxBottomBound = Math.round(panelRect.bottom) - 2;
-    const anchorRect = anchor.getBoundingClientRect();
-    const availableWidth = Math.max(
-      160,
-      Math.floor(panelRect.width) - viewportMargin * 2 - 4,
-    );
-
-    menu.style.position = "fixed";
-    menu.style.display = "grid";
-    menu.style.visibility = "hidden";
-    menu.style.boxSizing = "border-box";
-    menu.style.maxWidth = `${availableWidth}px`;
-    menu.style.maxHeight = `${Math.max(120, Math.floor(panelRect.height) - viewportMargin * 2)}px`;
-    menu.style.overflowY = "auto";
-    menu.style.overflowX = "hidden";
-
-    const menuRect = menu.getBoundingClientRect();
-    const maxLeft = Math.max(
-      minLeftBound,
-      Math.min(
-        win.innerWidth - menuRect.width - viewportMargin,
-        maxRightBound - menuRect.width,
-      ),
-    );
-    const maxTop = Math.max(
-      minTopBound,
-      Math.min(
-        win.innerHeight - menuRect.height - viewportMargin,
-        maxBottomBound - menuRect.height,
-      ),
-    );
-    const preferredLeft =
-      anchorRect.left + menuRect.width <= maxRightBound
-        ? anchorRect.left
-        : anchorRect.right - menuRect.width;
-    const spaceAbove = anchorRect.top - minTopBound;
-    const spaceBelow = maxBottomBound - anchorRect.bottom;
-    const preferredTop =
-      spaceAbove >= menuRect.height || spaceAbove >= spaceBelow
-        ? anchorRect.top - menuRect.height - gap
-        : anchorRect.bottom + gap;
-    const left = Math.min(Math.max(minLeftBound, preferredLeft), maxLeft);
-    const top = Math.min(Math.max(minTopBound, preferredTop), maxTop);
-    menu.style.left = `${Math.round(left)}px`;
-    menu.style.top = `${Math.round(top)}px`;
-    menu.style.visibility = "visible";
-  };
-  const openPaperChipMenu = (
-    chip: HTMLDivElement,
-    paperContext: PaperContextRef,
-    options?: { sticky?: boolean },
-  ) => {
-    const menu = ensurePaperChipMenu();
-    const ownerDoc = body.ownerDocument;
-    if (!menu || !ownerDoc) return;
-    clearPaperChipMenuHideTimer();
-    paperChipMenuAnchor = chip;
-    paperChipMenuSticky = options?.sticky === true;
-    paperChipMenuTarget = paperContext;
-    menu.innerHTML = "";
-    menu.appendChild(
-      buildPaperChipMenuCard(ownerDoc, paperContext, {
-        contentSourceMode:
-          (chip.dataset.contentSource as PaperContentSourceMode) || "text",
-      }),
-    );
-    positionPaperChipMenuAboveAnchor(menu, chip);
-    menu.style.display = "grid";
-  };
-  const schedulePaperChipMenuClose = () => {
-    if (paperChipMenuSticky) return;
-    const win = body.ownerDocument?.defaultView;
-    if (!win) {
-      closePaperChipMenu();
-      return;
-    }
-    clearPaperChipMenuHideTimer();
-    paperChipMenuHideTimer = win.setTimeout(() => {
-      closePaperChipMenu();
-    }, 100);
   };
   const resolvePaperContextFromChipElement = (
     chip: HTMLElement,
@@ -2430,67 +1742,17 @@ export function setupHandlers(
     list.appendChild(chip);
   };
 
-  const appendCollectionChip = (
-    ownerDoc: Document,
-    list: HTMLDivElement,
-    ref: CollectionContextRef,
-    removableIndex: number,
-  ) => {
-    const chip = createElement(
-      ownerDoc,
-      "div",
-      "llm-selected-context llm-collection-context-chip",
-    );
-    chip.dataset.collectionId = `${ref.collectionId}`;
-    chip.dataset.collectionIndex = `${removableIndex}`;
-    chip.classList.add("collapsed");
-
-    const chipHeader = createElement(
-      ownerDoc,
-      "div",
-      "llm-image-preview-header llm-selected-context-header llm-collection-chip-header",
-    );
-    const chipLabel = createElement(
-      ownerDoc,
-      "span",
-      "llm-collection-chip-label",
-      {
-        textContent: `\u{1F5C2}\uFE0F ${ref.name}`,
-        title: `Collection: ${ref.name}`,
-      },
-    );
-    const removeBtn = createElement(
-      ownerDoc,
-      "button",
-      "llm-remove-img-btn llm-collection-clear",
-      {
-        type: "button",
-        textContent: "\u00D7",
-        title: `Remove ${ref.name}`,
-      },
-    ) as HTMLButtonElement;
-    removeBtn.dataset.collectionIndex = `${removableIndex}`;
-    removeBtn.setAttribute("aria-label", `Remove ${ref.name}`);
-    chipHeader.append(chipLabel, removeBtn);
-    chip.appendChild(chipHeader);
-    list.appendChild(chip);
-  };
-
   const updatePaperPreview = () => {
     if (!item || !paperPreview || !paperPreviewList) return;
-    closePaperChipMenu();
     const itemId = item.id;
     const selectedPapers = normalizePaperContextEntries(
       selectedPaperContextCache.get(itemId) || [],
     );
     const selectedOtherRefs = selectedOtherRefContextCache.get(itemId) || [];
-    const selectedCollections =
-      selectedCollectionContextCache.get(itemId) || [];
     const autoLoadedPaperContext = resolveAutoLoadedPaperContext();
     const hasAnyContext =
       selectedPapers.length > 0 ||
       selectedOtherRefs.length > 0 ||
-      selectedCollections.length > 0 ||
       !!autoLoadedPaperContext;
     if (!hasAnyContext) {
       paperPreview.style.display = "none";
@@ -2540,9 +1802,6 @@ export function setupHandlers(
     });
     selectedOtherRefs.forEach((ref, index) => {
       appendOtherRefChip(ownerDoc, paperPreviewList, ref, index);
-    });
-    selectedCollections.forEach((ref, index) => {
-      appendCollectionChip(ownerDoc, paperPreviewList, ref, index);
     });
   };
 
@@ -2680,17 +1939,16 @@ export function setupHandlers(
       !previewExpanded ||
       !previewSelected ||
       !previewSelectedImg ||
-      !previewMeta ||
-      !screenshotBtn
+      !previewMeta
     )
       return;
     const ownerDoc = body.ownerDocument;
     if (!ownerDoc) return;
     const { currentModel } = getSelectedModelInfo();
-    const screenshotUnsupported = isScreenshotUnsupportedModel(currentModel);
-    const screenshotDisabledHint = getScreenshotDisabledHint(currentModel);
+    const imageContextUnsupported =
+      isImageContextUnsupportedModel(currentModel);
     let selectedImages = selectedImageCache.get(item.id) || [];
-    if (screenshotUnsupported && selectedImages.length) {
+    if (imageContextUnsupported && selectedImages.length) {
       clearSelectedImageState(item.id);
       selectedImages = [];
     }
@@ -2740,12 +1998,12 @@ export function setupHandlers(
           "llm-preview-thumb",
           {
             type: "button",
-            title: `Screenshot ${index + 1}`,
+            title: `Image ${index + 1}`,
           },
         ) as HTMLButtonElement;
         thumbBtn.classList.toggle("active", index === activeIndex);
         const thumb = createElement(ownerDoc, "img", "llm-preview-img", {
-          alt: "Selected screenshot",
+          alt: "Selected image",
         }) as HTMLImageElement;
         thumb.src = imageUrl;
         thumbBtn.appendChild(thumb);
@@ -2767,7 +2025,7 @@ export function setupHandlers(
           {
             type: "button",
             textContent: "×",
-            title: `Remove screenshot ${index + 1}`,
+            title: `Remove image ${index + 1}`,
           },
         );
         removeOneBtn.addEventListener("click", (e: Event) => {
@@ -2797,25 +2055,14 @@ export function setupHandlers(
           }
           updateImagePreviewPreservingScroll();
           if (status) {
-            setStatus(
-              status,
-              `Screenshot removed (${nextImages.length})`,
-              "ready",
-            );
+            setStatus(status, `Image removed (${nextImages.length})`, "ready");
           }
         });
         thumbItem.append(thumbBtn, removeOneBtn);
         previewStrip.appendChild(thumbItem);
       }
       previewSelectedImg.src = selectedImages[activeIndex];
-      previewSelectedImg.alt = `Selected screenshot ${activeIndex + 1}`;
-      screenshotBtn.disabled =
-        screenshotUnsupported || imageCount >= MAX_SELECTED_IMAGES;
-      screenshotBtn.title = screenshotUnsupported
-        ? screenshotDisabledHint
-        : imageCount >= MAX_SELECTED_IMAGES
-          ? `Max ${MAX_SELECTED_IMAGES} screenshots`
-          : `Add screenshot (${imageCount})`;
+      previewSelectedImg.alt = `Selected image ${activeIndex + 1}`;
     } else {
       imagePreview.style.display = "none";
       imagePreview.classList.remove("expanded", "collapsed");
@@ -2824,16 +2071,12 @@ export function setupHandlers(
       previewStrip.innerHTML = "";
       previewSelected.style.display = "none";
       previewSelectedImg.removeAttribute("src");
-      previewSelectedImg.alt = "Selected screenshot preview";
+      previewSelectedImg.alt = "Selected image preview";
       previewMeta.textContent = formatFigureCountLabel(0);
       previewMeta.classList.remove("expanded");
       previewMeta.setAttribute("aria-expanded", "false");
       previewMeta.title = t("Expand figures panel");
       clearSelectedImageState(item.id);
-      screenshotBtn.disabled = screenshotUnsupported;
-      screenshotBtn.title = screenshotUnsupported
-        ? screenshotDisabledHint
-        : "Select figure screenshot";
     }
     applyResponsiveActionButtonsLayout();
   };
@@ -2923,9 +2166,9 @@ export function setupHandlers(
     previewRanges: HistorySearchRange[];
   };
 
-  let latestConversationHistory: ConversationHistoryEntry[] = [];
+  let latestPaperHistoryEntries: ConversationHistoryEntry[] = [];
 
-  // Day-group helpers for history menu (matching standalone sidebar style)
+  // Day-group helpers for history menu
   const getDayGroupLabel = (ts: number): string => {
     const now = new Date();
     const todayStart = new Date(
@@ -2961,14 +2204,13 @@ export function setupHandlers(
   };
   let historySearchQuery = "";
   let historySearchExpanded = false;
-  let historySearchLoading = false;
   let historySearchLoadSeq = 0;
   const historySearchDocumentCache = new Map<number, HistorySearchDocument>();
   const historySearchDocumentTasks = new Map<
     number,
     Promise<HistorySearchDocument>
   >();
-  let globalHistoryLoadSeq = 0;
+  let paperHistoryLoadSeq = 0;
   let pendingHistoryDeletion: PendingHistoryDeletion | null = null;
   const pendingHistoryDeletionKeys = new Set<number>();
   const MESSAGE_TURN_UNDO_WINDOW_MS = 8000;
@@ -3029,9 +2271,6 @@ export function setupHandlers(
       : undefined,
     selectedTextPaperContexts: Array.isArray(message.selectedTextPaperContexts)
       ? [...message.selectedTextPaperContexts]
-      : undefined,
-    selectedTextNoteContexts: Array.isArray(message.selectedTextNoteContexts)
-      ? [...message.selectedTextNoteContexts]
       : undefined,
     screenshotImages: Array.isArray(message.screenshotImages)
       ? [...message.screenshotImages]
@@ -3107,14 +2346,7 @@ export function setupHandlers(
 
   const isHistoryEntryActive = (entry: ConversationHistoryEntry): boolean => {
     if (!item) return false;
-    const activeConversationKey = getConversationKey(item);
-    if (entry.kind === "paper" && !isGlobalMode()) {
-      return !isGlobalMode() && activeConversationKey === entry.conversationKey;
-    }
-    if (entry.kind === "global" && isGlobalMode()) {
-      return activeConversationKey === entry.conversationKey;
-    }
-    return false;
+    return getConversationKey(item) === entry.conversationKey;
   };
 
   const normalizeHistorySearchQuery = (value: string): string =>
@@ -3425,14 +2657,14 @@ export function setupHandlers(
     return results;
   };
 
-  const renderGlobalHistoryMenu = () => {
+  const renderPaperHistoryMenu = () => {
     if (!historyMenu) return;
     historyMenu.innerHTML = "";
     const searchQuery = historySearchQuery;
     const normalizedSearchQuery = normalizeHistorySearchQuery(searchQuery);
     const searchTokens = tokenizeHistorySearchQuery(normalizedSearchQuery);
     const searchActive = searchTokens.length > 0;
-    const allEntries = latestConversationHistory.filter(
+    const allEntries = latestPaperHistoryEntries.filter(
       (entry) => !entry.isPendingDelete,
     );
     if (!allEntries.length) {
@@ -3537,7 +2769,7 @@ export function setupHandlers(
           (a, b) => b.lastActivityAt - a.lastActivityAt,
         );
 
-    // Group by day (matching standalone sidebar style)
+    // Group by day
     const dayGroups = groupEntriesByDay(sortedEntries);
 
     const itemsList = createElement(
@@ -3565,8 +2797,6 @@ export function setupHandlers(
         item.setAttribute("role", "button");
         item.setAttribute("tabindex", "0");
         item.dataset.conversationKey = `${entry.conversationKey}`;
-        item.dataset.historyKind = entry.kind;
-        item.dataset.historySection = entry.section;
         if (isHistoryEntryActive(entry)) {
           item.classList.add("active");
         }
@@ -3637,9 +2867,9 @@ export function setupHandlers(
     historyMenu.appendChild(itemsList);
   };
 
-  const renderGlobalHistoryMenuIfOpen = () => {
+  const renderPaperHistoryMenuIfOpen = () => {
     if (!historyMenu || historyMenu.style.display === "none") return;
-    renderGlobalHistoryMenu();
+    renderPaperHistoryMenu();
     if (historyToggleBtn) {
       positionMenuBelowButton(body, historyMenu, historyToggleBtn);
     }
@@ -3664,7 +2894,7 @@ export function setupHandlers(
 
   const expandHistorySearch = () => {
     historySearchExpanded = true;
-    renderGlobalHistoryMenu();
+    renderPaperHistoryMenu();
     if (
       historyToggleBtn &&
       historyMenu &&
@@ -3680,8 +2910,7 @@ export function setupHandlers(
     historySearchLoadSeq += 1;
     historySearchExpanded = false;
     historySearchQuery = "";
-    historySearchLoading = false;
-    renderGlobalHistoryMenu();
+    renderPaperHistoryMenu();
     if (
       historyToggleBtn &&
       historyMenu &&
@@ -3695,12 +2924,11 @@ export function setupHandlers(
     const requestId = ++historySearchLoadSeq;
     const normalizedSearchQuery =
       normalizeHistorySearchQuery(historySearchQuery);
-    const entries = latestConversationHistory.filter(
+    const entries = latestPaperHistoryEntries.filter(
       (entry) => !entry.isPendingDelete,
     );
     if (!normalizedSearchQuery) {
-      historySearchLoading = false;
-      renderGlobalHistoryMenu();
+      renderPaperHistoryMenu();
       if (
         historyToggleBtn &&
         historyMenu &&
@@ -3715,8 +2943,7 @@ export function setupHandlers(
       (entry) => !historySearchDocumentCache.has(entry.conversationKey),
     );
     if (!missingEntries.length) {
-      historySearchLoading = false;
-      renderGlobalHistoryMenu();
+      renderPaperHistoryMenu();
       if (
         historyToggleBtn &&
         historyMenu &&
@@ -3727,8 +2954,7 @@ export function setupHandlers(
       restoreHistorySearchInputFocus();
       return;
     }
-    historySearchLoading = true;
-    renderGlobalHistoryMenu();
+    renderPaperHistoryMenu();
     if (
       historyToggleBtn &&
       historyMenu &&
@@ -3739,8 +2965,7 @@ export function setupHandlers(
     restoreHistorySearchInputFocus();
     await ensureHistorySearchDocuments(missingEntries);
     if (requestId !== historySearchLoadSeq) return;
-    historySearchLoading = false;
-    renderGlobalHistoryMenu();
+    renderPaperHistoryMenu();
     if (
       historyToggleBtn &&
       historyMenu &&
@@ -3752,48 +2977,19 @@ export function setupHandlers(
   };
 
   const invalidateLocalConversationHistory = () => {
-    globalHistoryLoadSeq += 1;
+    paperHistoryLoadSeq += 1;
     historySearchLoadSeq += 1;
-    historySearchLoading = false;
-    latestConversationHistory = [];
+    latestPaperHistoryEntries = [];
   };
 
-  const refreshGlobalHistoryHeader = async (
+  const refreshPaperHistoryHeader = async (
     mode: ConversationHistoryRefreshMode = "mutation",
   ) => {
-    const shouldReloadMenuEntries = shouldReloadConversationHistoryMenu(
-      mode,
-      isHistoryMenuOpen(),
-    );
-    const shouldNotifyHistoryConsumers =
-      shouldNotifyConversationHistoryConsumers(mode);
+    const shouldReloadMenuEntries = mode === "menu-open" || isHistoryMenuOpen();
+    const shouldNotifyHistoryConsumers = mode !== "selection";
     if (!historyBar || !titleStatic || !item) {
       if (titleStatic) titleStatic.style.display = "";
       if (historyBar) historyBar.style.display = "none";
-      closeHistoryNewMenu();
-      closeHistoryMenu();
-      hideHistoryUndoToast();
-      invalidateLocalConversationHistory();
-      if (shouldNotifyHistoryConsumers) {
-        notifyConversationHistoryChanged();
-      }
-      return;
-    }
-    if (isNoteSession()) {
-      titleStatic.style.display = "none";
-      historyBar.style.display = "inline-flex";
-      if (historyNewBtn) {
-        historyNewBtn.style.display = "none";
-        historyNewBtn.setAttribute("aria-expanded", "false");
-      }
-      if (historyToggleBtn) {
-        historyToggleBtn.style.display = "none";
-        historyToggleBtn.setAttribute("aria-expanded", "false");
-      }
-      if (historyMenu) {
-        historyMenu.style.display = "none";
-        historyMenu.textContent = "";
-      }
       closeHistoryNewMenu();
       closeHistoryMenu();
       hideHistoryUndoToast();
@@ -3824,9 +3020,8 @@ export function setupHandlers(
     }
 
     const libraryID = getCurrentLibraryID();
-    const requestId = ++globalHistoryLoadSeq;
+    const requestId = ++paperHistoryLoadSeq;
     const paperEntries: ConversationHistoryEntry[] = [];
-    const globalEntries: ConversationHistoryEntry[] = [];
     const paperItem = resolveCurrentPaperBaseItem();
 
     if (libraryID && paperItem) {
@@ -3837,15 +3032,14 @@ export function setupHandlers(
         > = [];
         try {
           summaries = await loadConversationHistoryScope({
-            mode: "paper",
             libraryID,
             paperItemID,
-            limit: GLOBAL_HISTORY_LIMIT,
+            limit: PAPER_HISTORY_LIMIT,
           });
         } catch (err) {
           ztoolkit.log("LLM: Failed to load paper history entries", err);
         }
-        if (requestId !== globalHistoryLoadSeq) return;
+        if (requestId !== paperHistoryLoadSeq) return;
         const seenPaperKeys = new Set<number>();
         for (const summary of summaries) {
           const conversationKey = Number(summary.conversationKey);
@@ -3870,14 +3064,11 @@ export function setupHandlers(
           );
           const isDraft = Boolean(summary.isDraft);
           paperEntries.push({
-            kind: "paper",
-            section: "paper",
-            sectionTitle: "Paper Chat",
             conversationKey: normalizedKey,
             title: summary.title,
             timestampText: isDraft
               ? "Draft"
-              : formatGlobalHistoryTimestamp(lastActivity) || "Paper chat",
+              : formatPaperHistoryTimestamp(lastActivity) || "Paper chat",
             deletable: true,
             isDraft,
             isPendingDelete: false,
@@ -3896,130 +3087,11 @@ export function setupHandlers(
         });
       }
     }
-
-    if (libraryID) {
-      let activeGlobalKey = 0;
-      if (isGlobalMode() && item && Number.isFinite(item.id) && item.id > 0) {
-        activeGlobalKey = Math.floor(item.id);
-      } else {
-        const remembered = Number(
-          activeGlobalConversationByLibrary.get(libraryID),
-        );
-        if (Number.isFinite(remembered) && remembered > 0) {
-          activeGlobalKey = Math.floor(remembered);
-        }
-      }
-      if (activeGlobalKey > 0) {
-        try {
-          await ensureGlobalConversationExists(libraryID, activeGlobalKey);
-        } catch (err) {
-          ztoolkit.log("LLM: Failed to ensure active global history row", err);
-        }
-      }
-      if (requestId !== globalHistoryLoadSeq) return;
-
-      let historyEntries: Awaited<
-        ReturnType<typeof loadConversationHistoryScope>
-      > = [];
-      try {
-        historyEntries = await loadConversationHistoryScope({
-          mode: "open",
-          libraryID,
-          limit: GLOBAL_HISTORY_LIMIT,
-        });
-      } catch (err) {
-        ztoolkit.log("LLM: Failed to load global history entries", err);
-      }
-      if (requestId !== globalHistoryLoadSeq) return;
-
-      const seenGlobalKeys = new Set<number>();
-      for (const entry of historyEntries) {
-        const conversationKey = Number(entry.conversationKey);
-        if (!Number.isFinite(conversationKey) || conversationKey <= 0) continue;
-        const normalizedKey = Math.floor(conversationKey);
-        if (pendingHistoryDeletionKeys.has(normalizedKey)) continue;
-        if (seenGlobalKeys.has(normalizedKey)) continue;
-        seenGlobalKeys.add(normalizedKey);
-        const lastActivity = Number(
-          entry.lastActivityAt || entry.createdAt || 0,
-        );
-        globalEntries.push({
-          kind: "global",
-          section: "open",
-          sectionTitle: "Library Chat",
-          conversationKey: normalizedKey,
-          title: entry.title,
-          timestampText: entry.isDraft
-            ? "Draft"
-            : formatGlobalHistoryTimestamp(lastActivity) || "Standalone chat",
-          deletable: true,
-          isDraft: Boolean(entry.isDraft),
-          isPendingDelete: false,
-          lastActivityAt: Number.isFinite(lastActivity)
-            ? Math.floor(lastActivity)
-            : 0,
-        });
-      }
-
-      const dedupedGlobalEntries: ConversationHistoryEntry[] = [];
-      const seenGlobalEntryKeys = new Set<number>();
-      for (const entry of globalEntries) {
-        if (seenGlobalEntryKeys.has(entry.conversationKey)) continue;
-        seenGlobalEntryKeys.add(entry.conversationKey);
-        dedupedGlobalEntries.push(entry);
-      }
-      dedupedGlobalEntries.sort((a, b) => {
-        if (b.lastActivityAt !== a.lastActivityAt) {
-          return b.lastActivityAt - a.lastActivityAt;
-        }
-        if (a.isDraft !== b.isDraft) {
-          return a.isDraft ? 1 : -1;
-        }
-        return b.conversationKey - a.conversationKey;
-      });
-      globalEntries.splice(0, globalEntries.length, ...dedupedGlobalEntries);
-    }
-
-    // In the sidepanel, only show paper chat history — library chat is standalone-only
-    const isStandalonePanel =
-      (body as HTMLElement).dataset?.standalone === "true";
-    const allEntries = isStandalonePanel
-      ? [...paperEntries, ...globalEntries]
-      : paperEntries;
-    const visibleEntries = allEntries.filter(
+    const visibleEntries = paperEntries.filter(
       (entry) => !pendingHistoryDeletionKeys.has(entry.conversationKey),
     );
-    const visibleSections = [
-      {
-        section: "paper" as const,
-        latestActivity: paperEntries.reduce(
-          (max, entry) => Math.max(max, entry.lastActivityAt || 0),
-          0,
-        ),
-      },
-      {
-        section: "open" as const,
-        latestActivity: globalEntries.reduce(
-          (max, entry) => Math.max(max, entry.lastActivityAt || 0),
-          0,
-        ),
-      },
-    ]
-      .filter((entry) =>
-        visibleEntries.some((row) => row.section === entry.section),
-      )
-      .sort((a, b) => {
-        if (b.latestActivity !== a.latestActivity) {
-          return b.latestActivity - a.latestActivity;
-        }
-        if (a.section === b.section) return 0;
-        return a.section === "paper" ? -1 : 1;
-      });
-    latestConversationHistory = visibleSections.flatMap((section) =>
-      visibleEntries.filter((entry) => entry.section === section.section),
-    );
-
-    renderGlobalHistoryMenu();
+    latestPaperHistoryEntries = visibleEntries;
+    renderPaperHistoryMenu();
     if (shouldNotifyHistoryConsumers) {
       notifyConversationHistoryChanged();
     }
@@ -4032,44 +3104,8 @@ export function setupHandlers(
     updateSelectedTextPreviewPreservingScroll();
   };
 
-  const switchGlobalConversation = async (nextConversationKey: number) => {
-    if (!item || isNoteSession()) return;
-    persistDraftInputForCurrentConversation();
-    const libraryID = getCurrentLibraryID();
-    if (!libraryID) return;
-    const normalizedConversationKey = Number.isFinite(nextConversationKey)
-      ? Math.floor(nextConversationKey)
-      : 0;
-    if (normalizedConversationKey <= 0) return;
-    const nextItem = createGlobalPortalItem(
-      libraryID,
-      normalizedConversationKey,
-    );
-    item = nextItem;
-    syncConversationIdentity();
-    activeEditSession = null;
-    inlineEditCleanup?.();
-    setInlineEditCleanup(null);
-    setInlineEditTarget(null);
-    clearForcedSkill();
-    closePaperPicker();
-    closePromptMenu();
-    closeResponseMenu();
-    closeRetryModelMenu();
-    closeExportMenu();
-    closeHistoryNewMenu();
-    closeHistoryMenu();
-    await ensureConversationLoaded(item);
-    restoreDraftInputForCurrentConversation();
-    refreshChatPreservingScroll();
-    resetComposePreviewUI();
-    updateModelButton();
-    updateReasoningButton();
-    void refreshGlobalHistoryHeader("selection");
-  };
-
   const switchPaperConversation = async (nextConversationKey?: number) => {
-    if (!item || isNoteSession()) return;
+    if (!item) return;
     persistDraftInputForCurrentConversation();
     const paperItem = resolveCurrentPaperBaseItem();
     if (!paperItem) return;
@@ -4125,16 +3161,13 @@ export function setupHandlers(
           );
     item = nextItem;
     syncConversationIdentity();
-    activeEditSession = null;
     inlineEditCleanup?.();
     setInlineEditCleanup(null);
     setInlineEditTarget(null);
-    clearForcedSkill();
     closePaperPicker();
     closePromptMenu();
     closeResponseMenu();
     closeRetryModelMenu();
-    closeExportMenu();
     closeHistoryNewMenu();
     closeHistoryMenu();
     await ensureConversationLoaded(item);
@@ -4143,18 +3176,14 @@ export function setupHandlers(
     resetComposePreviewUI();
     updateModelButton();
     updateReasoningButton();
-    void refreshGlobalHistoryHeader("selection");
+    void refreshPaperHistoryHeader("selection");
   };
 
   const switchToHistoryTarget = async (
     target: HistorySwitchTarget,
   ): Promise<void> => {
     if (!target) return;
-    if (target.kind === "paper") {
-      await switchPaperConversation(target.conversationKey);
-      return;
-    }
-    await switchGlobalConversation(target.conversationKey);
+    await switchPaperConversation(target.conversationKey);
   };
 
   const resolveFallbackAfterPaperDelete = async (
@@ -4167,7 +3196,7 @@ export function setupHandlers(
       summaries = await listPaperConversations(
         libraryID,
         paperItemID,
-        GLOBAL_HISTORY_LIMIT,
+        PAPER_HISTORY_LIMIT,
         true,
       );
     } catch (err) {
@@ -4182,7 +3211,7 @@ export function setupHandlers(
       const normalizedKey = Math.floor(candidateKey);
       if (normalizedKey === deletedConversationKey) continue;
       if (pendingHistoryDeletionKeys.has(normalizedKey)) continue;
-      return { kind: "paper", conversationKey: normalizedKey };
+      return { conversationKey: normalizedKey };
     }
     let createdSummary: Awaited<ReturnType<typeof createPaperConversation>> =
       null;
@@ -4192,10 +3221,7 @@ export function setupHandlers(
       ztoolkit.log("LLM: Failed to create fallback paper conversation", err);
     }
     if (createdSummary?.conversationKey) {
-      return {
-        kind: "paper",
-        conversationKey: Math.floor(createdSummary.conversationKey),
-      };
+      return { conversationKey: Math.floor(createdSummary.conversationKey) };
     }
     const ensured = await ensurePaperV1Conversation(libraryID, paperItemID);
     if (ensured?.conversationKey) {
@@ -4206,107 +3232,7 @@ export function setupHandlers(
       ) {
         return null;
       }
-      return {
-        kind: "paper",
-        conversationKey: normalizedKey,
-      };
-    }
-    return null;
-  };
-
-  const resolveFallbackAfterGlobalDelete = async (
-    libraryID: number,
-    deletedConversationKey: number,
-  ): Promise<HistorySwitchTarget> => {
-    let remainingHistorical: Awaited<
-      ReturnType<typeof listGlobalConversations>
-    > = [];
-    try {
-      remainingHistorical = await listGlobalConversations(
-        libraryID,
-        GLOBAL_HISTORY_LIMIT,
-        false,
-      );
-    } catch (err) {
-      ztoolkit.log(
-        "LLM: Failed to load fallback global history candidates",
-        err,
-      );
-    }
-    for (const entry of remainingHistorical) {
-      const candidateKey = Number(entry.conversationKey);
-      if (!Number.isFinite(candidateKey) || candidateKey <= 0) continue;
-      const normalizedKey = Math.floor(candidateKey);
-      if (normalizedKey === deletedConversationKey) continue;
-      if (pendingHistoryDeletionKeys.has(normalizedKey)) continue;
-      return { kind: "global", conversationKey: normalizedKey };
-    }
-    const paperItem = resolveCurrentPaperBaseItem();
-    const paperItemID = Number(paperItem?.id || 0);
-    if (paperItemID > 0) {
-      const paperTarget = await resolveFallbackAfterPaperDelete(
-        libraryID,
-        paperItemID,
-        deletedConversationKey,
-      );
-      if (paperTarget) return paperTarget;
-    }
-
-    const isEmptyDraft = async (conversationKey: number): Promise<boolean> => {
-      if (!Number.isFinite(conversationKey) || conversationKey <= 0)
-        return false;
-      const normalizedKey = Math.floor(conversationKey);
-      if (normalizedKey === deletedConversationKey) return false;
-      if (pendingHistoryDeletionKeys.has(normalizedKey)) return false;
-      try {
-        const count = await getGlobalConversationUserTurnCount(normalizedKey);
-        return count === 0;
-      } catch (err) {
-        ztoolkit.log(
-          "LLM: Failed to inspect draft candidate user turn count",
-          err,
-        );
-        return false;
-      }
-    };
-
-    let candidateDraftKey = Number(
-      activeGlobalConversationByLibrary.get(libraryID),
-    );
-    if (!(await isEmptyDraft(candidateDraftKey))) {
-      candidateDraftKey = 0;
-      try {
-        const latestEmpty = await getLatestEmptyGlobalConversation(libraryID);
-        const latestEmptyKey = Number(latestEmpty?.conversationKey || 0);
-        if (await isEmptyDraft(latestEmptyKey)) {
-          candidateDraftKey = Math.floor(latestEmptyKey);
-        }
-      } catch (err) {
-        ztoolkit.log("LLM: Failed to load latest empty draft candidate", err);
-      }
-    }
-    if (candidateDraftKey > 0) {
-      return {
-        kind: "global",
-        conversationKey: Math.floor(candidateDraftKey),
-      };
-    }
-
-    let createdDraftKey = 0;
-    try {
-      createdDraftKey = await createGlobalConversation(libraryID);
-    } catch (err) {
-      ztoolkit.log("LLM: Failed to create fallback draft conversation", err);
-    }
-    if (createdDraftKey > 0) {
-      ztoolkit.log("LLM: Fallback target created new draft", {
-        libraryID,
-        conversationKey: createdDraftKey,
-      });
-      return {
-        kind: "global",
-        conversationKey: Math.floor(createdDraftKey),
-      };
+      return { conversationKey: normalizedKey };
     }
     return null;
   };
@@ -4317,59 +3243,6 @@ export function setupHandlers(
     selectedModelCache.delete(conversationKey);
     selectedReasoningCache.delete(conversationKey);
     clearTransientComposeStateForItem(conversationKey);
-    clearConversationSummaryFromCache(conversationKey);
-  };
-
-  const finalizeGlobalConversationDeletion = async (
-    pending: PendingHistoryDeletion,
-  ): Promise<void> => {
-    const conversationKey = pending.conversationKey;
-    const rememberedKey = Number(
-      activeGlobalConversationByLibrary.get(pending.libraryID),
-    );
-    if (
-      Number.isFinite(rememberedKey) &&
-      Math.floor(rememberedKey) === conversationKey
-    ) {
-      activeGlobalConversationByLibrary.delete(pending.libraryID);
-    }
-    clearPendingDeletionCaches(conversationKey);
-    let hasError = false;
-    try {
-      await clearStoredConversation(conversationKey);
-    } catch (err) {
-      hasError = true;
-      ztoolkit.log("LLM: Failed to clear deleted history conversation", err);
-    }
-    try {
-      await clearOwnerAttachmentRefs("conversation", conversationKey);
-    } catch (err) {
-      hasError = true;
-      ztoolkit.log("LLM: Failed to clear deleted history attachment refs", err);
-    }
-    try {
-      await removeConversationAttachmentFiles(conversationKey);
-    } catch (err) {
-      hasError = true;
-      ztoolkit.log(
-        "LLM: Failed to remove deleted history attachment files",
-        err,
-      );
-    }
-    try {
-      await deleteGlobalConversation(conversationKey);
-    } catch (err) {
-      hasError = true;
-      ztoolkit.log("LLM: Failed to delete global history conversation", err);
-    }
-    scheduleAttachmentGc();
-    if (hasError && status) {
-      setStatus(
-        status,
-        t("Failed to fully delete conversation. Check logs."),
-        "error",
-      );
-    }
   };
 
   const finalizePaperConversationDeletion = async (
@@ -4411,7 +3284,7 @@ export function setupHandlers(
       ztoolkit.log("LLM: Failed to clear deleted paper conversation", err);
     }
     try {
-      await clearOwnerAttachmentRefs("conversation", conversationKey);
+      await clearConversationAttachmentRefs(conversationKey);
     } catch (err) {
       hasError = true;
       ztoolkit.log("LLM: Failed to clear deleted paper attachment refs", err);
@@ -4469,8 +3342,7 @@ export function setupHandlers(
     }
     try {
       const remainingHistory = chatHistory.get(pending.conversationKey) || [];
-      await replaceOwnerAttachmentRefs(
-        "conversation",
+      await replaceConversationAttachmentRefs(
         pending.conversationKey,
         collectAttachmentHashesFromMessages(remainingHistory),
       );
@@ -4484,7 +3356,7 @@ export function setupHandlers(
     } else if (reason === "timeout" && status) {
       setStatus(status, t("Turn deleted"), "ready");
     }
-    void refreshGlobalHistoryHeader("mutation");
+    void refreshPaperHistoryHeader("mutation");
   };
 
   const undoPendingTurnDeletion = () => {
@@ -4507,7 +3379,6 @@ export function setupHandlers(
       chatHistory.set(pending.conversationKey, history);
     }
     if (item && getConversationKey(item) === pending.conversationKey) {
-      activeEditSession = null;
       refreshChatPreservingScroll();
     }
     if (status) setStatus(status, t("Turn restored"), "ready");
@@ -4536,7 +3407,7 @@ export function setupHandlers(
       return;
     }
     if (pendingHistoryDeletion) {
-      await finalizePendingHistoryDeletion("superseded");
+      await finalizePendingHistoryDeletion();
     }
     if (pendingTurnDeletion) {
       const sameTurn =
@@ -4559,7 +3430,6 @@ export function setupHandlers(
 
     history.splice(pair.userIndex, 2);
     chatHistory.set(target.conversationKey, history);
-    activeEditSession = null;
     refreshChatPreservingScroll();
 
     const pending: PendingTurnDeletion = {
@@ -4595,67 +3465,39 @@ export function setupHandlers(
     return pending;
   };
 
-  const finalizePendingHistoryDeletion = async (
-    reason: "timeout" | "superseded",
-  ) => {
+  const finalizePendingHistoryDeletion = async () => {
     const pending = clearPendingHistoryDeletion(false);
     if (!pending) return;
-    ztoolkit.log("LLM: Finalizing pending history deletion", {
-      reason,
-      kind: pending.kind,
-      conversationKey: pending.conversationKey,
-      libraryID: pending.libraryID,
-      title: pending.title,
-    });
-    if (pending.kind === "global") {
-      await finalizeGlobalConversationDeletion(pending);
-    } else {
-      await finalizePaperConversationDeletion(pending);
-    }
+    await finalizePaperConversationDeletion(pending);
     pendingHistoryDeletionKeys.delete(pending.conversationKey);
-    await refreshGlobalHistoryHeader("mutation");
+    await refreshPaperHistoryHeader("mutation");
   };
 
   const undoPendingHistoryDeletion = async () => {
     const pending = clearPendingHistoryDeletion(true);
     if (!pending) return;
-    ztoolkit.log("LLM: Restoring pending history deletion", {
-      kind: pending.kind,
-      conversationKey: pending.conversationKey,
-      libraryID: pending.libraryID,
-      title: pending.title,
-    });
     if (pending.wasActive) {
-      await switchToHistoryTarget({
-        kind: pending.kind,
-        conversationKey: pending.conversationKey,
-      });
+      await switchToHistoryTarget({ conversationKey: pending.conversationKey });
       if (status) setStatus(status, t("Conversation restored"), "ready");
       return;
     }
-    renderGlobalHistoryMenuIfOpen();
+    renderPaperHistoryMenuIfOpen();
     if (status) setStatus(status, t("Conversation restored"), "ready");
   };
 
   const findHistoryEntryByKey = (
-    historyKind: "paper" | "global",
     conversationKey: number,
   ): ConversationHistoryEntry | null => {
     return (
-      latestConversationHistory.find(
-        (entry) =>
-          entry.kind === historyKind &&
-          entry.conversationKey === conversationKey,
+      latestPaperHistoryEntries.find(
+        (entry) => entry.conversationKey === conversationKey,
       ) || null
     );
   };
 
   const getHistoryRowMenuEntry = (): ConversationHistoryEntry | null => {
     if (!historyRowMenuTarget) return null;
-    return findHistoryEntryByKey(
-      historyRowMenuTarget.kind,
-      historyRowMenuTarget.conversationKey,
-    );
+    return findHistoryEntryByKey(historyRowMenuTarget.conversationKey);
   };
 
   const promptConversationRename = (
@@ -4699,12 +3541,8 @@ export function setupHandlers(
     const nextTitle = promptConversationRename(entry);
     if (!nextTitle) return;
     try {
-      if (entry.kind === "paper") {
-        await setPaperConversationTitle(entry.conversationKey, nextTitle);
-      } else {
-        await setGlobalConversationTitle(entry.conversationKey, nextTitle);
-      }
-      await refreshGlobalHistoryHeader("mutation");
+      await setPaperConversationTitle(entry.conversationKey, nextTitle);
+      await refreshPaperHistoryHeader("mutation");
       if (status) setStatus(status, t("Conversation renamed"), "ready");
     } catch (err) {
       ztoolkit.log("LLM: Failed to rename conversation", err);
@@ -4727,7 +3565,7 @@ export function setupHandlers(
       if (pendingHistoryDeletion.conversationKey === entry.conversationKey) {
         return;
       }
-      await finalizePendingHistoryDeletion("superseded");
+      await finalizePendingHistoryDeletion();
     }
     if (pendingTurnDeletion) {
       await finalizePendingTurnDeletion("superseded");
@@ -4736,29 +3574,18 @@ export function setupHandlers(
     const wasActive = isHistoryEntryActive(entry);
     let fallbackTarget: HistorySwitchTarget = null;
     if (wasActive) {
-      if (entry.kind === "paper") {
-        const paperItemID = Number(entry.paperItemID || 0);
-        if (!paperItemID) {
-          if (status) {
-            setStatus(
-              status,
-              t("Cannot resolve active paper session"),
-              "error",
-            );
-          }
-          return;
+      const paperItemID = Number(entry.paperItemID || 0);
+      if (!paperItemID) {
+        if (status) {
+          setStatus(status, t("Cannot resolve active paper session"), "error");
         }
-        fallbackTarget = await resolveFallbackAfterPaperDelete(
-          libraryID,
-          paperItemID,
-          entry.conversationKey,
-        );
-      } else {
-        fallbackTarget = await resolveFallbackAfterGlobalDelete(
-          libraryID,
-          entry.conversationKey,
-        );
+        return;
       }
+      fallbackTarget = await resolveFallbackAfterPaperDelete(
+        libraryID,
+        paperItemID,
+        entry.conversationKey,
+      );
       if (!fallbackTarget) {
         if (status) {
           setStatus(
@@ -4770,138 +3597,32 @@ export function setupHandlers(
         return;
       }
       await switchToHistoryTarget(fallbackTarget);
-      if (fallbackTarget.kind === "paper") {
-        activeGlobalConversationByLibrary.delete(libraryID);
-      }
     }
 
     pendingHistoryDeletionKeys.add(entry.conversationKey);
     const pending: PendingHistoryDeletion = {
-      kind: entry.kind,
       conversationKey: entry.conversationKey,
       libraryID,
       paperItemID: entry.paperItemID,
       title: entry.title,
       wasActive,
       fallbackTarget,
-      expiresAt: Date.now() + GLOBAL_HISTORY_UNDO_WINDOW_MS,
+      expiresAt: Date.now() + PAPER_HISTORY_UNDO_WINDOW_MS,
       timeoutId: null,
     };
     pending.timeoutId = getWindowTimeout(() => {
-      void finalizePendingHistoryDeletion("timeout");
-    }, GLOBAL_HISTORY_UNDO_WINDOW_MS);
+      void finalizePendingHistoryDeletion();
+    }, PAPER_HISTORY_UNDO_WINDOW_MS);
     pendingHistoryDeletion = pending;
 
-    ztoolkit.log("LLM: Queued history deletion", {
-      kind: entry.kind,
-      conversationKey: entry.conversationKey,
-      libraryID,
-      wasActive,
-      fallbackTarget,
-      expiresAt: pending.expiresAt,
-    });
     showHistoryUndoToast(entry.title);
-    renderGlobalHistoryMenuIfOpen();
+    renderPaperHistoryMenuIfOpen();
     if (status)
       setStatus(status, t("Conversation deleted. Undo available."), "ready");
   };
 
-  const createAndSwitchGlobalConversation = async () => {
-    if (!item || isNoteSession()) return;
-    // Allow creating new conversations even if another is generating.
-    // The user wants to start a fresh conversation while the other runs.
-    closeHistoryNewMenu();
-    const libraryID = getCurrentLibraryID();
-    if (!libraryID) {
-      if (status) {
-        setStatus(
-          status,
-          t("No active library for global conversation"),
-          "error",
-        );
-      }
-      return;
-    }
-
-    let targetConversationKey = 0;
-    let reuseReason: "active-draft" | "latest-draft" | null = null;
-
-    const currentCandidate = isGlobalMode()
-      ? getConversationKey(item)
-      : Number(activeGlobalConversationByLibrary.get(libraryID) || 0);
-    const normalizedCurrentCandidate = Number.isFinite(currentCandidate)
-      ? Math.floor(currentCandidate)
-      : 0;
-    if (normalizedCurrentCandidate > 0) {
-      try {
-        const turnCount = await getGlobalConversationUserTurnCount(
-          normalizedCurrentCandidate,
-        );
-        if (turnCount === 0) {
-          targetConversationKey = normalizedCurrentCandidate;
-          reuseReason = "active-draft";
-        }
-      } catch (err) {
-        ztoolkit.log(
-          "LLM: Failed to inspect active candidate for draft reuse",
-          err,
-        );
-      }
-    }
-
-    if (targetConversationKey <= 0) {
-      try {
-        const latestEmpty = await getLatestEmptyGlobalConversation(libraryID);
-        const latestEmptyKey = Number(latestEmpty?.conversationKey || 0);
-        if (Number.isFinite(latestEmptyKey) && latestEmptyKey > 0) {
-          targetConversationKey = Math.floor(latestEmptyKey);
-          reuseReason = "latest-draft";
-        }
-      } catch (err) {
-        ztoolkit.log(
-          "LLM: Failed to load latest empty global conversation",
-          err,
-        );
-      }
-    }
-
-    if (targetConversationKey <= 0) {
-      try {
-        targetConversationKey = await createGlobalConversation(libraryID);
-      } catch (err) {
-        ztoolkit.log("LLM: Failed to create new global conversation", err);
-      }
-      reuseReason = null;
-    }
-    if (!targetConversationKey) {
-      if (status)
-        setStatus(status, t("Failed to create conversation"), "error");
-      return;
-    }
-
-    ztoolkit.log("LLM: + conversation action", {
-      libraryID,
-      targetConversationKey,
-      action: reuseReason ? "reuse" : "create",
-      reason: reuseReason || "new",
-    });
-    activeGlobalConversationByLibrary.set(libraryID, targetConversationKey);
-    await switchGlobalConversation(targetConversationKey);
-    await refreshGlobalHistoryHeader("mutation");
-    if (status) {
-      setStatus(
-        status,
-        reuseReason
-          ? t("Reused existing new conversation")
-          : t("Started new conversation"),
-        "ready",
-      );
-    }
-    inputBox.focus({ preventScroll: true });
-  };
-
   const createAndSwitchPaperConversation = async () => {
-    if (!item || isNoteSession()) return;
+    if (!item) return;
     // Allow creating new paper conversations even if another is generating.
     closeHistoryNewMenu();
     const paperItem = resolveCurrentPaperBaseItem();
@@ -4980,16 +3701,8 @@ export function setupHandlers(
       reuseReason = null;
     }
 
-    ztoolkit.log("LLM: + paper conversation action", {
-      libraryID,
-      paperItemID,
-      targetConversationKey,
-      action: reuseReason ? "reuse" : "create",
-      reason: reuseReason || "new",
-    });
-
     await switchPaperConversation(targetConversationKey);
-    await refreshGlobalHistoryHeader("mutation");
+    await refreshPaperHistoryHeader("mutation");
     if (status) {
       setStatus(
         status,
@@ -5008,10 +3721,7 @@ export function setupHandlers(
     clientY: number,
   ) => {
     if (!historyRowMenu || !historyRowRenameBtn) return;
-    historyRowMenuTarget = {
-      kind: entry.kind,
-      conversationKey: entry.conversationKey,
-    };
+    historyRowMenuTarget = { conversationKey: entry.conversationKey };
     const renameDisabled = entry.isPendingDelete;
     historyRowRenameBtn.disabled = renameDisabled;
     historyRowRenameBtn.setAttribute(
@@ -5026,29 +3736,23 @@ export function setupHandlers(
     historyNewBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!item || isNoteSession()) return;
+      if (!item) return;
       // Allow creating new conversations even if another is generating.
       closeModelMenu();
       closeReasoningMenu();
       closeRetryModelMenu();
-      closeSlashMenu();
+      closeAddMenu();
       closeResponseMenu();
       closePromptMenu();
-      closeExportMenu();
       closeHistoryMenu();
 
-      // [webchat] In webchat mode, "+" creates a new ChatGPT conversation
-      const { selectedEntry: _debugEntry } = getSelectedModelInfo();
-      ztoolkit.log(
-        `[webchat] + clicked: authMode=${_debugEntry?.authMode}, entryId=${_debugEntry?.entryId}, isWebChat=${_debugEntry?.authMode === "webchat"}`,
-      );
       if (isWebChatMode()) {
         // Clear local chat panel and mark the relay as needing a new chat.
         // The next send carries an explicit force_new_chat intent to the relay,
         // and we also trigger a remote new-chat command immediately.
         markNextWebChatSendAsNewChat();
         primeFreshWebChatPaperChipState();
-        // Clear cached images so stale screenshots don't auto-attach to ChatGPT
+        // Clear cached images so stale image context doesn't auto-attach to ChatGPT
         if (item) {
           selectedImageCache.delete(item.id);
           updateImagePreviewPreservingScroll();
@@ -5072,32 +3776,6 @@ export function setupHandlers(
         return;
       }
 
-      // Create new session directly in whichever mode is currently active
-      if (isGlobalMode()) {
-        void createAndSwitchGlobalConversation();
-      } else {
-        void createAndSwitchPaperConversation();
-      }
-    });
-  }
-
-  if (historyNewOpenBtn) {
-    historyNewOpenBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (isNoteSession()) return;
-      closeHistoryNewMenu();
-      void createAndSwitchGlobalConversation();
-    });
-  }
-
-  if (historyNewPaperBtn) {
-    historyNewPaperBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (isNoteSession()) return;
-      if (historyNewPaperBtn.disabled) return;
-      closeHistoryNewMenu();
       void createAndSwitchPaperConversation();
     });
   }
@@ -5114,86 +3792,19 @@ export function setupHandlers(
     });
   }
 
-  // --- Mode chip + lock button handlers ---
-  if (modeChipBtn) {
-    modeChipBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      // Mode chip is non-clickable — sidepanels are paper-only,
-      // standalone is open-chat-only. No mode switching anywhere.
-    });
-  }
-
-  // Sync lock state to ALL other registered panels so they switch
-  // to/from global chat immediately (not just when the user visits them).
-  const syncLockStateToOtherPanels = () => {
-    for (const [otherBody] of activeContextPanels) {
-      if (otherBody === body) continue;
-      if (!(otherBody as Element).isConnected) {
-        activeContextPanels.delete(otherBody);
-        activeContextPanelStateSync.delete(otherBody);
-        continue;
-      }
-      // Use the raw Zotero item (stored on every onRender) to re-resolve
-      // the panel state.  This correctly handles lock→unlock transitions
-      // because resolveInitialPanelItemState re-checks the lock preference.
-      const rawItem =
-        activeContextPanelRawItems.get(otherBody as Element) || null;
-      const resolved = resolveInitialPanelItemState(rawItem);
-      buildUI(otherBody as Element, resolved.item);
-      activeContextPanels.set(otherBody, () => resolved.item);
-      // buildUI creates fresh DOM elements, so handlers must be re-attached.
-      // The P4 handlersAttached guard prevents truly redundant calls.
-      setupHandlers(otherBody as Element, rawItem);
-      void (async () => {
-        try {
-          if (resolved.item) await ensureConversationLoaded(resolved.item);
-          refreshChat(otherBody as Element, resolved.item);
-        } catch (err) {
-          ztoolkit.log("LLM: lock sync panel rebuild failed", err);
-        }
-      })();
-    }
-  };
-
-  if (modeLockBtn) {
-    modeLockBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item || isNoteSession() || !isGlobalMode()) return;
-      const libraryID = getCurrentLibraryID();
-      if (!libraryID) return;
-      const currentKey =
-        conversationKey !== null ? Math.floor(conversationKey as number) : null;
-      if (!currentKey) return;
-      const lockedKey = getLockedGlobalConversationKey(libraryID);
-      const isLocked = lockedKey !== null && lockedKey === currentKey;
-      // Manual lock/unlock overrides any auto-lock on this conversation
-      if (currentKey) removeAutoLockedGlobalConversationKey(currentKey);
-      if (isLocked) {
-        setLockedGlobalConversationKey(libraryID, null);
-      } else {
-        setLockedGlobalConversationKey(libraryID, currentKey);
-      }
-      syncConversationIdentity();
-      syncLockStateToOtherPanels();
-    });
-  }
-
   if (historyToggleBtn) {
     historyToggleBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!item || isNoteSession()) return;
+      if (!item) return;
       // Allow history navigation even during generation.
       void (async () => {
         closeModelMenu();
         closeReasoningMenu();
         closeRetryModelMenu();
-        closeSlashMenu();
+        closeAddMenu();
         closeResponseMenu();
         closePromptMenu();
-        closeExportMenu();
         closeHistoryNewMenu();
 
         // [webchat] Show ChatGPT conversation history
@@ -5214,8 +3825,8 @@ export function setupHandlers(
           closeHistoryMenu();
           return;
         }
-        await refreshGlobalHistoryHeader("menu-open");
-        if (!latestConversationHistory.length) {
+        await refreshPaperHistoryHeader("menu-open");
+        if (!latestPaperHistoryEntries.length) {
           closeHistoryMenu();
           return;
         }
@@ -5290,9 +3901,7 @@ export function setupHandlers(
         ) {
           return;
         }
-        const historyKind =
-          row.dataset.historyKind === "paper" ? "paper" : "global";
-        const entry = findHistoryEntryByKey(historyKind, parsedConversationKey);
+        const entry = findHistoryEntryByKey(parsedConversationKey);
         if (!entry || !entry.deletable) return;
         void queueHistoryDeletion(entry);
         return;
@@ -5315,14 +3924,8 @@ export function setupHandlers(
       ) {
         return;
       }
-      const historyKind =
-        row.dataset.historyKind === "paper" ? "paper" : "global";
       void (async () => {
-        if (historyKind === "paper") {
-          await switchPaperConversation(parsedConversationKey);
-        } else {
-          await switchGlobalConversation(parsedConversationKey);
-        }
+        await switchPaperConversation(parsedConversationKey);
         if (status) setStatus(status, t("Conversation loaded"), "ready");
       })();
     });
@@ -5349,9 +3952,7 @@ export function setupHandlers(
         closeHistoryRowMenu();
         return;
       }
-      const historyKind =
-        row.dataset.historyKind === "paper" ? "paper" : "global";
-      const entry = findHistoryEntryByKey(historyKind, parsedConversationKey);
+      const entry = findHistoryEntryByKey(parsedConversationKey);
       if (!entry) {
         closeHistoryRowMenu();
         return;
@@ -5362,10 +3963,9 @@ export function setupHandlers(
       closeModelMenu();
       closeReasoningMenu();
       closeRetryModelMenu();
-      closeSlashMenu();
+      closeAddMenu();
       closeResponseMenu();
       closePromptMenu();
-      closeExportMenu();
       const mouse = e as MouseEvent;
       let { clientX, clientY } = mouse;
       if (
@@ -5420,12 +4020,7 @@ export function setupHandlers(
   const getSelectedModelInfo = () => {
     const { choices, groupedChoices } = getModelChoices();
     const selectedEntry = item ? getSelectedModelEntryForItem(item.id) : null;
-    const currentModel =
-      selectedEntry?.model ||
-      choices[0]?.model ||
-      getStringPref("modelPrimary") ||
-      getStringPref("model") ||
-      "default";
+    const currentModel = selectedEntry?.model || choices[0]?.model || "default";
     const currentModelDisplay =
       selectedEntry?.displayModelLabel || currentModel;
     const currentModelHint = selectedEntry
@@ -5444,13 +4039,11 @@ export function setupHandlers(
 
   type ActionLabelMode = "icon" | "full";
   type ModelLabelMode = "icon" | "full-single" | "full-wrap2";
-  type ActionLayoutMode = "icon" | "half" | "full";
+  type ActionLayoutMode = "icon" | "half";
   type ActionRevealState = {
     send: ActionLabelMode;
     reasoning: ActionLabelMode;
     model: ModelLabelMode;
-    screenshot: ActionLabelMode;
-    selectText: ActionLabelMode;
   };
 
   const setActionButtonLabel = (
@@ -5653,8 +4246,6 @@ export function setupHandlers(
     };
 
     const uploadSlot = uploadBtn?.parentElement as HTMLElement | null;
-    const selectTextSlot = selectTextBtn?.parentElement as HTMLElement | null;
-    const screenshotSlot = screenshotBtn?.parentElement as HTMLElement | null;
     const sendSlot = sendBtn?.parentElement as HTMLElement | null;
 
     const getModelWidth = (mode: ModelLabelMode) => {
@@ -5675,18 +4266,6 @@ export function setupHandlers(
       return mode === "full"
         ? getFullSlotRequiredWidth(reasoningSlot, reasoningBtn, reasoningLabel)
         : ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX;
-    };
-
-    const getContextButtonWidth = (
-      slot: HTMLElement | null,
-      button: HTMLButtonElement | null,
-      expandedLabel: string,
-      mode: ActionLabelMode,
-    ) => {
-      if (!button) return 0;
-      return mode === "full"
-        ? getFullSlotRequiredWidth(slot, button, expandedLabel)
-        : ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX;
     };
 
     const getSendWidth = (mode: ActionLabelMode) => {
@@ -5714,18 +4293,6 @@ export function setupHandlers(
               ),
             )
           : 0,
-        getContextButtonWidth(
-          selectTextSlot,
-          selectTextBtn,
-          getSelectTextExpandedLabel(),
-          state.selectText,
-        ),
-        getContextButtonWidth(
-          screenshotSlot,
-          screenshotBtn,
-          getScreenshotExpandedLabel(),
-          state.screenshot,
-        ),
         getModelWidth(state.model),
         getReasoningWidth(state.reasoning),
       ].filter((width) => width > 0);
@@ -5742,14 +4309,7 @@ export function setupHandlers(
       getAvailableRowWidth() + 1 >= getRequiredWidth(state);
 
     const getPanelLayoutMode = (state: ActionRevealState): ActionLayoutMode => {
-      if (state.selectText === "full") {
-        return "full";
-      }
-      if (
-        state.screenshot === "full" ||
-        state.model !== "icon" ||
-        state.reasoning === "full"
-      ) {
+      if (state.model !== "icon" || state.reasoning === "full") {
         return "half";
       }
       return "icon";
@@ -5764,18 +4324,6 @@ export function setupHandlers(
         UPLOAD_FILE_EXPANDED_LABEL,
         UPLOAD_FILE_COMPACT_LABEL,
         "icon",
-      );
-      setActionButtonLabel(
-        selectTextBtn,
-        getSelectTextExpandedLabel(),
-        SELECT_TEXT_COMPACT_LABEL,
-        "full",
-      );
-      setActionButtonLabel(
-        screenshotBtn,
-        getScreenshotExpandedLabel(),
-        SCREENSHOT_COMPACT_LABEL,
-        "full",
       );
       setSendButtonLabel("full");
 
@@ -5802,18 +4350,6 @@ export function setupHandlers(
         UPLOAD_FILE_EXPANDED_LABEL,
         UPLOAD_FILE_COMPACT_LABEL,
         "icon",
-      );
-      setActionButtonLabel(
-        selectTextBtn,
-        getSelectTextExpandedLabel(),
-        SELECT_TEXT_COMPACT_LABEL,
-        state.selectText,
-      );
-      setActionButtonLabel(
-        screenshotBtn,
-        getScreenshotExpandedLabel(),
-        SCREENSHOT_COMPACT_LABEL,
-        state.screenshot,
       );
       setSendButtonLabel(state.send);
 
@@ -5863,50 +4399,32 @@ export function setupHandlers(
       send: "full",
       reasoning: "full",
       model: "full-single",
-      screenshot: "full",
-      selectText: "full",
-    };
-    const screenshotState: ActionRevealState = {
-      send: "full",
-      reasoning: "full",
-      model: "full-single",
-      screenshot: "full",
-      selectText: "icon",
     };
     const modelState: ActionRevealState = {
       send: "full",
       reasoning: "full",
       model: "full-single",
-      screenshot: "icon",
-      selectText: "icon",
     };
     const reasoningState: ActionRevealState = {
       send: "full",
       reasoning: "full",
       model: "icon",
-      screenshot: "icon",
-      selectText: "icon",
     };
     const sendState: ActionRevealState = {
       send: "full",
       reasoning: "icon",
       model: "icon",
-      screenshot: "icon",
-      selectText: "icon",
     };
     const iconOnlyState: ActionRevealState = {
       send: "icon",
       reasoning: "icon",
       model: "icon",
-      screenshot: "icon",
-      selectText: "icon",
     };
 
     // Reveal order as width grows:
-    // send/cancel -> reasoning -> model -> screenshots -> add text.
+    // send/cancel -> reasoning -> model.
     const candidateStates: ActionRevealState[] = [
       widestState,
-      screenshotState,
       modelState,
       reasoningState,
       sendState,
@@ -5918,7 +4436,6 @@ export function setupHandlers(
         1,
         0,
         { ...widestState, model: "full-wrap2" },
-        { ...screenshotState, model: "full-wrap2" },
         { ...modelState, model: "full-wrap2" },
       );
     }
@@ -6095,7 +4612,7 @@ export function setupHandlers(
           if (entry.authMode === "webchat" && !wasWebChat) {
             markNextWebChatSendAsNewChat();
             primeFreshWebChatPaperChipState();
-            // Clear cached images so stale screenshots don't auto-attach to ChatGPT
+            // Clear cached images so stale image context doesn't auto-attach to ChatGPT
             if (item) {
               selectedImageCache.delete(item.id);
               updateImagePreviewPreservingScroll();
@@ -6115,11 +4632,7 @@ export function setupHandlers(
             // Apply webchat UI immediately so model button is disabled during preload
             applyWebChatModeUI();
             void (async () => {
-              if (isGlobalMode()) {
-                await createAndSwitchGlobalConversation();
-              } else {
-                await createAndSwitchPaperConversation();
-              }
+              await createAndSwitchPaperConversation();
 
               // Show preloading screen to verify connectivity before enabling webchat
               const chatShellEl = body.querySelector(
@@ -6188,7 +4701,7 @@ export function setupHandlers(
       latestPair?.assistantMessage?.modelEntryId?.trim() || "";
     const latestAssistantProviderLabel =
       latestPair?.assistantMessage?.modelProviderLabel?.trim() || "";
-    const matchingLegacyEntries = latestAssistantModelName
+    const matchingModelOnlyEntries = latestAssistantModelName
       ? groupedChoices.flatMap((group) =>
           group.entries.filter(
             (entry) => entry.model === latestAssistantModelName,
@@ -6209,7 +4722,7 @@ export function setupHandlers(
             ? entry.model === latestAssistantModelName &&
               (latestAssistantProviderLabel
                 ? entry.providerLabel === latestAssistantProviderLabel
-                : matchingLegacyEntries.length === 1)
+                : matchingModelOnlyEntries.length === 1)
             : false;
         const option = createElement(
           body.ownerDocument as Document,
@@ -6235,15 +4748,17 @@ export function setupHandlers(
             entry.apiBase,
           );
           const retryAdvanced = getAdvancedModelParams(entry.entryId);
-          await retryLatestAssistantResponse(
-            body,
-            item,
-            entry.model,
-            entry.apiBase,
-            entry.apiKey,
-            retryReasoning,
-            retryAdvanced,
-          );
+          await retryLatestAssistantResponse(body, item, {
+            model: entry.model,
+            apiBase: entry.apiBase,
+            apiKey: entry.apiKey,
+            authMode: entry.authMode,
+            providerProtocol: entry.providerProtocol,
+            modelEntryId: entry.entryId,
+            modelProviderLabel: entry.providerLabel,
+            reasoning: retryReasoning,
+            advanced: retryAdvanced,
+          });
         };
         option.addEventListener("click", (e: Event) => {
           void runRetry(e);
@@ -6369,8 +4884,8 @@ export function setupHandlers(
     webchatPdfUploadedInCurrentConversation = false;
   };
 
-  // Expose webchat intent clearing via hooks so standalone can call it
-  // when loading a conversation from its own sidebar/popup.
+  // Expose webchat intent clearing via hooks for consumers that switch
+  // conversations outside the primary send flow.
   if (hooks) {
     hooks.clearWebChatNewChatIntent = () => {
       clearNextWebChatNewChatIntent();
@@ -6594,57 +5109,7 @@ export function setupHandlers(
       }
     }
 
-    // Mode chip: show target site name with connection dot, or restore original
-    if (modeChipBtn) {
-      if (isWebChat) {
-        // Resolve the target label from the current model name
-        let webchatChipLabel = "chatgpt.com";
-        let webchatChipTitle = "WebChat Sync";
-        try {
-          const { currentModel } = getSelectedModelInfo();
-          const { getWebChatTargetByModelName } =
-            require("../../webchat/types") as typeof import("../../webchat/types");
-          const entry = getWebChatTargetByModelName(currentModel || "");
-          if (entry) {
-            webchatChipLabel = entry.modelName;
-            webchatChipTitle = `${entry.label} Web Sync`;
-          }
-        } catch {
-          /* fallback to defaults */
-        }
-
-        let dot = modeChipBtn.querySelector(
-          ".llm-webchat-dot",
-        ) as HTMLElement | null;
-        if (!dot) {
-          dot = (modeChipBtn.ownerDocument as Document).createElement("span");
-          dot.className = "llm-webchat-dot llm-webchat-dot-disconnected";
-        }
-        modeChipBtn.textContent = "";
-        modeChipBtn.appendChild(dot);
-        modeChipBtn.appendChild(
-          (modeChipBtn.ownerDocument as Document).createTextNode(
-            ` ${webchatChipLabel}`,
-          ),
-        );
-        modeChipBtn.title = webchatChipTitle;
-        modeChipBtn.style.cursor = "default";
-        startWebChatConnectionCheck(dot);
-      } else {
-        const oldDot = modeChipBtn.querySelector(".llm-webchat-dot");
-        if (oldDot) {
-          oldDot.remove();
-          // Restore mode chip text — the normal render sync skips it while the dot is present
-          const chipLabel = isGlobalMode() ? "Library chat" : "Paper chat";
-          modeChipBtn.textContent = chipLabel;
-          modeChipBtn.title = isGlobalMode()
-            ? "Switch to paper chat"
-            : "Switch to library chat";
-        }
-        stopWebChatConnectionCheck();
-        modeChipBtn.style.cursor = "";
-      }
-    }
+    stopWebChatConnectionCheck();
 
     // Model dropdown: fully disabled in webchat (model is ChatGPT, use Exit to change)
     if (modelBtn) {
@@ -6656,6 +5121,12 @@ export function setupHandlers(
 
     // [webchat] Pre-fetch history in background so it's ready when user clicks
     if (isWebChat) {
+      const statusDot = body.querySelector(
+        ".llm-webchat-dot",
+      ) as HTMLElement | null;
+      if (statusDot) {
+        startWebChatConnectionCheck(statusDot);
+      }
       void warmUpWebChatHistory();
     }
 
@@ -6672,7 +5143,7 @@ export function setupHandlers(
       }
     }
 
-    // [webchat] Hide the "/" action button — slash menu is disabled in webchat
+    // [webchat] Hide the "+" action button — context menu is disabled in webchat
     if (uploadBtn) {
       uploadBtn.style.display = isWebChat ? "none" : "";
     }
@@ -6682,9 +5153,7 @@ export function setupHandlers(
       updatePaperPreviewPreservingScroll();
     }
 
-    updateRuntimeModeButton();
-
-    // Notify standalone window (or other listeners) of webchat mode change
+    // Notify external listeners of webchat mode change
     hooks?.onWebChatModeChanged?.(isWebChat);
   };
 
@@ -6705,35 +5174,14 @@ export function setupHandlers(
       const { relaySetCommand } = await import("../../webchat/relayServer");
       relaySetCommand({ type: "SCRAPE_HISTORY" });
 
-      const {
-        filterWebChatHistorySessionsForHostname,
-        getWebChatHistorySiteSyncEntry,
-        isWebChatHistorySiteFailure,
-        waitForFreshChatHistorySnapshot,
-      } = await import("../../webchat/client");
-      const snapshot = await waitForFreshChatHistorySnapshot(
+      const { waitForFreshChatHistorySnapshot } =
+        await import("../../webchat/client");
+      await waitForFreshChatHistorySnapshot(
         "",
         targetHostname,
         requestedAt,
         25_000,
       );
-      const sessions = filterWebChatHistorySessionsForHostname(
-        snapshot.sessions,
-        targetHostname,
-      );
-      const siteSyncEntry = getWebChatHistorySiteSyncEntry(
-        snapshot,
-        targetHostname,
-      );
-      if (sessions.length > 0) {
-        ztoolkit.log(
-          `[webchat] History warmed up: ${sessions.length} conversations`,
-        );
-      } else if (isWebChatHistorySiteFailure(siteSyncEntry)) {
-        ztoolkit.log(
-          `[webchat] History warm-up failed for ${targetHostname || "active site"}: ${siteSyncEntry?.status}`,
-        );
-      }
     } catch {
       /* ignore */
     }
@@ -7087,21 +5535,10 @@ export function setupHandlers(
     // isWebChatMode may not be ready during initial render
   }
   restoreDraftInputForCurrentConversation();
-  if (isNoteSession()) {
-    void refreshGlobalHistoryHeader("selection");
-  } else if (isPaperMode()) {
-    // In the standalone window, mountChatPanel's own async IIFE handles
-    // conversation loading.  The parameter-less auto-fire would race with it
-    // and resolve to a different (default) conversation, overwriting the
-    // explicitly targeted one.
-    const isStandalone = panelRoot.dataset.standalone === "true";
-    if (!isStandalone) {
-      void switchPaperConversation().catch((err) => {
-        ztoolkit.log("LLM: Failed to restore paper conversation session", err);
-      });
-    }
-  } else {
-    void refreshGlobalHistoryHeader("selection");
+  if (item) {
+    void switchPaperConversation().catch((err) => {
+      ztoolkit.log("LLM: Failed to restore paper conversation session", err);
+    });
   }
 
   // Preferences can change outside this panel (e.g., settings window).
@@ -7220,7 +5657,7 @@ export function setupHandlers(
     body,
     getItem: () => item,
     getCurrentModel: () => getSelectedModelInfo().currentModel,
-    isScreenshotUnsupportedModel,
+    isImageContextUnsupportedModel,
     optimizeImageDataUrl,
     persistAttachmentBlob,
     selectedImageCache,
@@ -7244,14 +5681,8 @@ export function setupHandlers(
     }
   };
 
-  type ActiveSlashToken = PaperSearchSlashToken;
-  type PaperPickerMode = "browse" | "search" | "empty";
+  type ActiveAtToken = PaperSearchToken;
   type PaperPickerRow =
-    | {
-        kind: "collection";
-        collectionId: number;
-        depth: number;
-      }
     | {
         kind: "paper";
         itemId: number;
@@ -7263,17 +5694,9 @@ export function setupHandlers(
         attachmentIndex: number;
         depth: number;
       };
-  let paperPickerMode: PaperPickerMode = "browse";
-  let paperPickerEmptyMessage = "No references available.";
   let paperPickerGroups: PaperSearchGroupCandidate[] = [];
-  let paperPickerCollections: PaperBrowseCollectionCandidate[] = [];
   let paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
-  let paperPickerCollectionById = new Map<
-    number,
-    PaperBrowseCollectionCandidate
-  >();
   let paperPickerExpandedPaperKeys = new Set<number>();
-  let paperPickerExpandedCollectionKeys = new Set<number>();
   let paperPickerRows: PaperPickerRow[] = [];
   let paperPickerActiveRowIndex = 0;
   let paperPickerRequestSeq = 0;
@@ -7289,40 +5712,26 @@ export function setupHandlers(
     paperPickerDebounceTimer = null;
   };
   const resetPaperPickerState = () => {
-    paperPickerMode = "browse";
-    paperPickerEmptyMessage = "No references available.";
     paperPickerGroups = [];
-    paperPickerCollections = [];
     paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
-    paperPickerCollectionById = new Map<
-      number,
-      PaperBrowseCollectionCandidate
-    >();
     paperPickerExpandedPaperKeys = new Set<number>();
-    paperPickerExpandedCollectionKeys = new Set<number>();
     paperPickerRows = [];
     paperPickerActiveRowIndex = 0;
   };
-  // Paper picker is now triggered by '@'; action picker is triggered by '/'
-  const getActiveAtToken = (): ActiveSlashToken | null => {
+  // Paper picker is triggered by '@'; context actions are opened by the + button.
+  const getActiveAtToken = (): ActiveAtToken | null => {
     const caretEnd =
       typeof inputBox.selectionStart === "number"
         ? inputBox.selectionStart
         : inputBox.value.length;
     return parseAtSearchToken(inputBox.value, caretEnd);
   };
-  const getActiveSlashToken = (): ActiveSlashToken | null => getActiveAtToken();
-  const getActiveActionToken = (): ActiveSlashToken | null => {
-    const caretEnd =
-      typeof inputBox.selectionStart === "number"
-        ? inputBox.selectionStart
-        : inputBox.value.length;
-    return parsePaperSearchSlashToken(inputBox.value, caretEnd);
-  };
   const isPaperPickerOpen = () =>
     Boolean(paperPicker && paperPicker.style.display !== "none");
-  const closePaperPicker = () => {
-    consumeActiveAtToken(); // Remove leftover "@" + query from textarea on dismiss
+  const closePaperPicker = (opts: { consumeToken?: boolean } = {}) => {
+    if (opts.consumeToken === true) {
+      consumeActiveAtToken();
+    }
     paperPickerRequestSeq += 1;
     clearPaperPickerDebounceTimer();
     resetPaperPickerState();
@@ -7333,1042 +5742,53 @@ export function setupHandlers(
       paperPickerList.innerHTML = "";
     }
   };
-  // ── Slash menu keyboard navigation ────────────────────────────────────────
-  let slashMenuActiveIndex = -1;
-  const clearAgentSlashItems = () => {
-    if (!slashMenu) return;
-    Array.from(slashMenu.querySelectorAll("[data-slash-agent-item]")).forEach(
-      (el) => (el as Element).remove(),
-    );
-  };
-  const getVisibleSlashItems = (): HTMLButtonElement[] => {
-    if (!slashMenu) return [];
+  // ── Context action menu keyboard navigation ───────────────────────────────
+  let addMenuActiveIndex = -1;
+  const getVisibleAddItems = (): HTMLButtonElement[] => {
+    if (!addMenu) return [];
     const win = body.ownerDocument?.defaultView;
     return Array.from(
-      slashMenu.querySelectorAll(".llm-action-picker-item"),
+      addMenu.querySelectorAll(".llm-action-picker-item"),
     ).filter((el) => {
       const style = win?.getComputedStyle(el as Element);
       return style ? style.display !== "none" : true;
     }) as HTMLButtonElement[];
   };
-  const updateSlashMenuSelection = () => {
-    const items = getVisibleSlashItems();
+  const updateAddMenuSelection = () => {
+    const items = getVisibleAddItems();
     items.forEach((item, idx) => {
       item.setAttribute(
         "aria-selected",
-        idx === slashMenuActiveIndex ? "true" : "false",
+        idx === addMenuActiveIndex ? "true" : "false",
       );
     });
-    if (slashMenuActiveIndex >= 0 && items[slashMenuActiveIndex] && slashMenu) {
-      const activeItem = items[slashMenuActiveIndex];
+    if (addMenuActiveIndex >= 0 && items[addMenuActiveIndex] && addMenu) {
+      const activeItem = items[addMenuActiveIndex];
       // Walk offsetParent chain to get offset relative to the scroll container
       let offsetTop = 0;
       let el: HTMLElement | null = activeItem;
-      while (el && el !== slashMenu) {
+      while (el && el !== addMenu) {
         offsetTop += el.offsetTop;
         el = el.offsetParent as HTMLElement | null;
       }
       const itemBottom = offsetTop + activeItem.offsetHeight;
-      if (offsetTop < slashMenu.scrollTop) {
-        slashMenu.scrollTop = offsetTop;
-      } else if (itemBottom > slashMenu.scrollTop + slashMenu.clientHeight) {
-        slashMenu.scrollTop = itemBottom - slashMenu.clientHeight;
+      if (offsetTop < addMenu.scrollTop) {
+        addMenu.scrollTop = offsetTop;
+      } else if (itemBottom > addMenu.scrollTop + addMenu.clientHeight) {
+        addMenu.scrollTop = itemBottom - addMenu.clientHeight;
       }
     }
   };
-  const openSlashMenuWithSelection = () => {
-    slashMenuActiveIndex = 0;
-    setFloatingMenuOpen(slashMenu, SLASH_MENU_OPEN_CLASS, true);
-    updateSlashMenuSelection();
+  const openAddMenuWithSelection = () => {
+    addMenuActiveIndex = 0;
+    setFloatingMenuOpen(addMenu, ADD_MENU_OPEN_CLASS, true);
+    updateAddMenuSelection();
   };
-  const selectActiveSlashMenuItem = () => {
-    const items = getVisibleSlashItems();
-    if (slashMenuActiveIndex >= 0 && items[slashMenuActiveIndex]) {
-      items[slashMenuActiveIndex].click();
+  const selectActiveAddMenuItem = () => {
+    const items = getVisibleAddItems();
+    if (addMenuActiveIndex >= 0 && items[addMenuActiveIndex]) {
+      items[addMenuActiveIndex].click();
     }
-  };
-
-  // ── Action picker ─────────────────────────────────────────────────────────
-  type ActionPickerItem = {
-    name: string;
-    description: string;
-    inputSchema: object;
-  };
-  let actionPickerItems: ActionPickerItem[] = [];
-  let actionPickerActiveIndex = 0;
-  const isActionPickerOpen = () =>
-    Boolean(actionPicker && actionPicker.style.display !== "none");
-  const closeActionPicker = () => {
-    if (actionPicker) actionPicker.style.display = "none";
-    if (actionPickerList) actionPickerList.innerHTML = "";
-    actionPickerItems = [];
-    actionPickerActiveIndex = 0;
-  };
-  const formatActionLabel = (name: string): string =>
-    name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-
-  /** Renders the action picker dropdown. */
-  const renderActionPicker = () => {
-    if (!actionPicker || !actionPickerList) return;
-    const ownerDoc = body.ownerDocument;
-    if (!ownerDoc) return;
-    actionPickerList.innerHTML = "";
-    if (!actionPickerItems.length) {
-      const empty = createElement(ownerDoc, "div", "llm-action-picker-empty", {
-        textContent: "No actions matched.",
-      });
-      actionPickerList.appendChild(empty);
-      actionPicker.style.display = "block";
-      return;
-    }
-    actionPickerItems.forEach((action, idx) => {
-      const option = createElement(
-        ownerDoc,
-        "div",
-        "llm-action-picker-item",
-        {},
-      );
-      option.setAttribute("role", "option");
-      option.setAttribute(
-        "aria-selected",
-        idx === actionPickerActiveIndex ? "true" : "false",
-      );
-      option.tabIndex = -1;
-      const titleEl = createElement(
-        ownerDoc,
-        "div",
-        "llm-action-picker-title",
-        {
-          textContent: action.name,
-        },
-      );
-      const descEl = createElement(
-        ownerDoc,
-        "div",
-        "llm-action-picker-description",
-        {
-          textContent: action.description,
-        },
-      );
-      option.append(titleEl, descEl);
-      option.addEventListener("mousedown", (e: Event) => {
-        e.preventDefault();
-        actionPickerActiveIndex = idx;
-        void selectActionPickerItem(idx);
-      });
-      actionPickerList.appendChild(option);
-    });
-    actionPicker.style.display = "block";
-  };
-
-  /** Populates the slash menu (and, in agent mode, appends agent actions). */
-  const scheduleActionPickerTrigger = () => {
-    if (!item) {
-      closeActionPicker();
-      return;
-    }
-    // [webchat] Slash menu not available in webchat mode
-    try {
-      if (isWebChatMode()) {
-        closeActionPicker();
-        closeSlashMenu();
-        return;
-      }
-    } catch {
-      /* */
-    }
-    closeActionPicker();
-    const token = getActiveActionToken();
-    if (!token) {
-      closeSlashMenu();
-      return;
-    }
-    // Agent mode: render agent actions first (creates section labels),
-    // then skills (inserts between agent actions and base actions)
-    if (getCurrentRuntimeMode() === "agent") {
-      const query = token.query.toLowerCase().trim();
-      renderAgentActionsInSlashMenu(query);
-      renderSkillsInSlashMenu(query);
-    }
-    if (!isFloatingMenuOpen(slashMenu)) {
-      closeRetryModelMenu();
-      closeModelMenu();
-      closeReasoningMenu();
-      closeHistoryNewMenu();
-      closeHistoryMenu();
-      closeResponseMenu();
-      closePromptMenu();
-      closeExportMenu();
-      openSlashMenuWithSelection();
-    } else {
-      // Already open — re-render selection after agent items may have changed
-      slashMenuActiveIndex = 0;
-      updateSlashMenuSelection();
-    }
-  };
-
-  // ── Action HITL panel ──────────────────────────────────────────────────────
-  /**
-   * Refreshes the `data-has-action-card` attribute on the panel root so CSS
-   * can restore chat-mode shell sizing when a card is present on the start
-   * page. Called whenever a card is added or removed.
-   */
-  const syncHasActionCardAttr = () => {
-    if (!panelRoot) return;
-    const hasCard = !!chatBox?.querySelector(
-      ".llm-action-inline-card, .llm-action-progress-card",
-    );
-    if (hasCard) {
-      panelRoot.dataset.hasActionCard = "true";
-    } else {
-      delete panelRoot.dataset.hasActionCard;
-    }
-  };
-
-  const closeActionHitlPanel = () => {
-    if (actionHitlPanel) {
-      actionHitlPanel.style.display = "none";
-      actionHitlPanel.innerHTML = "";
-    }
-    chatBox?.querySelector(".llm-action-inline-card")?.remove();
-    syncHasActionCardAttr();
-  };
-
-  const showActionHitlCard = (
-    requestId: string,
-    action: AgentPendingAction,
-  ): Promise<AgentConfirmationResolution> => {
-    return new Promise((resolve) => {
-      getAgentApi().registerPendingConfirmation(requestId, (resolution) => {
-        closeActionHitlPanel();
-        resolve(resolution);
-      });
-      const ownerDoc = body.ownerDocument;
-      if (ownerDoc && chatBox) {
-        chatBox.querySelector(".llm-action-inline-card")?.remove();
-        const wrapper = ownerDoc.createElement("div");
-        wrapper.className = "llm-action-inline-card";
-        const card = renderPendingActionCard(ownerDoc, { requestId, action });
-        wrapper.appendChild(card);
-        chatBox.appendChild(wrapper);
-        chatBox.scrollTop = chatBox.scrollHeight;
-        syncHasActionCardAttr();
-      }
-    });
-  };
-
-  /**
-   * Returns a controller for a persistent "action in progress" indicator
-   * rendered inside the chat thread.  The indicator surfaces the current
-   * action's step label + the bouncing-dots animation used during assistant
-   * streaming, so users can see that work is happening during long
-   * network-bound steps (e.g. audit_library's per-item metadata fetch).
-   */
-  const createActionProgressIndicator = (actionName: string) => {
-    const ownerDoc = body.ownerDocument;
-    let element: HTMLDivElement | null = null;
-    let stepText: HTMLDivElement | null = null;
-    let summaryText: HTMLDivElement | null = null;
-
-    const ensureMounted = () => {
-      if (!ownerDoc || !chatBox) return;
-      if (element && element.isConnected) return;
-      chatBox.querySelector(".llm-action-progress-card")?.remove();
-      const wrapper = ownerDoc.createElement("div");
-      wrapper.className = "llm-action-progress-card";
-
-      const header = ownerDoc.createElement("div");
-      header.className = "llm-action-progress-header";
-      const title = ownerDoc.createElement("div");
-      title.className = "llm-action-progress-title";
-      title.textContent = `${formatActionLabel(actionName)}`;
-      const typing = ownerDoc.createElement("div");
-      typing.className = "llm-typing llm-action-progress-typing";
-      typing.innerHTML =
-        '<span class="llm-typing-dot"></span><span class="llm-typing-dot"></span><span class="llm-typing-dot"></span>';
-      header.append(title, typing);
-      wrapper.appendChild(header);
-
-      const step = ownerDoc.createElement("div");
-      step.className = "llm-action-progress-step";
-      step.textContent = "Starting…";
-      wrapper.appendChild(step);
-      stepText = step;
-
-      const summary = ownerDoc.createElement("div");
-      summary.className = "llm-action-progress-summary";
-      summary.textContent = "";
-      wrapper.appendChild(summary);
-      summaryText = summary;
-
-      chatBox.appendChild(wrapper);
-      chatBox.scrollTop = chatBox.scrollHeight;
-      element = wrapper;
-      syncHasActionCardAttr();
-    };
-
-    // Mount right away so the user sees feedback before the first step event.
-    ensureMounted();
-
-    return {
-      setStep(stepName: string, index: number, total: number) {
-        ensureMounted();
-        if (stepText) {
-          stepText.textContent = `${stepName} (${index}/${total})`;
-        }
-        if (summaryText) {
-          summaryText.textContent = "";
-        }
-      },
-      setSummary(summary: string) {
-        ensureMounted();
-        if (summaryText) summaryText.textContent = summary;
-      },
-      hide() {
-        if (element && element.isConnected) {
-          element.remove();
-        }
-        element = null;
-        stepText = null;
-        summaryText = null;
-        syncHasActionCardAttr();
-      },
-      remove() {
-        if (element && element.isConnected) {
-          element.remove();
-        }
-        element = null;
-        stepText = null;
-        summaryText = null;
-        syncHasActionCardAttr();
-      },
-    };
-  };
-
-  // ── Action launch form ─────────────────────────────────────────────────────
-  /**
-   * Returns the required fields that cannot be auto-filled from context.
-   * `itemId` is auto-filled from the current item. All other required fields
-   * need user input.
-   */
-  const getNeedsUserInputFields = (
-    actionName: string,
-    schema: object,
-  ): string[] => {
-    const s = schema as { required?: string[] };
-    if (!s.required?.length) return [];
-    const autoFillable = new Set(["itemId"]);
-    return s.required.filter((f) => !autoFillable.has(f));
-  };
-
-  /**
-   * Resolves the initial input for an action. Auto-fills `itemId` from context.
-   */
-  const buildActionInput = (
-    actionName: string,
-    schema: object,
-    extraFields: Record<string, string>,
-  ): Record<string, unknown> => {
-    const input: Record<string, unknown> = { ...extraFields };
-    const s = schema as { required?: string[] };
-    if (s.required?.includes("itemId")) {
-      // Portal items carry the conversation key as `id`, not the real Zotero
-      // item ID. Resolve to the base paper first so tools receive a real ID.
-      const realItem = resolveCurrentPaperBaseItem() || item;
-      if (realItem?.id) {
-        input.itemId = realItem.id;
-      }
-    }
-    return input;
-  };
-
-  /**
-   * Shows an inline launch form for actions that require user-provided fields
-   * when their required inputs cannot be derived from the current context.
-   * Returns a promise that resolves with the filled input, or null if cancelled.
-   */
-  const showActionLaunchForm = (
-    actionName: string,
-    requiredFields: string[],
-    schema: object,
-  ): Promise<Record<string, unknown> | null> => {
-    return new Promise((resolve) => {
-      const ownerDoc = body.ownerDocument;
-      if (!ownerDoc || !chatBox) {
-        resolve(null);
-        return;
-      }
-      const props =
-        (schema as { properties?: Record<string, { description?: string }> })
-          .properties || {};
-      chatBox.querySelector(".llm-action-inline-card")?.remove();
-      const wrapper = ownerDoc.createElement("div");
-      wrapper.className = "llm-action-inline-card";
-      const form = createElement(ownerDoc, "div", "llm-action-launch-form", {});
-      const header = createElement(
-        ownerDoc,
-        "div",
-        "llm-action-launch-form-header",
-        {
-          textContent: formatActionLabel(actionName),
-        },
-      );
-      form.appendChild(header);
-      const fieldEls: Array<{
-        name: string;
-        input: HTMLInputElement | HTMLTextAreaElement;
-      }> = [];
-      for (const fieldName of requiredFields) {
-        const label = createElement(
-          ownerDoc,
-          "label",
-          "llm-action-launch-form-label",
-          {
-            textContent: props[fieldName]?.description ?? fieldName,
-          },
-        );
-        const input = createElement(
-          ownerDoc,
-          "textarea",
-          "llm-action-launch-form-input llm-input",
-          {
-            placeholder: fieldName,
-          },
-        ) as HTMLTextAreaElement;
-        input.rows = 2;
-        form.append(label, input);
-        fieldEls.push({ name: fieldName, input });
-      }
-      const btns = createElement(
-        ownerDoc,
-        "div",
-        "llm-action-launch-form-btns",
-        {},
-      );
-      const runBtn = createElement(
-        ownerDoc,
-        "button",
-        "llm-action-launch-form-run-btn",
-        {
-          textContent: "Run",
-          type: "button",
-        },
-      ) as HTMLButtonElement;
-      const cancelBtn2 = createElement(
-        ownerDoc,
-        "button",
-        "llm-action-launch-form-cancel-btn",
-        {
-          textContent: "Cancel",
-          type: "button",
-        },
-      ) as HTMLButtonElement;
-      btns.append(runBtn, cancelBtn2);
-      form.appendChild(btns);
-      wrapper.appendChild(form);
-      const dismiss = () => {
-        closeActionHitlPanel();
-        inputBox.focus({ preventScroll: true });
-      };
-      runBtn.addEventListener("click", () => {
-        const filled: Record<string, unknown> = {};
-        for (const { name, input } of fieldEls) {
-          filled[name] = input.value.trim();
-        }
-        dismiss();
-        resolve(filled);
-      });
-      cancelBtn2.addEventListener("click", () => {
-        dismiss();
-        resolve(null);
-      });
-      chatBox.appendChild(wrapper);
-      chatBox.scrollTop = chatBox.scrollHeight;
-      // Focus first field
-      fieldEls[0]?.input.focus();
-    });
-  };
-
-  /** Core action execution — shared between action picker and slash menu. */
-  const executeAgentAction = async (
-    action: ActionPickerItem,
-    parsedInput?: Record<string, unknown>,
-  ): Promise<void> => {
-    inputBox.focus({ preventScroll: true });
-    // Ensure agent subsystem is initialized before running any action
-    try {
-      await initAgentSubsystem();
-    } catch (err) {
-      ztoolkit.log("LLM: failed to init agent subsystem", err);
-      if (status) setStatus(status, `Error: Agent system unavailable`, "error");
-      return;
-    }
-    let input: Record<string, unknown>;
-    if (parsedInput) {
-      // Input already parsed from inline command
-      input = parsedInput;
-      // Auto-fill itemId from context if needed
-      const s = action.inputSchema as { required?: string[] };
-      if (s.required?.includes("itemId") && !input.itemId) {
-        // Portal items carry the conversation key as `id`, not the real Zotero
-        // item ID. Resolve to the base paper first so tools receive a real ID.
-        const realItem = resolveCurrentPaperBaseItem() || item;
-        if (realItem?.id) {
-          input.itemId = realItem.id;
-        }
-      }
-    } else {
-      const needsInput = getNeedsUserInputFields(
-        action.name,
-        action.inputSchema,
-      );
-      let extraFields: Record<string, string> = {};
-      if (needsInput.length) {
-        const filled = await showActionLaunchForm(
-          action.name,
-          needsInput,
-          action.inputSchema,
-        );
-        if (!filled) return;
-        extraFields = Object.fromEntries(
-          Object.entries(filled).map(([k, v]) => [k, String(v)]),
-        );
-      }
-      input = buildActionInput(action.name, action.inputSchema, extraFields);
-    }
-    if (status)
-      setStatus(status, `Running: ${formatActionLabel(action.name)}…`, "ready");
-    const progressIndicator = createActionProgressIndicator(action.name);
-    try {
-      const agentApi = getAgentApi();
-      const selectedProfile = getSelectedProfile();
-      const actionLlmConfig = selectedProfile
-        ? {
-            model: selectedProfile.model,
-            apiBase: selectedProfile.apiBase,
-            apiKey: selectedProfile.apiKey,
-            authMode: selectedProfile.authMode,
-            providerProtocol: selectedProfile.providerProtocol,
-          }
-        : undefined;
-      const result = await agentApi.runAction(action.name, input, {
-        confirmationMode: "native_ui",
-        llm: actionLlmConfig,
-        onProgress: (event) => {
-          if (event.type === "step_start") {
-            progressIndicator.setStep(event.step, event.index, event.total);
-            if (status) {
-              setStatus(
-                status,
-                `${event.step} (${event.index}/${event.total})`,
-                "ready",
-              );
-            }
-          } else if (event.type === "step_done") {
-            if (event.summary) {
-              progressIndicator.setSummary(event.summary);
-              if (status) setStatus(status, event.summary, "ready");
-            }
-          } else if (event.type === "confirmation_required") {
-            // HITL card takes over; hide the indicator until work resumes.
-            progressIndicator.hide();
-          }
-        },
-        requestConfirmation: (requestId, pendingAction) =>
-          showActionHitlCard(requestId, pendingAction),
-      });
-      if (status) {
-        setStatus(
-          status,
-          result.ok
-            ? `${formatActionLabel(action.name)} complete`
-            : `${formatActionLabel(action.name)} failed: ${result.error}`,
-          result.ok ? "ready" : "error",
-        );
-      }
-    } catch (err) {
-      ztoolkit.log("LLM: action picker run error", err);
-      if (status) setStatus(status, `Error: ${String(err)}`, "error");
-    } finally {
-      progressIndicator.remove();
-    }
-  };
-
-  // ── Forced skill state (from slash menu skill selection) ────────────────
-  /** The skill ID force-selected from the slash menu, if any. */
-  let forcedSkillId: string | null = null;
-  /** Badge element for the forced skill, rendered in the compose area. */
-  let forcedSkillBadge: HTMLElement | null = null;
-
-  const clearForcedSkill = (): void => {
-    forcedSkillId = null;
-    forcedSkillBadge = null;
-    const row = body.querySelector("#llm-command-row");
-    if (row) {
-      row.removeAttribute("data-active");
-      row.classList.remove("llm-command-row--skill");
-    }
-    if (inputBox.dataset.originalPlaceholder !== undefined) {
-      inputBox.placeholder = inputBox.dataset.originalPlaceholder;
-      delete inputBox.dataset.originalPlaceholder;
-    }
-  };
-
-  const handleSkillSelection = (skill: AgentSkill): void => {
-    clearForcedSkill();
-    clearCommandChip();
-    forcedSkillId = skill.id;
-
-    // Ensure agent mode
-    if (getCurrentRuntimeMode() !== "agent" && getAgentModeEnabled()) {
-      setCurrentRuntimeMode("agent");
-    }
-
-    // Populate the command row above the textarea
-    const row = body.querySelector("#llm-command-row");
-    const badgeEl = body.querySelector("#llm-command-row-badge");
-    if (!row || !badgeEl) return;
-
-    badgeEl.textContent = `/${skill.id}`;
-    row.classList.add("llm-command-row--skill");
-    row.setAttribute("data-active", "");
-    forcedSkillBadge = row as HTMLElement;
-
-    if (inputBox.dataset.originalPlaceholder === undefined) {
-      inputBox.dataset.originalPlaceholder = inputBox.placeholder;
-    }
-    inputBox.placeholder = "";
-    inputBox.value = "";
-    inputBox.focus({ preventScroll: true });
-    const EvtCtor =
-      (inputBox.ownerDocument?.defaultView as any)?.Event ?? Event;
-    inputBox.dispatchEvent(new EvtCtor("input", { bubbles: true }));
-  };
-
-  // ── Inline command badge state ──────────────────────────────────────────
-  /** The currently active command action, or null if no badge is shown. */
-  let activeCommandAction: ActionPickerItem | null = null;
-  /** The DOM element for the inline badge, if currently rendered. */
-  let activeCommandBadge: HTMLElement | null = null;
-
-  /** Removes the inline command badge from the textarea and restores state. */
-  const clearCommandChip = (): void => {
-    activeCommandAction = null;
-    activeCommandBadge = null;
-    const row = body.querySelector("#llm-command-row");
-    if (row) {
-      row.removeAttribute("data-active");
-      row.classList.remove("llm-command-row--skill");
-    }
-    // Restore original placeholder
-    if (inputBox.dataset.originalPlaceholder !== undefined) {
-      inputBox.placeholder = inputBox.dataset.originalPlaceholder;
-      delete inputBox.dataset.originalPlaceholder;
-    }
-  };
-
-  /**
-   * Creates an inline command badge inside the textarea area.
-   * The badge is positioned at the textarea's first-line text start position,
-   * and the textarea's padding-left is increased to flow around it.
-   * The badge is atomic — removed entirely via its x button or Backspace.
-   */
-  const insertCommandToken = (action: ActionPickerItem): void => {
-    clearForcedSkill();
-    clearCommandChip();
-    activeCommandAction = action;
-
-    // Populate the command row above the textarea
-    const row = body.querySelector("#llm-command-row");
-    const badgeEl = body.querySelector("#llm-command-row-badge");
-    if (!row || !badgeEl) return;
-
-    badgeEl.textContent = `/${action.name}`;
-    row.classList.remove("llm-command-row--skill");
-    row.setAttribute("data-active", "");
-    activeCommandBadge = row as HTMLElement;
-
-    // Save original placeholder and update hint
-    if (inputBox.dataset.originalPlaceholder === undefined) {
-      inputBox.dataset.originalPlaceholder = inputBox.placeholder;
-    }
-    inputBox.placeholder = "";
-    inputBox.value = "";
-    inputBox.focus({ preventScroll: true });
-    const EvtCtor =
-      (inputBox.ownerDocument?.defaultView as any)?.Event ?? Event;
-    inputBox.dispatchEvent(new EvtCtor("input", { bubbles: true }));
-  };
-
-  /** Returns the active command action if a badge is present, null otherwise. */
-  const getActiveCommandAction = (): ActionPickerItem | null =>
-    activeCommandAction;
-
-  /**
-   * Parses natural-language parameters for an action command.
-   * Returns a structured input object for the action.
-   */
-  const parseCommandParams = (
-    actionName: string,
-    params: string,
-  ): Record<string, unknown> => {
-    const input: Record<string, unknown> = {};
-    if (!params) return input;
-    const lower = params.toLowerCase();
-
-    // Parse "for first N items" or "first N items"
-    const firstNMatch = /(?:for\s+)?(?:first|top)\s+(\d+)\s*items?/i.exec(
-      params,
-    );
-    if (firstNMatch) {
-      input.limit = parseInt(firstNMatch[1], 10);
-      return input;
-    }
-
-    // Parse "last N items"
-    const lastNMatch = /(?:for\s+)?last\s+(\d+)\s*items?/i.exec(params);
-    if (lastNMatch) {
-      input.limit = parseInt(lastNMatch[1], 10);
-      return input;
-    }
-
-    // Parse "for collection XXX"
-    const collectionMatch = /(?:for\s+)?collection\s+(.+)/i.exec(params);
-    if (collectionMatch) {
-      input.scope = "collection";
-      input.collectionName = collectionMatch[1].trim();
-      return input;
-    }
-
-    // Parse "for whole library" or "for all"
-    if (
-      lower.includes("whole library") ||
-      lower.includes("for all") ||
-      lower === "all"
-    ) {
-      input.scope = "all";
-      return input;
-    }
-
-    // Parse bare number as limit
-    const bareNumber = /^(\d+)$/.exec(params.trim());
-    if (bareNumber) {
-      input.limit = parseInt(bareNumber[1], 10);
-      return input;
-    }
-
-    return input;
-  };
-
-  /**
-   * Shows a HITL scope confirmation card when an action command is sent
-   * with no parameters. Returns the user's chosen scope as input.
-   */
-  const showScopeConfirmation = (
-    actionName: string,
-  ): Promise<Record<string, unknown> | null> => {
-    return new Promise((resolve) => {
-      const requestId = `scope-confirm-${actionName}-${Date.now()}`;
-      const card = {
-        toolName: actionName,
-        mode: "review" as const,
-        title: `${formatActionLabel(actionName)}`,
-        description: "What scope should this action run on?",
-        confirmLabel: "Run",
-        cancelLabel: "Cancel",
-        actions: [
-          { id: "first20", label: "First 20 items", style: "primary" as const },
-          { id: "all", label: "Whole library", style: "secondary" as const },
-          { id: "cancel", label: "Cancel", style: "secondary" as const },
-        ],
-        defaultActionId: "first20",
-        cancelActionId: "cancel",
-        fields: [],
-      };
-      getAgentApi().registerPendingConfirmation(requestId, (resolution) => {
-        closeActionHitlPanel();
-        if (!resolution.approved || resolution.actionId === "cancel") {
-          resolve(null);
-          return;
-        }
-        if (resolution.actionId === "all") {
-          resolve({ scope: "all" });
-        } else {
-          resolve({ limit: 20 });
-        }
-      });
-      const ownerDoc = body.ownerDocument;
-      if (ownerDoc && chatBox) {
-        chatBox.querySelector(".llm-action-inline-card")?.remove();
-        const wrapper = ownerDoc.createElement("div");
-        wrapper.className = "llm-action-inline-card";
-        const cardEl = renderPendingActionCard(ownerDoc, {
-          requestId,
-          action: card,
-        });
-        wrapper.appendChild(cardEl);
-        chatBox.appendChild(wrapper);
-        chatBox.scrollTop = chatBox.scrollHeight;
-      }
-    });
-  };
-
-  /**
-   * Handles execution of a command chip action with optional text params.
-   * Called from the send flow when a command chip is active.
-   */
-  const handleInlineCommand = async (
-    actionName: string,
-    params: string,
-  ): Promise<void> => {
-    // Commands that go through agent chat for full trace visibility
-    if (
-      actionName === "library_statistics" ||
-      actionName === "literature_review"
-    ) {
-      if (getCurrentRuntimeMode() !== "agent" && getAgentModeEnabled()) {
-        setCurrentRuntimeMode("agent");
-      }
-      let prompt: string;
-      if (actionName === "library_statistics") {
-        prompt = params.trim()
-          ? `Show my library statistics: ${params.trim()}`
-          : "Show my library statistics and give me a comprehensive overview.";
-      } else {
-        prompt = params.trim()
-          ? `Conduct a literature review on: ${params.trim()}`
-          : "I'd like to do a literature review.";
-      }
-      // Store command metadata for display formatting in the chat bubble
-      inputBox.dataset.commandAction = actionName;
-      inputBox.dataset.commandParams = params.trim();
-      inputBox.value = prompt;
-      await doSend();
-      return;
-    }
-
-    let allActions: ActionPickerItem[] = [];
-    try {
-      await initAgentSubsystem();
-      allActions = getAgentApi().listActions();
-    } catch {
-      if (status) setStatus(status, "Agent system unavailable", "error");
-      return;
-    }
-
-    const action = allActions.find((a) => a.name === actionName);
-    if (!action) {
-      if (status) setStatus(status, `Unknown action: ${actionName}`, "error");
-      return;
-    }
-
-    let input = parseCommandParams(actionName, params);
-
-    // For organize_unfiled, no scope confirmation needed (always unfiled items)
-    const needsScopeConfirm =
-      actionName !== "organize_unfiled" &&
-      actionName !== "discover_related" &&
-      actionName !== "complete_metadata";
-
-    // If no meaningful params and action needs scope, show HITL confirmation
-    if (needsScopeConfirm && !params.trim()) {
-      const scopeInput = await showScopeConfirmation(actionName);
-      if (!scopeInput) return; // user cancelled
-      input = { ...input, ...scopeInput };
-    }
-
-    void executeAgentAction(action, input);
-  };
-
-  /** Prepends filtered skills into the slash menu (agent mode only). */
-  const renderSkillsInSlashMenu = (query: string = "") => {
-    const list = slashMenu?.querySelector(".llm-action-picker-list");
-    if (!list) return;
-    const ownerDoc = body.ownerDocument;
-    if (!ownerDoc) return;
-
-    // Remove old skill items
-    list
-      .querySelectorAll("[data-slash-skill-item]")
-      .forEach((el: Element) => el.remove());
-
-    const allSkills = getAllSkills();
-    if (!allSkills.length) return;
-
-    const filtered = query
-      ? allSkills.filter(
-          (s: AgentSkill) =>
-            s.id.toLowerCase().includes(query) ||
-            s.description.toLowerCase().includes(query),
-        )
-      : allSkills;
-
-    if (!filtered.length) return;
-
-    // Anchor: the "Base actions" section label (inserted by renderAgentActionsInSlashMenu),
-    // or fall back to the first base item, or list end
-    const baseAnchor =
-      list.querySelector("[data-slash-section='base']") ||
-      list.querySelector("[data-slash-base-item]") ||
-      null;
-
-    const mkSkillEl = (tag: string, cls: string): HTMLElement => {
-      const el = ownerDoc.createElement(tag);
-      el.className = cls;
-      el.setAttribute("data-slash-skill-item", "true");
-      return el;
-    };
-
-    // "Skills" section label
-    const sectionLabel = mkSkillEl("div", "llm-slash-menu-section");
-    sectionLabel.setAttribute("aria-hidden", "true");
-    sectionLabel.textContent = t("Skills");
-    list.insertBefore(sectionLabel, baseAnchor);
-
-    // Skill items
-    filtered.forEach((skill: AgentSkill) => {
-      const btn = mkSkillEl(
-        "button",
-        "llm-action-picker-item",
-      ) as HTMLButtonElement;
-      btn.type = "button";
-      btn.title = skill.description || skill.id;
-
-      const titleEl = ownerDoc.createElement("span");
-      titleEl.className = "llm-action-picker-title";
-      titleEl.textContent = skill.id;
-
-      const descEl = ownerDoc.createElement("span");
-      descEl.className = "llm-action-picker-description";
-      descEl.textContent = skill.description;
-
-      const badgeLabel =
-        skill.source === "system"
-          ? "System"
-          : skill.source === "customized"
-            ? "Customized"
-            : "Personal";
-      const badgeEl = ownerDoc.createElement("span");
-      badgeEl.className = "llm-action-picker-badge";
-      badgeEl.textContent = t(badgeLabel);
-
-      btn.append(titleEl, descEl, badgeEl);
-
-      btn.addEventListener("click", (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        consumeActiveActionToken();
-        closeSlashMenu();
-        handleSkillSelection(skill);
-      });
-
-      list.insertBefore(btn, baseAnchor);
-    });
-  };
-
-  /** Prepends filtered agent actions into the slash menu (agent mode only). */
-  /**
-   * Extracts the first sentence of a description for compact slash-menu
-   * display. Falls back to the first ~80 chars if no sentence boundary is
-   * found. Preserves the full text as a tooltip (set by the caller).
-   */
-  const firstSentence = (text: string): string => {
-    const normalized = text.replace(/\s+/g, " ").trim();
-    if (!normalized) return "";
-    // Match up to and including the first sentence-terminating punctuation
-    // followed by a space or end-of-string.
-    const match = /^(.+?[.!?])(?:\s|$)/.exec(normalized);
-    if (match) return match[1];
-    if (normalized.length <= 80) return normalized;
-    return `${normalized.slice(0, 77).trimEnd()}...`;
-  };
-
-  const renderAgentActionsInSlashMenu = (query: string = "") => {
-    clearAgentSlashItems();
-    const chatMode: "paper" | "library" = isGlobalMode() ? "library" : "paper";
-    let allActions: ActionPickerItem[] = [];
-    try {
-      // initAgentSubsystem is async but listActions only needs the registry
-      // which is set synchronously during init. If not yet initialized,
-      // trigger init (fire-and-forget) and skip this render pass.
-      allActions = getAgentApi().listActions(chatMode);
-    } catch {
-      void initAgentSubsystem()
-        .then(() => {
-          // Re-render after init completes
-          renderAgentActionsInSlashMenu(query);
-        })
-        .catch(() => {});
-      return;
-    }
-    const filtered = query
-      ? allActions.filter(
-          (a) =>
-            a.name.toLowerCase().includes(query) ||
-            a.description.toLowerCase().includes(query),
-        )
-      : allActions;
-    const ownerDoc = body.ownerDocument;
-    const list = slashMenu?.querySelector(".llm-action-picker-list");
-    if (!ownerDoc || !list) return;
-    // Anchor: first static base item (marked in buildUI.ts)
-    const baseAnchor = list.querySelector("[data-slash-base-item]") || null;
-    const mkAgentEl = (tag: string, cls: string): HTMLElement => {
-      const el = ownerDoc.createElement(tag);
-      el.className = cls;
-      el.setAttribute("data-slash-agent-item", "true");
-      return el;
-    };
-    // "Base actions" section label (always shown above static base items)
-    const baseLabel = mkAgentEl("div", "llm-slash-menu-section");
-    baseLabel.setAttribute("aria-hidden", "true");
-    baseLabel.setAttribute("data-slash-section", "base");
-    baseLabel.textContent = t("Base actions");
-    list.insertBefore(baseLabel, baseAnchor);
-    // "Agent actions" section label (at the very top)
-    const agentLabel = mkAgentEl("div", "llm-slash-menu-section");
-    agentLabel.setAttribute("aria-hidden", "true");
-    agentLabel.textContent = t("Agent actions");
-    list.insertBefore(agentLabel, baseLabel);
-    // Agent action items (between agent label and base label)
-    filtered.forEach((action) => {
-      const btn = mkAgentEl(
-        "button",
-        "llm-action-picker-item",
-      ) as HTMLButtonElement;
-      btn.type = "button";
-      btn.title = action.description;
-      const titleEl = ownerDoc.createElement("span");
-      titleEl.className = "llm-action-picker-title";
-      titleEl.textContent = action.name;
-      // Inline description matching the skills menu pattern — single-line
-      // ellipsized via .llm-action-picker-description CSS; hover reveals
-      // the full description via btn.title. We show just the first sentence
-      // because action.description is typically a multi-sentence
-      // paragraph written for the LLM, and single-line truncation on the
-      // full text often cuts mid-word or reveals nothing meaningful.
-      const descEl = ownerDoc.createElement("span");
-      descEl.className = "llm-action-picker-description";
-      descEl.textContent = firstSentence(action.description);
-      btn.append(titleEl, descEl);
-      btn.addEventListener("click", (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        consumeActiveActionToken();
-        closeSlashMenu();
-        void insertCommandToken(action);
-      });
-      list.insertBefore(btn, baseLabel);
-    });
-  };
-
-  /** Selects an action from the (legacy) action picker by index. */
-  const selectActionPickerItem = async (index: number): Promise<void> => {
-    const action = actionPickerItems[index];
-    if (!action) return;
-    consumeActiveActionToken();
-    closeActionPicker();
-    await executeAgentAction(action);
   };
 
   function buildPaperMetaText(paper: {
@@ -8385,31 +5805,23 @@ export function setupHandlers(
   }
   function resolvePickerItemKind(
     contentType?: string,
-  ): "pdf" | "note" | "figure" | "other" {
+  ): "pdf" | "figure" | "other" {
     if (!contentType) return "other";
     if (contentType === "application/pdf") return "pdf";
-    if (contentType === ZOTERO_NOTE_CONTENT_TYPE) return "note";
     if (contentType.startsWith("image/")) return "figure";
     return "other";
   }
-  function resolvePickerKindIcon(
-    kind: "pdf" | "note" | "figure" | "other",
-  ): string {
+  function resolvePickerKindIcon(kind: "pdf" | "figure" | "other"): string {
     if (kind === "pdf") return "📚";
-    if (kind === "note") return "📝";
     if (kind === "figure") return "🖼";
     return "📎";
   }
-  function resolvePickerKindLabel(
-    kind: "pdf" | "note" | "figure" | "other",
-  ): string {
+  function resolvePickerKindLabel(kind: "pdf" | "figure" | "other"): string {
     if (kind === "pdf") return "PDF";
-    if (kind === "note") return "Note";
     if (kind === "figure") return "Figure";
     return "File";
   }
   function resolveGroupIcon(group: PaperSearchGroupCandidate): string {
-    if (group.itemKind === "standalone-note") return "📝";
     const hasPdf = group.attachments.some(
       (a) => resolvePickerItemKind(a.contentType) === "pdf",
     );
@@ -8418,10 +5830,6 @@ export function setupHandlers(
       (a) => resolvePickerItemKind(a.contentType) === "figure",
     );
     if (hasFigure) return "🖼";
-    const hasNote = group.attachments.some(
-      (a) => resolvePickerItemKind(a.contentType) === "note",
-    );
-    if (hasNote) return "📝";
     if (group.attachments.length > 0) return "📎";
     return "📄";
   }
@@ -8441,17 +5849,11 @@ export function setupHandlers(
     itemId: number,
   ): PaperSearchGroupCandidate | null =>
     paperPickerGroupByItemId.get(itemId) || null;
-  const getPaperPickerCollectionById = (
-    collectionId: number,
-  ): PaperBrowseCollectionCandidate | null =>
-    paperPickerCollectionById.get(collectionId) || null;
   const isPaperPickerGroupExpanded = (itemId: number): boolean => {
     const group = getPaperPickerGroupByItemId(itemId);
     if (!group || group.attachments.length <= 1) return false;
     return paperPickerExpandedPaperKeys.has(itemId);
   };
-  const isPaperPickerCollectionExpanded = (collectionId: number): boolean =>
-    paperPickerExpandedCollectionKeys.has(collectionId);
   const togglePaperPickerGroupExpanded = (
     itemId: number,
     expanded?: boolean,
@@ -8469,91 +5871,14 @@ export function setupHandlers(
     rebuildPaperPickerRows();
     return true;
   };
-  const togglePaperPickerCollectionExpanded = (
-    collectionId: number,
-    expanded?: boolean,
-  ): boolean => {
-    const collection = getPaperPickerCollectionById(collectionId);
-    if (!collection) return false;
-    const currentlyExpanded =
-      paperPickerExpandedCollectionKeys.has(collectionId);
-    const nextExpanded = expanded === undefined ? !currentlyExpanded : expanded;
-    if (nextExpanded === currentlyExpanded) return false;
-    if (nextExpanded) {
-      paperPickerExpandedCollectionKeys.add(collectionId);
-    } else {
-      paperPickerExpandedCollectionKeys.delete(collectionId);
-    }
-    rebuildPaperPickerRows();
-    return true;
-  };
   const setPaperPickerSearchGroups = (
     groups: PaperSearchGroupCandidate[],
   ): void => {
-    paperPickerMode = groups.length ? "search" : "empty";
-    paperPickerEmptyMessage = "No papers matched.";
     paperPickerGroups = groups;
-    paperPickerCollections = [];
     paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
-    paperPickerCollectionById = new Map<
-      number,
-      PaperBrowseCollectionCandidate
-    >();
     paperPickerExpandedPaperKeys = new Set<number>();
-    paperPickerExpandedCollectionKeys = new Set<number>();
     for (const group of groups) {
       paperPickerGroupByItemId.set(group.itemId, group);
-    }
-  };
-  /** Sets search results containing both papers and (optionally) collections. */
-  const setPaperPickerSearchResults = (
-    groups: PaperSearchGroupCandidate[],
-    collections: PaperBrowseCollectionCandidate[],
-  ): void => {
-    paperPickerMode = groups.length || collections.length ? "search" : "empty";
-    paperPickerEmptyMessage = "No items matched.";
-    paperPickerGroups = groups;
-    paperPickerCollections = collections;
-    paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
-    paperPickerCollectionById = new Map<
-      number,
-      PaperBrowseCollectionCandidate
-    >();
-    paperPickerExpandedPaperKeys = new Set<number>();
-    paperPickerExpandedCollectionKeys = new Set<number>();
-    for (const group of groups) {
-      paperPickerGroupByItemId.set(group.itemId, group);
-    }
-    for (const collection of collections) {
-      paperPickerCollectionById.set(collection.collectionId, collection);
-    }
-  };
-  const setPaperPickerCollections = (
-    collections: PaperBrowseCollectionCandidate[],
-  ): void => {
-    paperPickerMode = collections.length ? "browse" : "empty";
-    paperPickerEmptyMessage = "No references available.";
-    paperPickerGroups = [];
-    paperPickerCollections = collections;
-    paperPickerGroupByItemId = new Map<number, PaperSearchGroupCandidate>();
-    paperPickerCollectionById = new Map<
-      number,
-      PaperBrowseCollectionCandidate
-    >();
-    paperPickerExpandedPaperKeys = new Set<number>();
-    paperPickerExpandedCollectionKeys = new Set<number>();
-
-    const registerCollection = (collection: PaperBrowseCollectionCandidate) => {
-      paperPickerCollectionById.set(collection.collectionId, collection);
-      for (const paper of collection.papers) {
-        paperPickerGroupByItemId.set(paper.itemId, paper);
-      }
-      for (const child of collection.childCollections) {
-        registerCollection(child);
-      }
-    };
-    for (const collection of collections) {
-      registerCollection(collection);
     }
   };
   const rebuildPaperPickerRows = () => {
@@ -8578,39 +5903,9 @@ export function setupHandlers(
         });
       });
     };
-    const appendCollectionRows = (
-      collections: PaperBrowseCollectionCandidate[],
-      depth: number,
-    ) => {
-      for (const collection of collections) {
-        rows.push({
-          kind: "collection",
-          collectionId: collection.collectionId,
-          depth,
-        });
-        if (!isPaperPickerCollectionExpanded(collection.collectionId)) continue;
-        appendCollectionRows(collection.childCollections, depth + 1);
-        for (const paper of collection.papers) {
-          appendPaperRow(paper, depth + 1);
-        }
-      }
-    };
-
-    if (paperPickerMode === "browse") {
-      appendCollectionRows(paperPickerCollections, 0);
-    } else if (paperPickerMode === "search") {
-      // Collections first, then papers
-      for (const collection of paperPickerCollections) {
-        rows.push({
-          kind: "collection",
-          collectionId: collection.collectionId,
-          depth: 0,
-        });
-      }
-      paperPickerGroups.forEach((group) => {
-        appendPaperRow(group, 0);
-      });
-    }
+    paperPickerGroups.forEach((group) => {
+      appendPaperRow(group, 0);
+    });
 
     paperPickerRows = rows;
     if (!paperPickerRows.length) {
@@ -8654,15 +5949,6 @@ export function setupHandlers(
       if (candidateRow && candidateRow.depth === row.depth - 1) {
         return candidateIndex;
       }
-    }
-    return -1;
-  };
-  const findPaperPickerFirstChildRowIndex = (index: number): number => {
-    const row = getPaperPickerRowAt(index);
-    if (!row) return -1;
-    const nextRow = getPaperPickerRowAt(index + 1);
-    if (nextRow && nextRow.depth === row.depth + 1) {
-      return index + 1;
     }
     return -1;
   };
@@ -8720,49 +6006,11 @@ export function setupHandlers(
     }
     return true;
   };
-  const upsertNoteTextContext = (contextItemId: number): boolean => {
-    const textContextKey = getTextContextConversationKey();
-    if (!item || !textContextKey) return false;
-    const noteItem = Zotero.Items.get(contextItemId) || null;
-    const snapshot = readNoteSnapshot(noteItem);
-    if (!snapshot?.text) {
-      if (status) setStatus(status, t("Selected note is empty"), "warning");
-      return false;
-    }
-    const appended = appendSelectedTextContextForItem(
-      textContextKey,
-      snapshot.text,
-      "note",
-      undefined,
-      undefined,
-      {
-        libraryID: snapshot.libraryID,
-        noteItemKey: snapshot.noteItemKey || "",
-        noteItemId: snapshot.noteId,
-        parentItemId: snapshot.parentItemId,
-        parentItemKey: snapshot.parentItemKey,
-        noteKind: snapshot.noteKind,
-        title: snapshot.title || `Note ${snapshot.noteId}`,
-      },
-    );
-    if (!appended) {
-      if (status) setStatus(status, t("Note already selected"), "warning");
-      return false;
-    }
-    updateSelectedTextPreviewPreservingScroll();
-    if (status) setStatus(status, t("Note context added as text."), "ready");
-    return true;
-  };
   const addZoteroItemsAsPaperContext = (zoteroItems: Zotero.Item[]): void => {
     if (!item) return;
     let added = 0;
     let skipped = 0;
     for (const zi of zoteroItems) {
-      if ((zi as any).isNote?.()) {
-        if (upsertNoteTextContext(zi.id)) added++;
-        else skipped++;
-        continue;
-      }
       const ref = resolvePaperContextRefFromItem(zi);
       if (!ref) {
         skipped++;
@@ -8806,7 +6054,7 @@ export function setupHandlers(
   const consumeActiveAtToken = (): boolean => {
     const token = getActiveAtToken();
     if (!token) return false;
-    const beforeAt = inputBox.value.slice(0, token.slashStart);
+    const beforeAt = inputBox.value.slice(0, token.tokenStart);
     const afterCaret = inputBox.value.slice(token.caretEnd);
     inputBox.value = `${beforeAt}${afterCaret}`;
     persistDraftInputForCurrentConversation();
@@ -8814,50 +6062,16 @@ export function setupHandlers(
     inputBox.setSelectionRange(nextCaret, nextCaret);
     return true;
   };
-  /** Removes only the query text after `@`, preserving the `@` character itself.
-   *  Used after item selection so the picker can reset to browse mode. */
-  const consumeAtQueryOnly = (): boolean => {
-    const token = getActiveAtToken();
-    if (!token || token.query.length === 0) return false;
-    const beforeQuery = inputBox.value.slice(0, token.slashStart + 1); // keeps "@"
-    const afterCaret = inputBox.value.slice(token.caretEnd);
-    inputBox.value = `${beforeQuery}${afterCaret}`;
-    persistDraftInputForCurrentConversation();
-    const nextCaret = token.slashStart + 1; // right after "@"
-    inputBox.setSelectionRange(nextCaret, nextCaret);
-    return true;
-  };
-  const consumeActiveSlashToken = (): boolean => consumeActiveAtToken();
-  const consumeActiveActionToken = (): boolean => {
-    const token = getActiveActionToken();
-    if (!token) return false;
-    const beforeSlash = inputBox.value.slice(0, token.slashStart);
-    const afterCaret = inputBox.value.slice(token.caretEnd);
-    inputBox.value = `${beforeSlash}${afterCaret}`;
-    persistDraftInputForCurrentConversation();
-    const nextCaret = beforeSlash.length;
-    inputBox.setSelectionRange(nextCaret, nextCaret);
-    return true;
-  };
   const selectPaperPickerAttachment = (
     itemId: number,
     attachmentIndex: number,
-    selectionKind: "paper-single" | "attachment",
   ): boolean => {
     const selectedGroup = getPaperPickerGroupByItemId(itemId);
     if (!selectedGroup) return false;
     const selectedAttachment = selectedGroup.attachments[attachmentIndex];
     if (!selectedAttachment) return false;
-    // Do NOT consume the @ token or close the picker — keep it open for multi-select.
-    // The picker closes when the user clicks outside, presses Escape, or removes the @ token.
     const contentType = selectedAttachment.contentType;
     const kind = resolvePickerItemKind(contentType);
-    ztoolkit.log("LLM: Picker selection", {
-      selectionKind,
-      kind,
-      itemId: selectedGroup.itemId,
-      contextItemId: selectedAttachment.contextItemId,
-    });
     if (kind === "pdf") {
       upsertPaperContext({
         itemId: selectedGroup.itemId,
@@ -8868,8 +6082,6 @@ export function setupHandlers(
         firstCreator: selectedGroup.firstCreator,
         year: selectedGroup.year,
       });
-    } else if (kind === "note") {
-      upsertNoteTextContext(selectedAttachment.contextItemId);
     } else {
       upsertOtherRefContext({
         contextItemId: selectedAttachment.contextItemId,
@@ -8882,70 +6094,23 @@ export function setupHandlers(
         refKind: kind === "figure" ? "figure" : "other",
       });
     }
-    // Clear the query text (e.g. "abc" from "@abc") but keep "@" so the picker
-    // stays open for further selections.  The ensuing schedulePaperPickerSearch()
-    // will detect the empty query after its debounce and reset to browse mode.
-    consumeAtQueryOnly();
-    schedulePaperPickerSearch();
-    // Re-render to show visual feedback (selected state) while keeping picker open
-    renderPaperPicker();
+    closePaperPicker({ consumeToken: true });
     inputBox.focus({ preventScroll: true });
-    return true;
-  };
-  /** Selects a collection and adds it as context, keeping the picker open for multi-select. */
-  const selectCollectionFromPickerUnified = (collectionId: number): boolean => {
-    if (!item) return false;
-    const collection = getPaperPickerCollectionById(collectionId);
-    if (!collection) return false;
-    const libraryID = getCurrentLibraryID();
-    const ref: CollectionContextRef = {
-      collectionId: collection.collectionId,
-      name: collection.name,
-      libraryID,
-    };
-    const existing = selectedCollectionContextCache.get(item.id) || [];
-    if (existing.some((e) => e.collectionId === ref.collectionId)) {
-      if (status)
-        setStatus(status, t("Collection already selected"), "warning");
-      return false;
-    }
-    selectedCollectionContextCache.set(item.id, [...existing, ref]);
-    consumeAtQueryOnly();
-    schedulePaperPickerSearch();
-    updatePaperPreviewPreservingScroll();
-    renderPaperPicker();
-    inputBox.focus({ preventScroll: true });
-    if (status) setStatus(status, t("Collection context added."), "ready");
     return true;
   };
   const selectPaperPickerRowAt = (index: number): boolean => {
     const row = getPaperPickerRowAt(index);
     if (!row) return false;
-    if (row.kind === "collection") {
-      if (paperPickerMode === "search") {
-        return selectCollectionFromPickerUnified(row.collectionId);
-      }
-      togglePaperPickerCollectionExpanded(row.collectionId);
-      renderPaperPicker();
-      return true;
-    }
     if (row.kind === "attachment") {
-      return selectPaperPickerAttachment(
-        row.itemId,
-        row.attachmentIndex,
-        "attachment",
-      );
+      return selectPaperPickerAttachment(row.itemId, row.attachmentIndex);
     }
     const group = getPaperPickerGroupByItemId(row.itemId);
     if (!group) return false;
     if (group.attachments.length <= 1) {
-      return selectPaperPickerAttachment(row.itemId, 0, "paper-single");
+      return selectPaperPickerAttachment(row.itemId, 0);
     }
     if (!isPaperPickerGroupExpanded(row.itemId)) {
       togglePaperPickerGroupExpanded(row.itemId, true);
-      ztoolkit.log("LLM: Paper picker expanded group via keyboard", {
-        itemId: group.itemId,
-      });
       renderPaperPicker();
       return true;
     }
@@ -8960,22 +6125,6 @@ export function setupHandlers(
   const handlePaperPickerArrowRight = (): boolean => {
     const activeRow = getPaperPickerRowAt(paperPickerActiveRowIndex);
     if (!activeRow) return false;
-    if (activeRow.kind === "collection") {
-      if (!isPaperPickerCollectionExpanded(activeRow.collectionId)) {
-        togglePaperPickerCollectionExpanded(activeRow.collectionId, true);
-        renderPaperPicker();
-        return true;
-      }
-      const firstChildIndex = findPaperPickerFirstChildRowIndex(
-        paperPickerActiveRowIndex,
-      );
-      if (firstChildIndex >= 0) {
-        paperPickerActiveRowIndex = firstChildIndex;
-        renderPaperPicker();
-        return true;
-      }
-      return false;
-    }
     if (activeRow.kind !== "paper") return false;
     const group = getPaperPickerGroupByItemId(activeRow.itemId);
     if (!group || group.attachments.length <= 1) return false;
@@ -8997,22 +6146,6 @@ export function setupHandlers(
   const handlePaperPickerArrowLeft = (): boolean => {
     const activeRow = getPaperPickerRowAt(paperPickerActiveRowIndex);
     if (!activeRow) return false;
-    if (activeRow.kind === "collection") {
-      if (isPaperPickerCollectionExpanded(activeRow.collectionId)) {
-        togglePaperPickerCollectionExpanded(activeRow.collectionId, false);
-        renderPaperPicker();
-        return true;
-      }
-      const parentIndex = findPaperPickerParentRowIndex(
-        paperPickerActiveRowIndex,
-      );
-      if (parentIndex >= 0) {
-        paperPickerActiveRowIndex = parentIndex;
-        renderPaperPicker();
-        return true;
-      }
-      return false;
-    }
     if (activeRow.kind === "attachment") {
       const parentIndex = findPaperPickerPaperRowIndex(activeRow.itemId);
       if (parentIndex >= 0 && parentIndex !== paperPickerActiveRowIndex) {
@@ -9046,25 +6179,16 @@ export function setupHandlers(
     if (!paperPicker || !paperPickerList) return;
     const ownerDoc = body.ownerDocument;
     if (!ownerDoc) return;
-    if (paperPickerMode === "empty") {
-      paperPickerList.innerHTML = "";
-      paperPicker.scrollTop = 0;
-      const empty = createElement(ownerDoc, "div", "llm-paper-picker-empty", {
-        textContent: paperPickerEmptyMessage,
-      });
-      paperPickerList.appendChild(empty);
-      paperPicker.style.display = "block";
-      return;
-    }
     rebuildPaperPickerRows();
     if (!paperPickerRows.length) {
-      const emptyMessage =
-        paperPickerMode === "browse"
-          ? "No items available."
-          : "No items matched.";
-      paperPickerMode = "empty";
-      paperPickerEmptyMessage = emptyMessage;
-      renderPaperPicker();
+      paperPickerList.innerHTML = "";
+      paperPicker.scrollTop = 0;
+      paperPickerList.appendChild(
+        createElement(ownerDoc, "div", "llm-paper-picker-empty", {
+          textContent: "No papers matched.",
+        }),
+      );
+      paperPicker.style.display = "block";
       return;
     }
     paperPickerList.innerHTML = "";
@@ -9075,9 +6199,7 @@ export function setupHandlers(
         `llm-paper-picker-item ${
           row.kind === "attachment"
             ? "llm-paper-picker-attachment-row"
-            : row.kind === "paper"
-              ? "llm-paper-picker-group-row"
-              : "llm-paper-picker-group-row llm-paper-picker-collection-row"
+            : "llm-paper-picker-group-row"
         }`,
       );
       option.setAttribute("role", "option");
@@ -9112,67 +6234,7 @@ export function setupHandlers(
         }
       }
 
-      if (row.kind === "collection") {
-        const collection = getPaperPickerCollectionById(row.collectionId);
-        if (!collection) return;
-        // Visual feedback: mark already-selected collections
-        if (item) {
-          const selectedCollections =
-            selectedCollectionContextCache.get(item.id) || [];
-          if (
-            selectedCollections.some((c) => c.collectionId === row.collectionId)
-          ) {
-            option.classList.add("llm-paper-picker-selected");
-          }
-        }
-        option.setAttribute(
-          "aria-expanded",
-          isPaperPickerCollectionExpanded(row.collectionId) ? "true" : "false",
-        );
-        const rowMain = createElement(
-          ownerDoc,
-          "div",
-          "llm-paper-picker-group-row-main",
-        );
-        const titleLine = createElement(
-          ownerDoc,
-          "div",
-          "llm-paper-picker-group-title-line",
-        );
-        const chevron = createElement(
-          ownerDoc,
-          "span",
-          isPaperPickerCollectionExpanded(row.collectionId)
-            ? "llm-paper-picker-group-chevron llm-folder-open"
-            : "llm-paper-picker-group-chevron llm-folder-closed",
-        );
-        const title = createElement(
-          ownerDoc,
-          "span",
-          "llm-paper-picker-title",
-          {
-            textContent: collection.name,
-            title: collection.name,
-          },
-        );
-        titleLine.append(chevron, title);
-        rowMain.appendChild(titleLine);
-        option.appendChild(rowMain);
-
-        // "+" button to add collection as context (visible on hover)
-        const addBtn = createElement(
-          ownerDoc,
-          "button",
-          "llm-paper-picker-collection-add-btn",
-          { textContent: "+", title: t("Add collection as context") },
-        );
-        addBtn.addEventListener("mousedown", (e: Event) => {
-          e.preventDefault();
-          e.stopPropagation();
-          selectCollectionFromPickerUnified(row.collectionId);
-        });
-        option.appendChild(addBtn);
-      } else if (row.kind === "paper") {
+      if (row.kind === "paper") {
         const group = getPaperPickerGroupByItemId(row.itemId);
         if (!group) return;
         const isMultiAttachment = group.attachments.length > 1;
@@ -9286,20 +6348,11 @@ export function setupHandlers(
         e.preventDefault();
         e.stopPropagation();
         paperPickerActiveRowIndex = rowIndex;
-        if (row.kind === "collection") {
-          if (paperPickerMode === "search") {
-            selectCollectionFromPickerUnified(row.collectionId);
-            return;
-          }
-          togglePaperPickerCollectionExpanded(row.collectionId);
-          renderPaperPicker();
-          return;
-        }
         if (row.kind === "paper") {
           const group = getPaperPickerGroupByItemId(row.itemId);
           if (!group) return;
           if (group.attachments.length <= 1) {
-            selectPaperPickerAttachment(row.itemId, 0, "paper-single");
+            selectPaperPickerAttachment(row.itemId, 0);
             return;
           }
           togglePaperPickerGroupExpanded(row.itemId);
@@ -9310,11 +6363,7 @@ export function setupHandlers(
           renderPaperPicker();
           return;
         }
-        selectPaperPickerAttachment(
-          row.itemId,
-          row.attachmentIndex,
-          "attachment",
-        );
+        selectPaperPickerAttachment(row.itemId, row.attachmentIndex);
       };
       option.addEventListener("mousedown", choosePaperRow);
       option.addEventListener("click", (e: Event) => {
@@ -9349,8 +6398,8 @@ export function setupHandlers(
     } catch {
       /* */
     }
-    const slashToken = getActiveSlashToken();
-    if (!slashToken) {
+    const atToken = getActiveAtToken();
+    if (!atToken) {
       closePaperPicker();
       return;
     }
@@ -9359,8 +6408,8 @@ export function setupHandlers(
     const runSearch = async () => {
       paperPickerDebounceTimer = null;
       if (!item) return;
-      const activeSlashToken = getActiveSlashToken();
-      if (!activeSlashToken) {
+      const activeAtToken = getActiveAtToken();
+      if (!activeAtToken) {
         closePaperPicker();
         return;
       }
@@ -9369,29 +6418,23 @@ export function setupHandlers(
         closePaperPicker();
         return;
       }
-      const normalizedQuery = normalizePaperSearchText(activeSlashToken.query);
+      const normalizedQuery = normalizePaperSearchText(activeAtToken.query);
       if (!normalizedQuery) {
-        const collections = await browseAllItemCandidates(libraryID);
-        if (requestId !== paperPickerRequestSeq) return;
-        if (!getActiveSlashToken()) {
-          closePaperPicker();
-          return;
-        }
-        setPaperPickerCollections(collections);
-        paperPickerActiveRowIndex = 0;
-        renderPaperPicker();
+        closePaperPicker({ consumeToken: false });
         return;
       }
-      const [paperResults, collectionResults] = await Promise.all([
-        searchAllItemCandidates(libraryID, activeSlashToken.query, 20),
-        searchCollectionCandidates(libraryID, activeSlashToken.query),
-      ]);
+      const paperResults = await searchPaperCandidates(
+        libraryID,
+        activeAtToken.query,
+        undefined,
+        20,
+      );
       if (requestId !== paperPickerRequestSeq) return;
-      if (!getActiveSlashToken()) {
+      if (!getActiveAtToken()) {
         closePaperPicker();
         return;
       }
-      setPaperPickerSearchResults(paperResults, collectionResults);
+      setPaperPickerSearchGroups(paperResults);
       paperPickerActiveRowIndex = 0;
       renderPaperPicker();
     };
@@ -9500,27 +6543,10 @@ export function setupHandlers(
       autoResizeInput();
       persistDraftInputForCurrentConversation();
       schedulePaperPickerSearch();
-      scheduleActionPickerTrigger();
     });
     inputBox.addEventListener("click", () => {
       schedulePaperPickerSearch();
-      scheduleActionPickerTrigger();
     });
-
-    // Command row dismiss button (reuses .llm-paper-context-clear class)
-    const commandRowClearBtn = body.querySelector(
-      "#llm-command-row .llm-paper-context-clear",
-    );
-    if (commandRowClearBtn) {
-      commandRowClearBtn.addEventListener("click", () => {
-        if (forcedSkillId) {
-          clearForcedSkill();
-        } else if (activeCommandAction) {
-          clearCommandChip();
-        }
-        inputBox.focus({ preventScroll: true });
-      });
-    }
 
     inputBox.addEventListener("keyup", (e: Event) => {
       const key = (e as KeyboardEvent).key;
@@ -9533,15 +6559,127 @@ export function setupHandlers(
         return;
       if (key === "Enter" || key === "Tab" || key === "Escape") return;
       schedulePaperPickerSearch();
-      scheduleActionPickerTrigger();
     });
   }
+
+  const encodeBytesBase64 = (bytes: Uint8Array): string => {
+    let binaryStr = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binaryStr += String.fromCharCode(
+        ...bytes.subarray(i, Math.min(bytes.length, i + chunkSize)),
+      );
+    }
+    return btoa(binaryStr);
+  };
+
+  const resolvePdfFilePath = async (
+    paperContext: PaperContextRef,
+  ): Promise<string> => {
+    const attachment = Zotero.Items.get(paperContext.contextItemId);
+    if (
+      !attachment?.isAttachment?.() ||
+      attachment.attachmentContentType !== "application/pdf"
+    ) {
+      throw new Error("Not a PDF attachment");
+    }
+    const asyncPath = await (
+      attachment as unknown as {
+        getFilePathAsync?: () => Promise<string | false>;
+      }
+    ).getFilePathAsync?.();
+    if (asyncPath) return asyncPath as string;
+    if (
+      typeof (attachment as { getFilePath?: () => string | undefined })
+        .getFilePath === "function"
+    ) {
+      const filePath = (
+        attachment as { getFilePath: () => string | undefined }
+      ).getFilePath();
+      if (filePath) return filePath;
+    }
+    const attachmentPath = (
+      attachment as unknown as { attachmentPath?: string }
+    ).attachmentPath;
+    if (!attachmentPath) throw new Error("Could not locate PDF file");
+    return attachmentPath;
+  };
+
+  const resolvePdfBytes = async (
+    paperContext: PaperContextRef,
+  ): Promise<Uint8Array> =>
+    readAttachmentBytes(await resolvePdfFilePath(paperContext));
+
+  const resolvePdfPaperAttachments = async (
+    paperContexts: PaperContextRef[],
+  ): Promise<ChatAttachment[]> => {
+    const results: ChatAttachment[] = [];
+    for (const pc of paperContexts) {
+      try {
+        const filePath = await resolvePdfFilePath(pc);
+        const bytes = await readAttachmentBytes(filePath);
+        if (bytes.byteLength > MAX_UPLOAD_PDF_SIZE_BYTES) continue;
+        const fileName = filePath.split(/[\\/]/).pop() || "document.pdf";
+        const persisted = await persistAttachmentBlob(
+          fileName,
+          new Uint8Array(bytes),
+        );
+        results.push({
+          id: `pdf-paper-${pc.contextItemId}-${Date.now()}`,
+          name: fileName,
+          mimeType: "application/pdf",
+          sizeBytes: bytes.byteLength,
+          category: "pdf",
+          storedPath: persisted.storedPath,
+          contentHash: persisted.contentHash,
+        });
+      } catch (err) {
+        ztoolkit.log("LLM: Failed to resolve PDF paper attachment", err);
+      }
+    }
+    return results;
+  };
+
+  const renderPdfPagesAsImages = async (
+    paperContexts: PaperContextRef[],
+  ): Promise<string[]> => {
+    const dataUrls: string[] = [];
+    for (const pc of paperContexts) {
+      try {
+        const pages = await renderAllPdfPages(pc.contextItemId);
+        for (const page of pages) {
+          const bytes = await readAttachmentBytes(page.storedPath);
+          if (bytes.byteLength > 0) {
+            dataUrls.push(`data:image/png;base64,${encodeBytesBase64(bytes)}`);
+          }
+        }
+      } catch (err) {
+        ztoolkit.log(
+          "LLM: Failed to render PDF pages for",
+          pc.contextItemId,
+          err,
+        );
+      }
+    }
+    return dataUrls;
+  };
+
+  const uploadPdfForProvider = async (params: {
+    apiBase: string;
+    apiKey: string;
+    pdfBytes: Uint8Array;
+    fileName: string;
+  }) => {
+    const pdfUpload = await import("../../utils/pdfUploadPreprocessor");
+    const provider = pdfUpload.detectPdfUploadProvider(params.apiBase);
+    return pdfUpload.uploadPdfForProvider({ provider, ...params });
+  };
 
   const { doSend } = createSendFlowController({
     body,
     inputBox,
     getItem: () => item,
-    closeSlashMenu,
+    closeAddMenu,
     closePaperPicker,
     getSelectedTextContextEntries,
     getSelectedPaperContexts: (itemId) =>
@@ -9552,162 +6690,30 @@ export function setupHandlers(
       getEffectivePdfModePaperContexts(currentItem, selectedPaperContexts),
     hasActivePdfFullTextPapers: (
       currentItem: Zotero.Item,
-      selectedPaperContexts?: any[],
+      selectedPaperContexts?: PaperContextRef[],
     ) => hasActivePdfFullTextPapers(currentItem, selectedPaperContexts),
     hasUploadedPdfInCurrentWebChatConversation,
     markWebChatPdfUploadedForCurrentConversation,
-    resolvePdfPaperAttachments: async (paperContexts) => {
-      const results: import("./types").ChatAttachment[] = [];
-      for (const pc of paperContexts) {
-        try {
-          const attachment = Zotero.Items.get(pc.contextItemId);
-          if (
-            !attachment?.isAttachment?.() ||
-            attachment.attachmentContentType !== "application/pdf"
-          )
-            continue;
-          const filePath = await (async () => {
-            const asyncPath = await (
-              attachment as unknown as {
-                getFilePathAsync?: () => Promise<string | false>;
-              }
-            ).getFilePathAsync?.();
-            if (asyncPath) return asyncPath as string;
-            if (
-              typeof (attachment as { getFilePath?: () => string | undefined })
-                .getFilePath === "function"
-            ) {
-              return (
-                attachment as { getFilePath: () => string | undefined }
-              ).getFilePath();
-            }
-            return (attachment as unknown as { attachmentPath?: string })
-              .attachmentPath;
-          })();
-          if (!filePath) continue;
-          const bytes = await readAttachmentBytes(filePath);
-          if (bytes.byteLength > MAX_UPLOAD_PDF_SIZE_BYTES) continue;
-          const fileName = filePath.split(/[\\/]/).pop() || "document.pdf";
-          const persisted = await persistAttachmentBlob(
-            fileName,
-            new Uint8Array(bytes),
-          );
-          results.push({
-            id: `pdf-paper-${pc.contextItemId}-${Date.now()}`,
-            name: fileName,
-            mimeType: "application/pdf",
-            sizeBytes: bytes.byteLength,
-            category: "pdf",
-            storedPath: persisted.storedPath,
-            contentHash: persisted.contentHash,
-          });
-        } catch (err) {
-          ztoolkit.log("LLM: Failed to resolve PDF paper attachment", err);
-        }
-      }
-      return results;
-    },
-    renderPdfPagesAsImages: async (paperContexts) => {
-      const { renderAllPdfPages } =
-        await import("../../agent/services/pdfPageService");
-      const dataUrls: string[] = [];
-      for (const pc of paperContexts) {
-        try {
-          const pages = await renderAllPdfPages(pc.contextItemId);
-          for (const page of pages) {
-            // Read the persisted PNG and convert to data URL for the image pipeline
-            const bytes = await readAttachmentBytes(page.storedPath);
-            if (bytes.byteLength > 0) {
-              // Encode in chunks to avoid "too many function arguments" with large images
-              let binaryStr = "";
-              const chunkSize = 0x8000;
-              for (let i = 0; i < bytes.length; i += chunkSize) {
-                binaryStr += String.fromCharCode(
-                  ...bytes.subarray(i, Math.min(bytes.length, i + chunkSize)),
-                );
-              }
-              const base64 = btoa(binaryStr);
-              dataUrls.push(`data:image/png;base64,${base64}`);
-            }
-          }
-        } catch (err) {
-          ztoolkit.log(
-            "LLM: Failed to render PDF pages for",
-            pc.contextItemId,
-            err,
-          );
-        }
-      }
-      return dataUrls;
-    },
+    resolvePdfPaperAttachments,
+    renderPdfPagesAsImages,
     getModelPdfSupport: (modelName, protocol, authMode, apiBase) =>
       getModelPdfSupport(modelName, protocol, authMode, apiBase),
-    uploadPdfForProvider: async (params) => {
-      const { detectPdfUploadProvider, uploadPdfForProvider } =
-        await import("../../utils/pdfUploadPreprocessor");
-      const provider = detectPdfUploadProvider(params.apiBase);
-      return uploadPdfForProvider({ provider, ...params });
-    },
-    resolvePdfBytes: async (pc) => {
-      const attachment = Zotero.Items.get(pc.contextItemId);
-      if (
-        !attachment?.isAttachment?.() ||
-        attachment.attachmentContentType !== "application/pdf"
-      ) {
-        throw new Error("Not a PDF attachment");
-      }
-      const filePath = await (async () => {
-        const asyncPath = await (
-          attachment as unknown as {
-            getFilePathAsync?: () => Promise<string | false>;
-          }
-        ).getFilePathAsync?.();
-        if (asyncPath) return asyncPath as string;
-        if (
-          typeof (attachment as { getFilePath?: () => string | undefined })
-            .getFilePath === "function"
-        )
-          return (
-            attachment as { getFilePath: () => string | undefined }
-          ).getFilePath();
-        return (attachment as unknown as { attachmentPath?: string })
-          .attachmentPath;
-      })();
-      if (!filePath) throw new Error("Could not locate PDF file");
-      return readAttachmentBytes(filePath);
-    },
-    encodeBytesBase64: (bytes: Uint8Array) => {
-      let binaryStr = "";
-      const chunkSize = 0x8000;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        binaryStr += String.fromCharCode(
-          ...bytes.subarray(i, Math.min(bytes.length, i + chunkSize)),
-        );
-      }
-      return btoa(binaryStr);
-    },
+    uploadPdfForProvider,
+    resolvePdfBytes,
+    encodeBytesBase64,
     getSelectedFiles: (itemId) => selectedFileAttachmentCache.get(itemId) || [],
     getSelectedImages: (itemId) => selectedImageCache.get(itemId) || [],
     resolvePromptText,
     buildQuestionWithSelectedTextContexts,
     buildModelPromptWithFileContext,
-    isAgentMode: () => getCurrentRuntimeMode() === "agent",
-    isGlobalMode,
     normalizeConversationTitleSeed,
     getConversationKey,
-    touchGlobalConversationTitle,
     touchPaperConversationTitle,
     getSelectedProfile,
     getCurrentModelName: () => getSelectedModelInfo().currentModel,
-    isScreenshotUnsupportedModel,
+    isImageContextUnsupportedModel,
     getSelectedReasoning,
     getAdvancedModelParams,
-    getActiveEditSession: () => activeEditSession,
-    setActiveEditSession: (nextEditSession) => {
-      activeEditSession = nextEditSession;
-    },
-    getLatestEditablePair,
-    editLatestUserMessageAndRetry,
     sendQuestion,
     retainPinnedImageState,
     retainPaperState,
@@ -9720,44 +6726,15 @@ export function setupHandlers(
     updateImagePreviewPreservingScroll,
     updateSelectedTextPreviewPreservingScroll,
     scheduleAttachmentGc,
-    refreshGlobalHistoryHeader: () => {
-      void refreshGlobalHistoryHeader("mutation");
+    refreshPaperHistoryHeader: () => {
+      void refreshPaperHistoryHeader("mutation");
     },
     persistDraftInput: persistDraftInputForCurrentConversation,
-    autoLockGlobalChat: () => {
-      if (!item || !isGlobalMode() || isNoteSession()) return;
-      const ck = conversationKey;
-      if (ck === null) return;
-      const libraryID = getCurrentLibraryID();
-      const existingLock = getLockedGlobalConversationKey(libraryID);
-      if (existingLock) return; // already manually locked — don't override
-      setLockedGlobalConversationKey(libraryID, ck);
-      addAutoLockedGlobalConversationKey(ck);
-      syncConversationIdentity();
-    },
-    autoUnlockGlobalChat: () => {
-      const ck = conversationKey;
-      if (ck === null || !isAutoLockedGlobalConversation(ck)) return;
-      removeAutoLockedGlobalConversationKey(ck);
-      const libraryID = getCurrentLibraryID();
-      const currentLock = getLockedGlobalConversationKey(libraryID);
-      if (currentLock === ck) {
-        setLockedGlobalConversationKey(libraryID, null);
-        syncConversationIdentity();
-      }
-    },
     setStatusMessage: status
       ? (message, level) => {
           setStatus(status, message, level);
         }
       : undefined,
-    editStaleStatusText: EDIT_STALE_STATUS_TEXT,
-    consumeForcedSkillIds: () => {
-      if (!forcedSkillId) return undefined;
-      const ids = [forcedSkillId];
-      clearForcedSkill();
-      return ids;
-    },
   });
   const { clearCurrentConversation } = createClearConversationController({
     getConversationKey: () => (item ? getConversationKey(item) : null),
@@ -9778,14 +6755,13 @@ export function setupHandlers(
     },
     clearStoredConversation,
     resetConversationTitle: clearConversationTitle,
-    clearOwnerAttachmentRefs,
+    clearConversationAttachmentRefs,
     removeConversationAttachmentFiles,
     refreshChatPreservingScroll,
-    refreshGlobalHistoryHeader: () => {
-      return refreshGlobalHistoryHeader("mutation");
+    refreshPaperHistoryHeader: () => {
+      return refreshPaperHistoryHeader("mutation");
     },
     scheduleAttachmentGc,
-    clearAgentToolCaches: clearAllAgentToolCaches,
     setStatusMessage: status
       ? (message, level) => {
           setStatus(status, message, level);
@@ -9794,16 +6770,6 @@ export function setupHandlers(
     logError: (message, err) => {
       ztoolkit.log(message, err);
     },
-    // [webchat] Check if the currently selected model uses webchat auth
-    isWebChatActive: () => {
-      const { selectedEntry } = getSelectedModelInfo();
-      return selectedEntry?.authMode === "webchat";
-    },
-    getWebChatHost: () => {
-      const port = Zotero.Prefs.get("httpServer.port") || 23119;
-      return `http://127.0.0.1:${port}/llm-for-zotero/webchat`;
-    },
-    markNextWebChatSendAsNewChat,
   });
   const executeSend = async () => {
     // If the inline edit widget is active, route through editUserTurnAndRetry
@@ -9821,17 +6787,13 @@ export function setupHandlers(
       const selectedTextPaperContexts = selectedContexts.map(
         (entry) => entry.paperContext,
       );
-      const selectedTextNoteContexts = selectedContexts.map(
-        (entry) => entry.noteContext,
-      );
       const allPaperContexts = normalizePaperContextEntries(
         selectedPaperContextCache.get(currentItem.id) || [],
       );
-      // Agent mode always uses text/MinerU pipeline — it fetches PDF pages on demand
-      const isAgent = getCurrentRuntimeMode() === "agent";
-      const pdfModePapers = isAgent
-        ? []
-        : getEffectivePdfModePaperContexts(currentItem, allPaperContexts);
+      const pdfModePapers = getEffectivePdfModePaperContexts(
+        currentItem,
+        allPaperContexts,
+      );
       const pdfModeKeys = new Set(
         pdfModePapers.map((p) => `${p.itemId}:${p.contextItemId}`),
       );
@@ -9848,15 +6810,13 @@ export function setupHandlers(
         getSelectedModelInfo().currentModel ||
         ""
       ).trim();
-      // Resolve PDF-mode papers with the same provider-capability rules as
-      // the normal send flow so edit+retry preserves multimodal context.
       const pdfSupport = getModelPdfSupport(
         activeModelName,
         selectedProfile?.providerProtocol,
         selectedProfile?.authMode,
         selectedProfile?.apiBase,
       );
-      const pdfAttachments: import("./types").ChatAttachment[] = [];
+      let pdfAttachments: ChatAttachment[] = [];
       const pdfPageImageDataUrls: string[] = [];
       const pdfUploadSystemMessages: string[] = [];
       if (pdfModePapers.length) {
@@ -9865,44 +6825,12 @@ export function setupHandlers(
           selectedProfile?.apiBase &&
           selectedProfile?.apiKey
         ) {
-          const { detectPdfUploadProvider, uploadPdfForProvider } =
-            await import("../../utils/pdfUploadPreprocessor");
-          const provider = detectPdfUploadProvider(selectedProfile.apiBase);
           for (const pc of pdfModePapers) {
             try {
-              const attachment = Zotero.Items.get(pc.contextItemId);
-              if (
-                !attachment?.isAttachment?.() ||
-                attachment.attachmentContentType !== "application/pdf"
-              ) {
-                continue;
-              }
-              const filePath = await (async () => {
-                const asyncPath = await (
-                  attachment as unknown as {
-                    getFilePathAsync?: () => Promise<string | false>;
-                  }
-                ).getFilePathAsync?.();
-                if (asyncPath) return asyncPath as string;
-                if (
-                  typeof (
-                    attachment as { getFilePath?: () => string | undefined }
-                  ).getFilePath === "function"
-                ) {
-                  return (
-                    attachment as { getFilePath: () => string | undefined }
-                  ).getFilePath();
-                }
-                return (attachment as unknown as { attachmentPath?: string })
-                  .attachmentPath;
-              })();
-              if (!filePath) continue;
-              const bytes = await readAttachmentBytes(filePath);
               const result = await uploadPdfForProvider({
-                provider,
                 apiBase: selectedProfile.apiBase,
                 apiKey: selectedProfile.apiKey,
-                pdfBytes: bytes,
+                pdfBytes: await resolvePdfBytes(pc),
                 fileName: (() => {
                   const raw = pc.attachmentTitle || pc.title || "document";
                   return /\.pdf$/i.test(raw) ? raw : `${raw}.pdf`;
@@ -9922,43 +6850,9 @@ export function setupHandlers(
         } else if (pdfSupport === "image_url") {
           for (const pc of pdfModePapers) {
             try {
-              const attachment = Zotero.Items.get(pc.contextItemId);
-              if (
-                !attachment?.isAttachment?.() ||
-                attachment.attachmentContentType !== "application/pdf"
-              ) {
-                continue;
-              }
-              const filePath = await (async () => {
-                const asyncPath = await (
-                  attachment as unknown as {
-                    getFilePathAsync?: () => Promise<string | false>;
-                  }
-                ).getFilePathAsync?.();
-                if (asyncPath) return asyncPath as string;
-                if (
-                  typeof (
-                    attachment as { getFilePath?: () => string | undefined }
-                  ).getFilePath === "function"
-                ) {
-                  return (
-                    attachment as { getFilePath: () => string | undefined }
-                  ).getFilePath();
-                }
-                return (attachment as unknown as { attachmentPath?: string })
-                  .attachmentPath;
-              })();
-              if (!filePath) continue;
-              const bytes = await readAttachmentBytes(filePath);
-              let binaryStr = "";
-              const chunkSize = 0x8000;
-              for (let i = 0; i < bytes.length; i += chunkSize) {
-                binaryStr += String.fromCharCode(
-                  ...bytes.subarray(i, Math.min(bytes.length, i + chunkSize)),
-                );
-              }
+              const bytes = await resolvePdfBytes(pc);
               pdfPageImageDataUrls.push(
-                `data:application/pdf;base64,${btoa(binaryStr)}`,
+                `data:application/pdf;base64,${encodeBytesBase64(bytes)}`,
               );
             } catch (err) {
               ztoolkit.log(
@@ -9969,85 +6863,11 @@ export function setupHandlers(
             }
           }
         } else if (pdfSupport === "vision") {
-          const { renderAllPdfPages } =
-            await import("../../agent/services/pdfPageService");
-          for (const pc of pdfModePapers) {
-            try {
-              const pages = await renderAllPdfPages(pc.contextItemId);
-              for (const page of pages) {
-                const bytes = await readAttachmentBytes(page.storedPath);
-                if (bytes.byteLength <= 0) continue;
-                let binaryStr = "";
-                const chunkSize = 0x8000;
-                for (let i = 0; i < bytes.length; i += chunkSize) {
-                  binaryStr += String.fromCharCode(
-                    ...bytes.subarray(i, Math.min(bytes.length, i + chunkSize)),
-                  );
-                }
-                pdfPageImageDataUrls.push(
-                  `data:image/png;base64,${btoa(binaryStr)}`,
-                );
-              }
-            } catch (err) {
-              ztoolkit.log(
-                "LLM: Failed to render PDF pages for edit",
-                pc.contextItemId,
-                err,
-              );
-            }
-          }
+          pdfPageImageDataUrls.push(
+            ...(await renderPdfPagesAsImages(pdfModePapers)),
+          );
         } else if (pdfSupport === "native") {
-          for (const pc of pdfModePapers) {
-            try {
-              const attachment = Zotero.Items.get(pc.contextItemId);
-              if (
-                !attachment?.isAttachment?.() ||
-                attachment.attachmentContentType !== "application/pdf"
-              )
-                continue;
-              const filePath = await (async () => {
-                const asyncPath = await (
-                  attachment as unknown as {
-                    getFilePathAsync?: () => Promise<string | false>;
-                  }
-                ).getFilePathAsync?.();
-                if (asyncPath) return asyncPath as string;
-                if (
-                  typeof (
-                    attachment as { getFilePath?: () => string | undefined }
-                  ).getFilePath === "function"
-                )
-                  return (
-                    attachment as { getFilePath: () => string | undefined }
-                  ).getFilePath();
-                return (attachment as unknown as { attachmentPath?: string })
-                  .attachmentPath;
-              })();
-              if (!filePath) continue;
-              const bytes = await readAttachmentBytes(filePath);
-              if (bytes.byteLength > MAX_UPLOAD_PDF_SIZE_BYTES) continue;
-              const fileName = filePath.split(/[\\/]/).pop() || "document.pdf";
-              const persisted = await persistAttachmentBlob(
-                fileName,
-                new Uint8Array(bytes),
-              );
-              pdfAttachments.push({
-                id: `pdf-paper-${pc.contextItemId}-${Date.now()}`,
-                name: fileName,
-                mimeType: "application/pdf",
-                sizeBytes: bytes.byteLength,
-                category: "pdf",
-                storedPath: persisted.storedPath,
-                contentHash: persisted.contentHash,
-              });
-            } catch (err) {
-              ztoolkit.log(
-                "LLM: Failed to resolve PDF paper for edit",
-                pc.contextItemId,
-                err,
-              );
-            }
-          }
+          pdfAttachments = await resolvePdfPaperAttachments(pdfModePapers);
         }
       }
       const selectedFiles = [
@@ -10058,14 +6878,13 @@ export function setupHandlers(
         selectedImageCache.get(currentItem.id) || []
       ).slice(0, MAX_SELECTED_IMAGES);
       const images = [
-        ...(isScreenshotUnsupportedModel(activeModelName)
+        ...(isImageContextUnsupportedModel(activeModelName)
           ? []
           : selectedImages),
         ...pdfPageImageDataUrls,
       ].slice(0, MAX_SELECTED_IMAGES);
       const selectedReasoning = getSelectedReasoning();
       const advancedParams = getAdvancedModelParams(selectedProfile?.entryId);
-      const targetRuntimeMode = getCurrentRuntimeMode();
       inlineEditCleanup?.();
       setInlineEditCleanup(null);
       setInlineEditInputSection(null, null, null);
@@ -10086,7 +6905,6 @@ export function setupHandlers(
           selectedTexts,
           selectedTextSources,
           selectedTextPaperContexts,
-          selectedTextNoteContexts,
           screenshotImages: images,
           paperContexts: selectedPaperContexts,
           fullTextPaperContexts,
@@ -10094,10 +6912,13 @@ export function setupHandlers(
           pdfUploadSystemMessages: pdfUploadSystemMessages.length
             ? pdfUploadSystemMessages
             : undefined,
-          targetRuntimeMode,
           model: selectedProfile?.model,
           apiBase: selectedProfile?.apiBase,
           apiKey: selectedProfile?.apiKey,
+          authMode: selectedProfile?.authMode,
+          providerProtocol: selectedProfile?.providerProtocol,
+          modelEntryId: selectedProfile?.entryId,
+          modelProviderLabel: selectedProfile?.providerLabel,
           reasoning: selectedReasoning,
           advanced: advancedParams,
         });
@@ -10106,20 +6927,6 @@ export function setupHandlers(
         // edit widget (the "Editing" header div) that cleanup left in chatBox.
         refreshConversationPanels(body, currentItem);
       }
-      return;
-    }
-    closeActionPicker();
-    // Intercept command chip: if a command chip is active, route to action execution
-    const chipAction = getActiveCommandAction();
-    if (chipAction) {
-      const params = inputBox?.value?.trim() ?? "";
-      clearCommandChip(); // also restores placeholder
-      inputBox.value = "";
-      const EvtCtor2 =
-        (inputBox.ownerDocument?.defaultView as any)?.Event ?? Event;
-      inputBox.dispatchEvent(new EvtCtor2("input", { bubbles: true }));
-      persistDraftInputForCurrentConversation();
-      void handleInlineCommand(chipAction.name, params);
       return;
     }
     await doSend();
@@ -10133,96 +6940,41 @@ export function setupHandlers(
     void executeSend();
   });
 
-  if (runtimeModeBtn) {
-    runtimeModeBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item) return;
-      const nextMode: ChatRuntimeMode =
-        getCurrentRuntimeMode() === "agent" ? "chat" : "agent";
-      setCurrentRuntimeMode(nextMode);
-      if (status) {
-        setStatus(
-          status,
-          nextMode === "agent"
-            ? t("Agent mode enabled")
-            : t("Chat mode enabled"),
-          "ready",
-        );
-      }
-    });
-  }
-
   // Enter key (Shift+Enter for newline)
   inputBox.addEventListener("keydown", (e: Event) => {
     const ke = e as KeyboardEvent;
-    if (isFloatingMenuOpen(slashMenu)) {
+    if (isFloatingMenuOpen(addMenu)) {
       if (ke.key === "ArrowDown") {
         e.preventDefault();
         e.stopPropagation();
-        const items = getVisibleSlashItems();
+        const items = getVisibleAddItems();
         if (items.length) {
-          slashMenuActiveIndex = (slashMenuActiveIndex + 1) % items.length;
-          updateSlashMenuSelection();
+          addMenuActiveIndex = (addMenuActiveIndex + 1) % items.length;
+          updateAddMenuSelection();
         }
         return;
       }
       if (ke.key === "ArrowUp") {
         e.preventDefault();
         e.stopPropagation();
-        const items = getVisibleSlashItems();
+        const items = getVisibleAddItems();
         if (items.length) {
-          slashMenuActiveIndex =
-            (slashMenuActiveIndex - 1 + items.length) % items.length;
-          updateSlashMenuSelection();
+          addMenuActiveIndex =
+            (addMenuActiveIndex - 1 + items.length) % items.length;
+          updateAddMenuSelection();
         }
         return;
       }
       if (ke.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        closeSlashMenu();
+        closeAddMenu();
         return;
       }
       if (ke.key === "Enter" || ke.key === "Tab") {
         e.preventDefault();
         e.stopPropagation();
-        selectActiveSlashMenuItem();
-        return;
-      }
-    }
-    if (isActionPickerOpen()) {
-      if (ke.key === "ArrowDown") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (actionPickerItems.length) {
-          actionPickerActiveIndex =
-            (actionPickerActiveIndex + 1) % actionPickerItems.length;
-          renderActionPicker();
-        }
-        return;
-      }
-      if (ke.key === "ArrowUp") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (actionPickerItems.length) {
-          actionPickerActiveIndex =
-            (actionPickerActiveIndex - 1 + actionPickerItems.length) %
-            actionPickerItems.length;
-          renderActionPicker();
-        }
-        return;
-      }
-      if (ke.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        closeActionPicker();
-        return;
-      }
-      if (ke.key === "Enter" || ke.key === "Tab") {
-        e.preventDefault();
-        e.stopPropagation();
-        void selectActionPickerItem(actionPickerActiveIndex);
+        selectActiveAddMenuItem();
         return;
       }
     }
@@ -10273,39 +7025,6 @@ export function setupHandlers(
         return;
       }
     }
-    // Backspace at position 0 with active badge: remove it
-    if (
-      ke.key === "Backspace" &&
-      inputBox.selectionStart === 0 &&
-      inputBox.selectionEnd === 0
-    ) {
-      if (forcedSkillId) {
-        e.preventDefault();
-        e.stopPropagation();
-        clearForcedSkill();
-        return;
-      }
-      if (activeCommandAction) {
-        e.preventDefault();
-        e.stopPropagation();
-        clearCommandChip();
-        return;
-      }
-    }
-    // Escape with active skill badge: remove the badge
-    if (ke.key === "Escape" && forcedSkillId) {
-      e.preventDefault();
-      e.stopPropagation();
-      clearForcedSkill();
-      return;
-    }
-    // Escape with active command badge: remove the badge
-    if (ke.key === "Escape" && activeCommandAction) {
-      e.preventDefault();
-      e.stopPropagation();
-      clearCommandChip();
-      return;
-    }
     // Up-arrow prompt recall: when input is empty or cursor is at position 0,
     // recall the last user message from the current conversation.
     if (ke.key === "ArrowUp" && !ke.shiftKey) {
@@ -10354,11 +7073,6 @@ export function setupHandlers(
     const isEventWithinActivePanel = (event: Event) => {
       const panel = panelDoc.querySelector("#llm-main") as HTMLElement | null;
       if (!panel) return null;
-      // In standalone window, accept events from anywhere in the document
-      const standaloneRoot = panelDoc.getElementById(
-        "llmforzotero-standalone-chat-root",
-      ) as HTMLElement | null;
-      if (standaloneRoot) return panel;
       const target = event.target as Node | null;
       const activeEl = panelDoc.activeElement;
       const inPanel = Boolean(
@@ -10389,11 +7103,6 @@ export function setupHandlers(
       event.preventDefault();
       event.stopPropagation();
       applyPanelFontScale(panel);
-      // Also scale the standalone root so sidebar/tabs/title scale together
-      const standaloneRoot = panelDoc.getElementById(
-        "llmforzotero-standalone-chat-root",
-      ) as HTMLElement | null;
-      if (standaloneRoot) applyPanelFontScale(standaloneRoot);
     };
 
     panelDoc.addEventListener(
@@ -10458,233 +7167,7 @@ export function setupHandlers(
     ).__llmFontScaleShortcut = true;
   }
 
-  // "Add Text" button — mirrors the reader popup "Add Text" path.
-  // Reads the conversation key directly from the panel's own DOM data
-  // attributes, so it always targets the correct conversation regardless
-  // of which tab was active when setupHandlers last ran.
-  {
-    const bodyDelegation = body as Element & {
-      __llmAddTextPointerDown?: EventListener;
-      __llmAddTextMouseDown?: EventListener;
-      __llmAddTextClick?: EventListener;
-    };
-    if (bodyDelegation.__llmAddTextPointerDown) {
-      body.removeEventListener(
-        "pointerdown",
-        bodyDelegation.__llmAddTextPointerDown,
-        true,
-      );
-    }
-    if (bodyDelegation.__llmAddTextMouseDown) {
-      body.removeEventListener(
-        "mousedown",
-        bodyDelegation.__llmAddTextMouseDown,
-        true,
-      );
-    }
-    if (bodyDelegation.__llmAddTextClick) {
-      body.removeEventListener("click", bodyDelegation.__llmAddTextClick, true);
-    }
-
-    let pendingSelectedText = "";
-
-    const cacheSelectionBeforeFocusShift = (e: Event) => {
-      if (!(e.target as Element)?.closest?.("#llm-select-text")) return;
-      const currentItem = activeContextPanels.get(body)?.() ?? item;
-      if (!currentItem) return;
-      pendingSelectedText = getActiveReaderSelectionText(
-        body.ownerDocument as Document,
-        currentItem,
-      );
-    };
-
-    const addTextClickHandler = async (e: Event) => {
-      if (!(e.target as Element)?.closest?.("#llm-select-text")) return;
-      e.preventDefault();
-      e.stopPropagation();
-
-      // Derive conversation key from the current item (updated by onRender
-      // on every tab switch) — not from panel DOM which may be stale.
-      const currentItem = activeContextPanels.get(body)?.() ?? item;
-      const root = body.querySelector("#llm-main") as HTMLDivElement | null;
-      const conversationKind = root?.dataset?.conversationKind || "";
-      const isGlobal = conversationKind === "global";
-      const conversationKey = currentItem
-        ? getConversationKey(currentItem)
-        : Number(root?.dataset?.itemId || 0);
-
-      if (!conversationKey) {
-        ztoolkit.log("LLM addText: no conversationKey");
-        return;
-      }
-
-      // Resolve selected text (cached on pointerdown, fallback on click)
-      let selectedText = pendingSelectedText;
-      pendingSelectedText = "";
-      if (!selectedText) {
-        const currentItem = activeContextPanels.get(body)?.() ?? item;
-        if (currentItem) {
-          selectedText = getActiveReaderSelectionText(
-            body.ownerDocument as Document,
-            currentItem,
-          );
-        }
-      }
-      if (!selectedText) {
-        ztoolkit.log("LLM addText: no text selected");
-        return;
-      }
-
-      // Global mode: attribute text to source paper
-      const readerAttachment = getActiveContextAttachmentFromTabs();
-      const readerPaperContext =
-        resolvePaperContextRefFromAttachment(readerAttachment);
-      const paperContext = isGlobal ? readerPaperContext : null;
-
-      // Resolve page location for jump-to-source
-      const reader = getActiveReaderForSelectedTab();
-      const selectedTextLocation =
-        await resolveCurrentSelectionPageLocationFromReader(
-          reader,
-          selectedText,
-        );
-
-      const added = appendSelectedTextContextForItem(
-        conversationKey,
-        selectedText,
-        "pdf",
-        paperContext,
-        selectedTextLocation,
-      );
-      if (added) {
-        applySelectedTextPreview(body, conversationKey);
-      }
-    };
-
-    bodyDelegation.__llmAddTextPointerDown =
-      cacheSelectionBeforeFocusShift as EventListener;
-    bodyDelegation.__llmAddTextMouseDown =
-      cacheSelectionBeforeFocusShift as EventListener;
-    bodyDelegation.__llmAddTextClick = addTextClickHandler as EventListener;
-
-    body.addEventListener(
-      "pointerdown",
-      cacheSelectionBeforeFocusShift as EventListener,
-      true,
-    );
-    body.addEventListener(
-      "mousedown",
-      cacheSelectionBeforeFocusShift as EventListener,
-      true,
-    );
-    body.addEventListener("click", addTextClickHandler as EventListener, true);
-  }
-
-  // Screenshot button
-  if (screenshotBtn) {
-    screenshotBtn.addEventListener("click", async (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item) return;
-      const { currentModel } = getSelectedModelInfo();
-      if (isScreenshotUnsupportedModel(currentModel)) {
-        if (status) {
-          setStatus(status, getScreenshotDisabledHint(currentModel), "error");
-        }
-        updateImagePreviewPreservingScroll();
-        return;
-      }
-
-      // Get the main Zotero window
-      // Try multiple methods to find the correct window
-      let mainWindow: Window | null = null;
-
-      // Method 1: Try Zotero.getMainWindow()
-      mainWindow = Zotero.getMainWindow();
-      ztoolkit.log("Screenshot: Zotero.getMainWindow() =", mainWindow);
-
-      // Method 2: If that doesn't work, try getting top window from our document
-      if (!mainWindow) {
-        const panelWin = body.ownerDocument?.defaultView;
-        mainWindow = panelWin?.top || panelWin || null;
-        ztoolkit.log("Screenshot: Using panel's top window");
-      }
-
-      if (!mainWindow) {
-        ztoolkit.log("Screenshot: No window found");
-        return;
-      }
-
-      ztoolkit.log(
-        "Screenshot: Using window, body exists:",
-        !!mainWindow.document.body,
-      );
-      ztoolkit.log(
-        "Screenshot: documentElement exists:",
-        !!mainWindow.document.documentElement,
-      );
-
-      const currentImages = selectedImageCache.get(item.id) || [];
-      if (currentImages.length >= MAX_SELECTED_IMAGES) {
-        if (status) {
-          setStatus(
-            status,
-            `Maximum ${MAX_SELECTED_IMAGES} screenshots allowed`,
-            "error",
-          );
-        }
-        updateImagePreviewPreservingScroll();
-        return;
-      }
-      if (status) setStatus(status, t("Select a region..."), "sending");
-
-      try {
-        ztoolkit.log("Screenshot: Starting capture selection...");
-        const dataUrl = await captureScreenshotSelection(mainWindow);
-        ztoolkit.log(
-          "Screenshot: Capture returned:",
-          dataUrl ? "image data" : "null",
-        );
-        if (dataUrl) {
-          const optimized = await optimizeImageDataUrl(mainWindow, dataUrl);
-          const existingImages = selectedImageCache.get(item.id) || [];
-          const nextImages = [...existingImages, optimized].slice(
-            0,
-            MAX_SELECTED_IMAGES,
-          );
-          selectedImageCache.set(item.id, nextImages);
-          const expandedBeforeCapture = selectedImagePreviewExpandedCache.get(
-            item.id,
-          );
-          selectedImagePreviewExpandedCache.set(
-            item.id,
-            typeof expandedBeforeCapture === "boolean"
-              ? expandedBeforeCapture
-              : false,
-          );
-          selectedImagePreviewActiveIndexCache.set(
-            item.id,
-            nextImages.length - 1,
-          );
-          updateImagePreviewPreservingScroll();
-          if (status) {
-            setStatus(
-              status,
-              `Screenshot captured (${nextImages.length})`,
-              "ready",
-            );
-          }
-        } else {
-          if (status) setStatus(status, t("Selection cancelled"), "ready");
-        }
-      } catch (err) {
-        ztoolkit.log("Screenshot selection error:", err);
-        if (status) setStatus(status, t("Screenshot failed"), "error");
-      }
-    });
-  }
-
-  const openReferenceSlashFromMenu = () => {
+  const openReferenceAtSearchFromMenu = () => {
     if (!item) return;
     // Paper picker is now triggered by '@'
     const existingToken = getActiveAtToken();
@@ -10709,14 +7192,94 @@ export function setupHandlers(
     inputBox.focus({ preventScroll: true });
     schedulePaperPickerSearch();
     if (status) {
-      setStatus(
-        status,
-        t(
-          "Reference picker ready. Browse collections or type to search papers.",
-        ),
-        "ready",
-      );
+      setStatus(status, t("Type after @ to search papers."), "ready");
     }
+  };
+
+  const openNativeReferencePicker = async () => {
+    if (!item) return;
+    const libraryID = getCurrentLibraryID();
+    const win =
+      Zotero.getMainWindow?.() ||
+      body.ownerDocument?.defaultView?.top ||
+      body.ownerDocument?.defaultView ||
+      null;
+    const openDialog = (
+      win as
+        | (Window & {
+            openDialog?: (
+              url: string,
+              name: string,
+              features: string,
+              io: unknown,
+            ) => unknown;
+          })
+        | null
+    )?.openDialog;
+    if (!win || typeof openDialog !== "function") {
+      openReferenceAtSearchFromMenu();
+      return;
+    }
+
+    let resolveDialog: () => void = () => {};
+    const io: {
+      dataIn: null;
+      dataOut: number[] | null;
+      deferred: { promise: Promise<void>; resolve: () => void };
+      itemTreeID: string;
+      filterLibraryIDs?: number[];
+      onlyRegularItems: boolean;
+      multiSelect: boolean;
+    } = {
+      dataIn: null,
+      dataOut: null,
+      deferred: {
+        promise: new Promise<void>((resolve) => {
+          resolveDialog = resolve;
+        }),
+        resolve: () => resolveDialog(),
+      },
+      itemTreeID: "llm-for-zotero-lite-reference-picker",
+      filterLibraryIDs: libraryID > 0 ? [libraryID] : undefined,
+      onlyRegularItems: true,
+      multiSelect: true,
+    };
+
+    try {
+      openDialog.call(
+        win,
+        "chrome://zotero/content/selectItemsDialog.xhtml",
+        "",
+        "chrome,dialog=no,centerscreen,resizable=yes,width=980,height=760",
+        io,
+      );
+      await io.deferred.promise;
+    } catch (err) {
+      ztoolkit.log("LLM: native reference picker failed", err);
+      openReferenceAtSearchFromMenu();
+      return;
+    }
+
+    const selectedIds = (io.dataOut || [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .map((value) => Math.floor(value));
+    if (!selectedIds.length) {
+      if (status) setStatus(status, t("Selection cancelled"), "ready");
+      return;
+    }
+    const getAsync = (
+      Zotero.Items as unknown as {
+        getAsync?: (ids: number[]) => Promise<Zotero.Item[]>;
+      }
+    ).getAsync;
+    const selectedItems =
+      typeof getAsync === "function"
+        ? await getAsync.call(Zotero.Items, selectedIds)
+        : selectedIds
+            .map((id) => Zotero.Items.get(id) || null)
+            .filter((value): value is Zotero.Item => Boolean(value));
+    addZoteroItemsAsPaperContext(selectedItems);
   };
 
   if (uploadBtn && uploadInput) {
@@ -10724,12 +7287,12 @@ export function setupHandlers(
       e.preventDefault();
       e.stopPropagation();
       if (!item) return;
-      if (!slashMenu) {
+      if (!addMenu) {
         uploadInput.click();
         return;
       }
-      if (isFloatingMenuOpen(slashMenu)) {
-        closeSlashMenu();
+      if (isFloatingMenuOpen(addMenu)) {
+        closeAddMenu();
         return;
       }
       closeRetryModelMenu();
@@ -10739,11 +7302,7 @@ export function setupHandlers(
       closeHistoryMenu();
       closeResponseMenu();
       closePromptMenu();
-      closeExportMenu();
-      if (getCurrentRuntimeMode() === "agent") {
-        renderAgentActionsInSlashMenu();
-      }
-      openSlashMenuWithSelection();
+      openAddMenuWithSelection();
       uploadBtn.setAttribute("aria-expanded", "true");
     });
     uploadInput.addEventListener("change", async () => {
@@ -10754,246 +7313,29 @@ export function setupHandlers(
     });
   }
 
-  if (slashUploadOption && uploadInput) {
-    slashUploadOption.addEventListener("click", (e: Event) => {
+  if (addUploadOption && uploadInput) {
+    addUploadOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
       if (!item) return;
-      consumeActiveActionToken();
-      closeSlashMenu();
+      closeAddMenu();
       uploadInput.click();
     });
   }
 
-  if (slashReferenceOption) {
-    slashReferenceOption.addEventListener("click", (e: Event) => {
+  if (addReferenceOption) {
+    addReferenceOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      consumeActiveActionToken();
-      closeSlashMenu();
-      openReferenceSlashFromMenu();
-    });
-  }
-
-  if (slashPdfPageOption) {
-    slashPdfPageOption.addEventListener("click", async (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item) return;
-      consumeActiveActionToken();
-      closeSlashMenu();
-      const { currentModel } = getSelectedModelInfo();
-      if (isScreenshotUnsupportedModel(currentModel)) {
-        if (status)
-          setStatus(status, getScreenshotDisabledHint(currentModel), "error");
-        return;
-      }
-      const currentImages = selectedImageCache.get(item.id) || [];
-      if (currentImages.length >= MAX_SELECTED_IMAGES) {
-        if (status)
-          setStatus(
-            status,
-            `Maximum ${MAX_SELECTED_IMAGES} images allowed`,
-            "error",
-          );
-        return;
-      }
-      if (status) setStatus(status, t("Capturing PDF page..."), "sending");
-      try {
-        const dataUrl = await captureCurrentPdfPage();
-        if (dataUrl) {
-          const win =
-            body.ownerDocument?.defaultView ||
-            (Zotero.getMainWindow?.() as Window | null);
-          const optimized = win
-            ? await optimizeImageDataUrl(win, dataUrl)
-            : dataUrl;
-          const existingImages = selectedImageCache.get(item.id) || [];
-          const nextImages = [...existingImages, optimized].slice(
-            0,
-            MAX_SELECTED_IMAGES,
-          );
-          selectedImageCache.set(item.id, nextImages);
-          const expandedBefore = selectedImagePreviewExpandedCache.get(item.id);
-          selectedImagePreviewExpandedCache.set(
-            item.id,
-            typeof expandedBefore === "boolean" ? expandedBefore : false,
-          );
-          selectedImagePreviewActiveIndexCache.set(
-            item.id,
-            nextImages.length - 1,
-          );
-          updateImagePreviewPreservingScroll();
-          if (status)
-            setStatus(status, `Page captured (${nextImages.length})`, "ready");
-        } else {
-          if (status)
-            setStatus(
-              status,
-              t("No PDF page found — open a PDF in the reader first"),
-              "error",
-            );
-          updateImagePreviewPreservingScroll();
-        }
-      } catch (err) {
-        ztoolkit.log("PDF page capture error:", err);
-        if (status) setStatus(status, t("PDF page capture failed"), "error");
-        updateImagePreviewPreservingScroll();
-      }
-    });
-  }
-
-  if (slashPdfMultiplePagesOption) {
-    slashPdfMultiplePagesOption.addEventListener("click", async (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!item) return;
-      consumeActiveActionToken();
-      closeSlashMenu();
-      const { currentModel } = getSelectedModelInfo();
-      if (isScreenshotUnsupportedModel(currentModel)) {
-        if (status)
-          setStatus(status, getScreenshotDisabledHint(currentModel), "error");
-        return;
-      }
-      const currentImages = selectedImageCache.get(item.id) || [];
-      const remaining = MAX_SELECTED_IMAGES - currentImages.length;
-      if (remaining <= 0) {
-        if (status)
-          setStatus(
-            status,
-            `Maximum ${MAX_SELECTED_IMAGES} images allowed`,
-            "error",
-          );
-        return;
-      }
-      // Get page count from the active PDF
-      const { getPdfPageCount, parsePageRanges, capturePdfPages } =
-        await import("./pdfPageCapture");
-      const totalPages = getPdfPageCount();
-      if (totalPages <= 0) {
-        if (status)
-          setStatus(
-            status,
-            t("No PDF page found — open a PDF in the reader first"),
-            "error",
-          );
-        return;
-      }
-      // Prompt user for page ranges via ztoolkit dialog
-      const win =
-        body.ownerDocument?.defaultView ||
-        (Zotero.getMainWindow?.() as Window | null);
-      if (!win) return;
-      const dialogData: Record<string, unknown> = {
-        pageRangeValue: `1-${Math.min(totalPages, remaining)}`,
-        loadCallback: () => {
-          return;
-        },
-        unloadCallback: () => {
-          return;
-        },
-      };
-      const pageDialog = new ztoolkit.Dialog(2, 1)
-        .addCell(0, 0, {
-          tag: "label",
-          namespace: "html",
-          properties: {
-            innerHTML: `${t("Enter page numbers or ranges (e.g. 1-5, 8, 12):")} (1-${totalPages})`,
-          },
-          styles: { display: "block", marginBottom: "8px" },
-        })
-        .addCell(
-          1,
-          0,
-          {
-            tag: "input",
-            namespace: "html",
-            id: "llm-pdf-page-range-input",
-            attributes: {
-              "data-bind": "pageRangeValue",
-              "data-prop": "value",
-              type: "text",
-            },
-            styles: { width: "300px" },
-          },
-          false,
-        )
-        .addButton("OK", "ok")
-        .addButton("Cancel", "cancel")
-        .setDialogData(dialogData)
-        .open(t("Select PDF pages"));
-      addon.data.dialog = pageDialog;
-      await (dialogData as { unloadLock: { promise: Promise<void> } })
-        .unloadLock.promise;
-      addon.data.dialog = undefined;
-      if ((dialogData as { _lastButtonId?: string })._lastButtonId !== "ok")
-        return;
-      const rawInput = String(
-        (dialogData as { pageRangeValue?: string }).pageRangeValue || "",
-      ).trim();
-      if (!rawInput) return;
-      const pageNumbers = parsePageRanges(rawInput, totalPages).slice(
-        0,
-        remaining,
-      );
-      if (!pageNumbers.length) {
-        if (status) setStatus(status, "No valid pages selected", "error");
-        return;
-      }
-      if (status) setStatus(status, t("Capturing PDF pages..."), "sending");
-      try {
-        const dataUrls = await capturePdfPages(pageNumbers, {
-          onProgress: (current, total) => {
-            if (status)
-              setStatus(
-                status,
-                `${t("Capturing PDF pages...")} ${current}/${total}`,
-                "sending",
-              );
-          },
-        });
-        if (dataUrls.length > 0) {
-          const optimized: string[] = [];
-          for (const dataUrl of dataUrls) {
-            optimized.push(
-              win ? await optimizeImageDataUrl(win, dataUrl) : dataUrl,
-            );
-          }
-          const existingImages = selectedImageCache.get(item.id) || [];
-          const nextImages = [...existingImages, ...optimized].slice(
-            0,
-            MAX_SELECTED_IMAGES,
-          );
-          selectedImageCache.set(item.id, nextImages);
-          const expandedBefore = selectedImagePreviewExpandedCache.get(item.id);
-          selectedImagePreviewExpandedCache.set(
-            item.id,
-            typeof expandedBefore === "boolean" ? expandedBefore : true,
-          );
-          selectedImagePreviewActiveIndexCache.set(
-            item.id,
-            nextImages.length - 1,
-          );
-          updateImagePreviewPreservingScroll();
-          if (status)
-            setStatus(status, `${dataUrls.length} pages captured`, "ready");
-        } else {
-          if (status) setStatus(status, t("PDF page capture failed"), "error");
-          updateImagePreviewPreservingScroll();
-        }
-      } catch (err) {
-        ztoolkit.log("PDF multiple pages capture error:", err);
-        if (status) setStatus(status, t("PDF page capture failed"), "error");
-        updateImagePreviewPreservingScroll();
-      }
+      closeAddMenu();
+      void openNativeReferencePicker();
     });
   }
 
   const openModelMenu = () => {
     if (!modelMenu || !modelBtn) return;
     if ((modelBtn as HTMLButtonElement).disabled) return;
-    closeSlashMenu();
+    closeAddMenu();
     closeRetryModelMenu();
     closeReasoningMenu();
     closePromptMenu();
@@ -11015,7 +7357,7 @@ export function setupHandlers(
 
   const openReasoningMenu = () => {
     if (!reasoningMenu || !reasoningBtn) return;
-    closeSlashMenu();
+    closeAddMenu();
     closeRetryModelMenu();
     closeModelMenu();
     closePromptMenu();
@@ -11037,9 +7379,8 @@ export function setupHandlers(
 
   const openRetryModelMenu = (anchor: HTMLButtonElement) => {
     if (!item || !retryModelMenu) return;
-    closeSlashMenu();
+    closeAddMenu();
     closeResponseMenu();
-    closeExportMenu();
     closePromptMenu();
     closeHistoryNewMenu();
     closeHistoryMenu();
@@ -11050,7 +7391,6 @@ export function setupHandlers(
       closeRetryModelMenu();
       return;
     }
-    retryMenuAnchor = anchor;
     positionFloatingMenu(body, retryModelMenu, anchor);
     setFloatingMenuOpen(retryModelMenu, RETRY_MODEL_MENU_OPEN_CLASS, true);
   };
@@ -11082,11 +7422,11 @@ export function setupHandlers(
     });
   }
 
-  if (slashMenu) {
-    slashMenu.addEventListener("pointerdown", (e: Event) => {
+  if (addMenu) {
+    addMenu.addEventListener("pointerdown", (e: Event) => {
       e.stopPropagation();
     });
-    slashMenu.addEventListener("mousedown", (e: Event) => {
+    addMenu.addEventListener("mousedown", (e: Event) => {
       e.stopPropagation();
     });
   }
@@ -11096,15 +7436,6 @@ export function setupHandlers(
       e.stopPropagation();
     });
     historyMenu.addEventListener("mousedown", (e: Event) => {
-      e.stopPropagation();
-    });
-  }
-
-  if (historyNewMenu) {
-    historyNewMenu.addEventListener("pointerdown", (e: Event) => {
-      e.stopPropagation();
-    });
-    historyNewMenu.addEventListener("mousedown", (e: Event) => {
       e.stopPropagation();
     });
   }
@@ -11196,37 +7527,6 @@ export function setupHandlers(
   bodyWithPaperPickerDismiss.__llmPaperPickerDismissHandler =
     dismissPaperPickerOnOutsidePointerDown;
 
-  const bodyWithPaperChipDismiss = body as Element & {
-    __llmPaperChipDismissHandler?: (event: PointerEvent) => void;
-  };
-  if (bodyWithPaperChipDismiss.__llmPaperChipDismissHandler) {
-    panelDoc.removeEventListener(
-      "pointerdown",
-      bodyWithPaperChipDismiss.__llmPaperChipDismissHandler,
-      true,
-    );
-  }
-  const dismissPaperChipOnOutsidePointerDown = (e: PointerEvent) => {
-    if (typeof e.button === "number" && e.button !== 0) return;
-    if (
-      !paperChipMenuSticky ||
-      !paperChipMenu ||
-      paperChipMenu.style.display === "none"
-    )
-      return;
-    const target = e.target as Node | null;
-    if (target && paperChipMenu.contains(target)) return;
-    if (target && paperChipMenuAnchor?.contains(target)) return;
-    closePaperChipMenu();
-  };
-  panelDoc.addEventListener(
-    "pointerdown",
-    dismissPaperChipOnOutsidePointerDown,
-    true,
-  );
-  bodyWithPaperChipDismiss.__llmPaperChipDismissHandler =
-    dismissPaperChipOnOutsidePointerDown;
-
   if (chatBox) {
     chatBox.addEventListener("click", (e: Event) => {
       // Dismiss inline edit when clicking outside the edit widget
@@ -11313,17 +7613,11 @@ export function setupHandlers(
       const promptMenus = Array.from(
         doc.querySelectorAll("#llm-prompt-menu"),
       ) as HTMLDivElement[];
-      const exportMenus = Array.from(
-        doc.querySelectorAll("#llm-export-menu"),
-      ) as HTMLDivElement[];
-      const slashMenus = Array.from(
-        doc.querySelectorAll("#llm-slash-menu"),
+      const addMenus = Array.from(
+        doc.querySelectorAll("#llm-add-menu"),
       ) as HTMLDivElement[];
       const historyMenus = Array.from(
         doc.querySelectorAll("#llm-history-menu"),
-      ) as HTMLDivElement[];
-      const historyNewMenus = Array.from(
-        doc.querySelectorAll("#llm-history-new-menu"),
       ) as HTMLDivElement[];
       const historyRowMenus = Array.from(
         doc.querySelectorAll("#llm-history-row-menu"),
@@ -11376,7 +7670,6 @@ export function setupHandlers(
             RETRY_MODEL_MENU_OPEN_CLASS,
             false,
           );
-          retryMenuAnchor = null;
         }
       }
       if (me.button === 0) {
@@ -11401,27 +7694,16 @@ export function setupHandlers(
           setPromptMenuTarget(null);
         }
 
-        for (const exportMenuEl of exportMenus) {
-          if (exportMenuEl.style.display === "none") continue;
-          if (target && exportMenuEl.contains(target)) continue;
-          const panelRoot = exportMenuEl.closest("#llm-main");
-          const exportButtonEl = panelRoot?.querySelector(
-            "#llm-export",
-          ) as HTMLButtonElement | null;
-          if (target && exportButtonEl?.contains(target)) continue;
-          exportMenuEl.style.display = "none";
-        }
-
-        for (const slashMenuEl of slashMenus) {
-          if (slashMenuEl.style.display === "none") continue;
-          if (target && slashMenuEl.contains(target)) continue;
-          const panelRoot = slashMenuEl.closest("#llm-main");
-          const slashButtonEl = panelRoot?.querySelector(
+        for (const addMenuEl of addMenus) {
+          if (addMenuEl.style.display === "none") continue;
+          if (target && addMenuEl.contains(target)) continue;
+          const panelRoot = addMenuEl.closest("#llm-main");
+          const addButtonEl = panelRoot?.querySelector(
             "#llm-upload-file",
           ) as HTMLButtonElement | null;
-          if (target && slashButtonEl?.contains(target)) continue;
-          slashMenuEl.style.display = "none";
-          slashButtonEl?.setAttribute("aria-expanded", "false");
+          if (target && addButtonEl?.contains(target)) continue;
+          addMenuEl.style.display = "none";
+          addButtonEl?.setAttribute("aria-expanded", "false");
         }
 
         for (const historyMenuEl of historyMenus) {
@@ -11438,18 +7720,6 @@ export function setupHandlers(
           if (target && historyNewEl?.contains(target)) continue;
           historyMenuEl.style.display = "none";
           historyToggleEl?.setAttribute("aria-expanded", "false");
-        }
-
-        for (const historyNewMenuEl of historyNewMenus) {
-          if (historyNewMenuEl.style.display === "none") continue;
-          if (target && historyNewMenuEl.contains(target)) continue;
-          const panelRoot = historyNewMenuEl.closest("#llm-main");
-          const historyNewEl = panelRoot?.querySelector(
-            "#llm-history-new",
-          ) as HTMLButtonElement | null;
-          if (target && historyNewEl?.contains(target)) continue;
-          historyNewMenuEl.style.display = "none";
-          historyNewEl?.setAttribute("aria-expanded", "false");
         }
 
         for (const historyRowMenuEl of historyRowMenus) {
@@ -11481,7 +7751,6 @@ export function setupHandlers(
         const textContextKey = getTextContextConversationKey();
         if (textContextKey) {
           setSelectedTextExpandedIndex(textContextKey, null);
-          setNoteContextExpanded(textContextKey, null);
         }
         selectedPaperPreviewExpandedCache.set(item.id, false);
         selectedFilePreviewExpandedCache.set(item.id, false);
@@ -11518,7 +7787,6 @@ export function setupHandlers(
         const textContextKey = getTextContextConversationKey();
         if (textContextKey) {
           setSelectedTextExpandedIndex(textContextKey, null);
-          setNoteContextExpanded(textContextKey, null);
         }
         selectedImagePreviewExpandedCache.set(item.id, false);
         selectedPaperPreviewExpandedCache.set(item.id, false);
@@ -11618,9 +7886,7 @@ export function setupHandlers(
       if (status) {
         setStatus(
           status,
-          nextPinned
-            ? t("Screenshot pinned for next sends")
-            : t("Screenshot unpinned"),
+          nextPinned ? t("Image pinned for next sends") : t("Image unpinned"),
           "ready",
         );
       }
@@ -11655,36 +7921,6 @@ export function setupHandlers(
           updatePaperPreviewPreservingScroll();
           if (status)
             setStatus(status, `File context removed (${next.length})`, "ready");
-        }
-        return;
-      }
-
-      // Collection chip removal
-      const collectionClearBtn = target.closest(
-        ".llm-collection-clear",
-      ) as HTMLButtonElement | null;
-      if (collectionClearBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-        const index = Number.parseInt(
-          collectionClearBtn.dataset.collectionIndex || "",
-          10,
-        );
-        const collections = selectedCollectionContextCache.get(item.id) || [];
-        if (
-          Number.isFinite(index) &&
-          index >= 0 &&
-          index < collections.length
-        ) {
-          const next = collections.filter((_, i) => i !== index);
-          if (next.length) {
-            selectedCollectionContextCache.set(item.id, next);
-          } else {
-            selectedCollectionContextCache.delete(item.id);
-          }
-          updatePaperPreviewPreservingScroll();
-          if (status)
-            setStatus(status, t("Collection context removed."), "ready");
         }
         return;
       }
@@ -11730,7 +7966,6 @@ export function setupHandlers(
           "ready",
         );
       }
-      closePaperChipMenu();
       return;
     });
     paperPreview.addEventListener("contextmenu", (e: Event) => {
@@ -11781,7 +8016,6 @@ export function setupHandlers(
           nextIsFullText,
         );
       }
-      closePaperChipMenu();
       if (status) {
         if (isWebChatMode() && contentSource === "pdf") {
           setStatus(
@@ -11908,19 +8142,6 @@ export function setupHandlers(
         currentSource,
         mineruAvailable,
       );
-      // Warn (but allow) PDF mode in agent mode — Agent normally reads pages on demand
-      if (nextSource === "pdf" && getCurrentRuntimeMode() === "agent") {
-        if (status) {
-          setStatus(
-            status,
-            t(
-              "Agent mode normally reads PDF pages on demand. Forcing full PDF mode.",
-            ),
-            "warning",
-          );
-        }
-        // Fall through — allow the mode change
-      }
       // Block PDF mode for models that don't support it (e.g., Copilot)
       if (nextSource === "pdf") {
         const selectedProfile = getSelectedProfile();
@@ -12143,68 +8364,10 @@ export function setupHandlers(
   };
 
   if (selectedContextList) {
-    selectedContextList.addEventListener("mouseover", (e: Event) => {
-      const target = e.target as Element | null;
-      const noteChip = target?.closest(
-        "[data-note-chip='true']",
-      ) as HTMLDivElement | null;
-      if (!noteChip) {
-        return;
-      }
-      if (noteChip.dataset.noteChipKind === "active") {
-        refreshActiveNoteChipPreview(body);
-      } else {
-        refreshNoteChipPreview(noteChip);
-      }
-    });
-    selectedContextList.addEventListener("focusin", (e: Event) => {
-      const target = e.target as Element | null;
-      const noteChip = target?.closest(
-        "[data-note-chip='true']",
-      ) as HTMLDivElement | null;
-      if (!noteChip) {
-        return;
-      }
-      if (noteChip.dataset.noteChipKind === "active") {
-        refreshActiveNoteChipPreview(body);
-      } else {
-        refreshNoteChipPreview(noteChip);
-      }
-    });
     selectedContextList.addEventListener("click", (e: Event) => {
       if (!item) return;
       const target = e.target as Element | null;
       if (!target) return;
-      const noteChip = target.closest(
-        "[data-note-chip='true']",
-      ) as HTMLDivElement | null;
-      const noteChipKind = noteChip?.dataset.noteChipKind || "";
-      const noteMetaBtn = target.closest(
-        ".llm-note-context-meta",
-      ) as HTMLButtonElement | null;
-      if (noteMetaBtn && noteChipKind === "active") {
-        e.preventDefault();
-        e.stopPropagation();
-        const textContextKey = getTextContextConversationKey();
-        if (!textContextKey) return;
-        refreshActiveNoteChipPreview(body);
-        const nextExpanded = !isNoteContextExpanded(textContextKey);
-        setNoteContextExpanded(textContextKey, nextExpanded);
-        if (nextExpanded) {
-          setSelectedTextExpandedIndex(textContextKey, null);
-          selectedImagePreviewExpandedCache.set(item.id, false);
-          selectedPaperPreviewExpandedCache.set(item.id, false);
-          selectedFilePreviewExpandedCache.set(item.id, false);
-        }
-        updatePaperPreviewPreservingScroll();
-        updateFilePreviewPreservingScroll();
-        updateImagePreviewPreservingScroll();
-        updateSelectedTextPreviewPreservingScroll();
-        return;
-      }
-      if (noteChip && noteChipKind === "active") {
-        return;
-      }
 
       const clearBtn = target.closest(
         ".llm-selected-context-clear",
@@ -12297,7 +8460,6 @@ export function setupHandlers(
       const nextExpandedIndex = expandedIndex === index ? null : index;
       setSelectedTextExpandedIndex(textContextKey, nextExpandedIndex);
       if (nextExpandedIndex !== null) {
-        setNoteContextExpanded(textContextKey, null);
         selectedImagePreviewExpandedCache.set(item.id, false);
         selectedPaperPreviewExpandedCache.set(item.id, false);
         selectedFilePreviewExpandedCache.set(item.id, false);
@@ -12311,21 +8473,6 @@ export function setupHandlers(
       if (!item) return;
       const target = e.target as Element | null;
       if (!target) return;
-      const noteChip = target.closest(
-        "[data-note-chip='true']",
-      ) as HTMLDivElement | null;
-      if (noteChip?.dataset.noteChipKind === "active") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (status) {
-          setStatus(
-            status,
-            t("Live note preview is pinned while editing"),
-            "ready",
-          );
-        }
-        return;
-      }
       const selectedContext = target.closest(
         ".llm-selected-context",
       ) as HTMLDivElement | null;
@@ -12344,18 +8491,6 @@ export function setupHandlers(
         index < 0 ||
         index >= selectedContexts.length
       ) {
-        return;
-      }
-      if (selectedContexts[index]?.source === "note-edit") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (status) {
-          setStatus(
-            status,
-            t("Editing focus syncs to the live note selection"),
-            "ready",
-          );
-        }
         return;
       }
       e.preventDefault();
@@ -12417,25 +8552,16 @@ export function setupHandlers(
     const textPinned =
       getSelectedTextExpandedIndex(
         textContextKey,
-        getSelectedTextContexts(textContextKey).length,
+        getSelectedTextContextEntries(textContextKey).length,
       ) >= 0;
-    const notePinned = isNoteContextExpanded(textContextKey);
     const figurePinned =
       selectedImagePreviewExpandedCache.get(item.id) === true;
     const paperPinned =
       typeof selectedPaperPreviewExpandedCache.get(item.id) === "number";
     const filePinned = selectedFilePreviewExpandedCache.get(item.id) === true;
-    if (
-      !textPinned &&
-      !notePinned &&
-      !figurePinned &&
-      !paperPinned &&
-      !filePinned
-    )
-      return;
+    if (!textPinned && !figurePinned && !paperPinned && !filePinned) return;
 
     setSelectedTextExpandedIndex(textContextKey, null);
-    setNoteContextExpanded(textContextKey, null);
     selectedImagePreviewExpandedCache.set(item.id, false);
     selectedPaperPreviewExpandedCache.set(item.id, false);
     selectedFilePreviewExpandedCache.set(item.id, false);
@@ -12509,11 +8635,9 @@ export function setupHandlers(
       e.preventDefault();
       e.stopPropagation();
       closePaperPicker();
-      closeExportMenu();
       closePromptMenu();
       closeHistoryNewMenu();
       closeHistoryMenu();
-      activeEditSession = null;
       if (!item) return;
 
       // [webchat] "Exit" button → restore previous model and leave webchat mode

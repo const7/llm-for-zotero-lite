@@ -1,29 +1,19 @@
-pref("enable", true);
-pref("input", "This is input");
-pref("apiBase", "");
-pref("apiKey", "");
-pref("model", "gpt-4o-mini");
 pref("modelProviderGroups", "");
 pref("modelProviderGroupsMigrationVersion", 0);
 pref("lastUsedModelEntryId", "");
 pref("systemPrompt", "");
-pref("showPopupAddText", true);
-pref("semanticScholarApiKey", "");
-pref("temperaturePrimary", "0.3");
-pref("maxTokensPrimary", "4096");
-pref("temperatureSecondary", "0.3");
-pref("maxTokensSecondary", "4096");
-pref("temperatureTertiary", "0.3");
-pref("maxTokensTertiary", "4096");
-pref("temperatureQuaternary", "0.3");
-pref("maxTokensQuaternary", "4096");
-pref("enableAgentMode", false);
-pref("obsidianVaultPath", "");
-pref("obsidianTargetFolder", "Zotero Notes");
-pref("obsidianAttachmentsFolder", "assets");
-pref("obsidianNoteTemplate", "");
-pref("notesDirectoryNickname", "");
+pref("lastUsedReasoningLevel", "default");
+pref("lastReasoningExpanded", false);
+pref("panelFontScale", 120);
+pref("customShortcuts", "");
+pref("shortcutOrder", "");
+pref("enableSemanticSearch", false);
+pref("embeddingProvider", "gemini");
+pref(
+  "embeddingApiBase",
+  "https://generativelanguage.googleapis.com/v1beta/openai",
+);
+pref("embeddingApiKey", "");
+pref("embeddingModel", "gemini-embedding-001");
+pref("mineruEnabled", false);
 pref("locale", "auto");
-pref("mineruAutoWatchCollections", "");
-pref("mineruGlobalAutoParse", false);
-pref("mineruExcludePatterns", "");

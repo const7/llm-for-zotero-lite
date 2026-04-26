@@ -1,14 +1,10 @@
-import { renderMarkdown, renderMarkdownForNote } from "../../utils/markdown";
+import { renderMarkdown } from "../../utils/markdown";
 import {
-  getWelcomeHtml,
   getWebChatWelcomeHtml,
-  getStandaloneLibraryChatStartPageHtml,
   getPaperChatStartPageHtml,
-  getNoteEditingStartPageHtml,
 } from "../../utils/i18n";
 import {
   appendMessage as appendStoredMessage,
-  clearConversation as clearStoredConversation,
   loadConversation,
   pruneConversation,
   updateLatestUserMessage as updateStoredLatestUserMessage,
@@ -26,9 +22,9 @@ import {
   ReasoningEvent,
   ReasoningLevel as LLMReasoningLevel,
   UsageStats,
-  checkEmbeddingAvailability,
 } from "../../utils/llmClient";
 import { estimateConversationTokens } from "../../utils/modelInputCap";
+import type { ModelProviderAuthMode } from "../../utils/modelProviders";
 import type { ProviderProtocol } from "../../utils/providerProtocol";
 import {
   PERSISTED_HISTORY_LIMIT,
@@ -37,32 +33,25 @@ import {
   formatFigureCountLabel,
   formatPaperCountLabel,
 } from "./constants";
-import { hasCachedMineruMd, getMineruItemDir } from "./mineruCache";
 import type {
   Message,
-  ChatRuntimeMode,
   ReasoningProviderKind,
   ReasoningOption,
-  ReasoningLevelSelection,
   AdvancedModelParams,
   ChatAttachment,
-  NoteContextRef,
   SelectedTextContext,
   SelectedTextSource,
   PaperContextRef,
-  PaperContextSendMode,
   ContextAssemblyStrategy,
 } from "./types";
 import {
   chatHistory,
   loadedConversationKeys,
   loadingConversationTasks,
-  selectedModelCache,
   selectedReasoningCache,
   selectedImageCache,
   selectedFileAttachmentCache,
   selectedPaperContextCache,
-  selectedCollectionContextCache,
   paperContextModeOverrides,
   activeContextPanels,
   activeContextPanelStateSync,
@@ -70,7 +59,6 @@ import {
   getAbortController,
   setAbortController,
   nextRequestId,
-  isRequestPending,
   setPendingRequestId,
   setResponseMenuTarget,
   setPromptMenuTarget,
@@ -84,10 +72,8 @@ import {
   inlineEditSavedDraft,
   setInlineEditInputSection,
   setInlineEditSavedDraft,
-  selectedRuntimeModeCache,
   pdfTextCache,
 } from "./state";
-import { agentRunTraceCache, agentRunTraceLoadingTasks } from "./agentState";
 import {
   sanitizeText,
   formatTime,
@@ -101,7 +87,6 @@ import {
   resolvePromptText,
 } from "./textUtils";
 import {
-  normalizeSelectedTextNoteContexts,
   normalizeSelectedTextPaperContexts as normalizeSelectedTextPaperContextEntries,
   normalizeSelectedTextSources,
   normalizePaperContextRefs,
@@ -114,30 +99,27 @@ import {
   getLastReasoningExpanded,
   getLastUsedReasoningLevel,
   getSelectedModelEntryForItem,
-  getBoolPref,
   getStringPref,
   setLastReasoningExpanded,
 } from "./prefHelpers";
-import { resolveMultiContextPlan } from "./multiContextPlanner";
 import { resolveContextImages, buildImageResolver } from "./mineruImages";
 import {
   formatPaperCitationLabel,
   resolvePaperContextRefFromAttachment,
-  resolvePaperContextRefFromItem,
 } from "./paperAttribution";
-import { buildPaperKey } from "./pdfContext";
+import {
+  buildPaperKey,
+  buildPaperRetrievalCandidates,
+  buildTruncatedFullPaperContext,
+  ensurePDFTextCached,
+  renderEvidencePack,
+} from "./pdfContext";
+import { buildLeanPaperContextPlanForRequest } from "./leanPaperContextPlanner";
 import { isTextOnlyModel } from "../../providers/modelChecks";
 import {
-  getActiveContextAttachmentFromTabs,
   resolveContextSourceItem,
   setSelectedTextContextEntries,
 } from "./contextResolution";
-import {
-  isGlobalPortalItem,
-  resolveActiveNoteSession,
-  resolveDisplayConversationKind,
-} from "./portalScope";
-import { buildChatHistoryNotePayload, readNoteSnapshot } from "./notes";
 import { extractManagedBlobHash } from "./attachmentStorage";
 import { buildContextPlanSystemMessages } from "./requestSystemMessages";
 import { canEditUserPromptTurn } from "./editability";
@@ -150,26 +132,11 @@ import {
   getNextBackfillStartIndex,
   resolveChatRenderStartIndex,
 } from "./chatRenderWindow";
-import { renderAgentTrace } from "./agentTrace/render";
-import { toFileUrl } from "../../utils/pathFileUrl";
-import { replaceOwnerAttachmentRefs } from "../../utils/attachmentRefStore";
+import { toFileUrl } from "../../utils/localPath";
+import { replaceConversationAttachmentRefs } from "../../utils/attachmentRefStore";
 import { decorateAssistantCitationLinks } from "./assistantCitationLinks";
-import { getAgentRuntime } from "../../agent";
-import { getAgentRunTrace } from "../../agent/store/traceStore";
-import {
-  applyHistoryCompression,
-  scheduleLLMSummary,
-  clearConversationSummary,
-} from "./conversationSummaryCache";
-import type {
-  AgentRunEventRecord,
-  AgentRuntimeRequest,
-} from "../../agent/types";
-import {
-  sendAgentTurn,
-  retryAgentTurn,
-  type AgentEngineDeps,
-} from "./agentMode/agentEngine";
+import { compressLongHistory } from "./historyCompression";
+import { hideQuestionTimeline, syncQuestionTimeline } from "./questionTimeline";
 
 /** Get AbortController constructor from global scope */
 function getAbortControllerCtor(): new () => AbortController {
@@ -193,43 +160,6 @@ function isReasoningExpandedByDefault(): boolean {
   return getLastReasoningExpanded();
 }
 
-function setHistoryControlsDisabled(body: Element, disabled: boolean): void {
-  const historyNewBtn = body.querySelector(
-    "#llm-history-new",
-  ) as HTMLButtonElement | null;
-  if (historyNewBtn) {
-    historyNewBtn.disabled = disabled;
-    historyNewBtn.setAttribute("aria-disabled", disabled ? "true" : "false");
-    if (disabled) {
-      historyNewBtn.setAttribute("aria-expanded", "false");
-    }
-  }
-  const historyToggleBtn = body.querySelector(
-    "#llm-history-toggle",
-  ) as HTMLButtonElement | null;
-  if (historyToggleBtn) {
-    historyToggleBtn.disabled = disabled;
-    historyToggleBtn.setAttribute("aria-disabled", disabled ? "true" : "false");
-    if (disabled) {
-      historyToggleBtn.setAttribute("aria-expanded", "false");
-    }
-  }
-  if (disabled) {
-    const historyNewMenu = body.querySelector(
-      "#llm-history-new-menu",
-    ) as HTMLDivElement | null;
-    if (historyNewMenu) {
-      historyNewMenu.style.display = "none";
-    }
-    const historyMenu = body.querySelector(
-      "#llm-history-menu",
-    ) as HTMLDivElement | null;
-    if (historyMenu) {
-      historyMenu.style.display = "none";
-    }
-  }
-}
-
 function resolveMultimodalRetryHint(
   errorMessage: string,
   imageCount: number,
@@ -248,9 +178,9 @@ function resolveMultimodalRetryHint(
     normalized.includes("input too long");
   if (looksLikeSizeOrTokenIssue) {
     if (imageCount >= 8) {
-      return " Try fewer screenshots (for example 4-6) or tighter crops.";
+      return " Try fewer images (for example 4-6) or tighter crops.";
     }
-    return " Try fewer screenshots or tighter crops.";
+    return " Try fewer images or tighter crops.";
   }
   const looksLikeVisionRejection =
     normalized.includes("model_not_supported") ||
@@ -295,10 +225,7 @@ function openStoredAttachmentFromMessage(attachment: ChatAttachment): boolean {
   return false;
 }
 
-function normalizeSelectedTexts(
-  selectedTexts: unknown,
-  legacySelectedText?: unknown,
-): string[] {
+function normalizeSelectedTexts(selectedTexts: unknown): string[] {
   const normalize = (value: unknown): string => {
     if (typeof value !== "string") return "";
     return sanitizeText(value).trim();
@@ -306,8 +233,7 @@ function normalizeSelectedTexts(
   if (Array.isArray(selectedTexts)) {
     return selectedTexts.map((value) => normalize(value)).filter(Boolean);
   }
-  const legacy = normalize(legacySelectedText);
-  return legacy ? [legacy] : [];
+  return [];
 }
 
 function normalizeSelectedTextPaperContextsByIndex(
@@ -323,15 +249,6 @@ function normalizeSelectedTextPaperContextsByIndex(
   );
 }
 
-function normalizeSelectedTextNoteContextsByIndex(
-  selectedTextNoteContexts: unknown,
-  count: number,
-): (NoteContextRef | undefined)[] {
-  return normalizeSelectedTextNoteContexts(selectedTextNoteContexts, count, {
-    sanitizeText,
-  });
-}
-
 function normalizePaperContexts(paperContexts: unknown): PaperContextRef[] {
   return normalizePaperContextRefs(paperContexts, { sanitizeText });
 }
@@ -339,59 +256,8 @@ function normalizePaperContexts(paperContexts: unknown): PaperContextRef[] {
 function resolveAutoLoadedPaperContextForItem(
   item: Zotero.Item,
 ): PaperContextRef | null {
-  const activeNoteSession = resolveActiveNoteSession(item);
-  if (activeNoteSession?.noteKind === "standalone") {
-    return null;
-  }
-  if (
-    activeNoteSession?.noteKind === "item" &&
-    activeNoteSession.parentItemId
-  ) {
-    const parentItem = Zotero.Items.get(activeNoteSession.parentItemId) || null;
-    if (!parentItem?.isRegularItem?.()) return null;
-    const activeContextItem = getActiveContextAttachmentFromTabs();
-    if (activeContextItem?.parentID === activeNoteSession.parentItemId) {
-      return resolvePaperContextRefFromAttachment(activeContextItem);
-    }
-    return resolvePaperContextRefFromItem(parentItem);
-  }
-  if (resolveDisplayConversationKind(item) === "global") {
-    return null;
-  }
   const contextSource = resolveContextSourceItem(item);
   return resolvePaperContextRefFromAttachment(contextSource.contextItem);
-}
-
-function buildActiveNoteContextBlock(
-  item: Zotero.Item | null | undefined,
-): string {
-  // Inject whenever a note session is active — regardless of whether the user
-  // has selected any text in the editor. The note-edit selection entries are
-  // still shown as individual "Editing" snippets; this block always provides
-  // the full note content as base context.
-  if (!resolveActiveNoteSession(item)) {
-    return "";
-  }
-  const snapshot = readNoteSnapshot(item);
-  if (!snapshot || !snapshot.text.trim()) {
-    return snapshot
-      ? [
-          "Current active Zotero note:",
-          `Title: ${snapshot.title}`,
-          "Note content is currently empty.",
-        ].join("\n")
-      : "";
-  }
-  const parentLine = snapshot.parentItemId
-    ? `Parent item ID: ${snapshot.parentItemId}`
-    : "Standalone note";
-  return [
-    "Current active Zotero note:",
-    `Title: ${snapshot.title}`,
-    parentLine,
-    "Note content:",
-    `"""\n${snapshot.text}\n"""`,
-  ].join("\n");
 }
 
 function collectRecentPaperContexts(history: Message[]): PaperContextRef[] {
@@ -432,31 +298,7 @@ function collectAttachmentHashesFromStoredMessages(
 }
 
 function getMessageSelectedTexts(message: Message): string[] {
-  return normalizeSelectedTexts(message.selectedTexts, message.selectedText);
-}
-
-/**
- * Renders user bubble content, detecting `/command` prefixes and showing them
- * as inline badges for visual consistency with the input compose area.
- */
-function renderUserBubbleContent(
-  bubble: HTMLElement,
-  text: string,
-  doc: Document,
-): void {
-  const match = text.match(/^\/(\S+)(\s[\s\S]*)?$/);
-  if (match) {
-    const badge = doc.createElement("span");
-    badge.className = "llm-command-badge";
-    badge.textContent = `/${match[1]}`;
-    bubble.appendChild(badge);
-    const rest = (match[2] || "").trim();
-    if (rest) {
-      bubble.appendChild(doc.createTextNode(` ${rest}`));
-    }
-  } else {
-    bubble.textContent = text;
-  }
+  return normalizeSelectedTexts(message.selectedTexts);
 }
 
 function getMessageSelectedTextExpandedIndex(
@@ -469,7 +311,6 @@ function getMessageSelectedTextExpandedIndex(
     const normalized = Math.floor(rawIndex);
     if (normalized >= 0 && normalized < count) return normalized;
   }
-  if (message.selectedTextExpanded === true) return 0;
   return -1;
 }
 
@@ -563,10 +404,6 @@ function getOrSeedSessionTokens(
   );
   sessionTokenTotals.set(conversationKey, estimated);
   return estimated;
-}
-
-export function resetSessionTokens(conversationKey: number): void {
-  sessionTokenTotals.delete(conversationKey);
 }
 
 /**
@@ -749,18 +586,6 @@ function scheduleFollowBottomStabilization(
   followBottomStabilizers.set(conversationKey, handle);
 }
 
-function applyChatScrollPolicy(
-  item: Zotero.Item,
-  chatBox: HTMLDivElement,
-): void {
-  const conversationKey = getConversationKey(item);
-  const snapshot =
-    chatScrollSnapshots.get(conversationKey) ||
-    buildChatScrollSnapshot(chatBox);
-  applyChatScrollSnapshot(chatBox, snapshot);
-  persistChatScrollSnapshotByKey(conversationKey, chatBox);
-}
-
 async function persistConversationMessage(
   conversationKey: number,
   message: StoredChatMessage,
@@ -774,11 +599,7 @@ async function persistConversationMessage(
     );
     const attachmentHashes =
       collectAttachmentHashesFromStoredMessages(storedMessages);
-    await replaceOwnerAttachmentRefs(
-      "conversation",
-      conversationKey,
-      attachmentHashes,
-    );
+    await replaceConversationAttachmentRefs(conversationKey, attachmentHashes);
   } catch (err) {
     ztoolkit.log("LLM: Failed to persist chat message", err);
   }
@@ -799,20 +620,13 @@ function toPanelMessage(message: StoredChatMessage): Message {
           Boolean(entry.name.trim()),
       )
     : undefined;
-  const selectedTexts = normalizeSelectedTexts(
-    message.selectedTexts,
-    message.selectedText,
-  );
+  const selectedTexts = normalizeSelectedTexts(message.selectedTexts);
   const selectedTextSources = normalizeSelectedTextSources(
     message.selectedTextSources,
     selectedTexts.length,
   );
   const selectedTextPaperContexts = normalizeSelectedTextPaperContextsByIndex(
     message.selectedTextPaperContexts,
-    selectedTexts.length,
-  );
-  const selectedTextNoteContexts = normalizeSelectedTextNoteContextsByIndex(
-    (message as Message).selectedTextNoteContexts,
     selectedTexts.length,
   );
   const paperContexts = normalizePaperContexts(message.paperContexts);
@@ -823,10 +637,6 @@ function toPanelMessage(message: StoredChatMessage): Message {
     role: message.role,
     text: message.text,
     timestamp: message.timestamp,
-    runMode: message.runMode,
-    agentRunId: message.agentRunId,
-    selectedText: selectedTexts[0] || message.selectedText,
-    selectedTextExpanded: false,
     selectedTexts: selectedTexts.length ? selectedTexts : undefined,
     selectedTextSources: selectedTextSources.length
       ? selectedTextSources
@@ -835,11 +645,6 @@ function toPanelMessage(message: StoredChatMessage): Message {
       Boolean(entry),
     )
       ? selectedTextPaperContexts
-      : undefined,
-    selectedTextNoteContexts: selectedTextNoteContexts.some((entry) =>
-      Boolean(entry),
-    )
-      ? selectedTextNoteContexts
       : undefined,
     selectedTextExpandedIndex: -1,
     paperContexts: paperContexts.length ? paperContexts : undefined,
@@ -905,43 +710,6 @@ export async function ensureConversationLoaded(
   await task;
 }
 
-async function ensureAgentRunTraceLoaded(
-  runId: string | undefined,
-  body?: Element,
-  item?: Zotero.Item | null,
-): Promise<void> {
-  const normalizedRunId = (runId || "").trim();
-  if (!normalizedRunId || agentRunTraceCache.has(normalizedRunId)) return;
-  const existing = agentRunTraceLoadingTasks.get(normalizedRunId);
-  if (existing) {
-    await existing;
-    return;
-  }
-  const task = (async () => {
-    try {
-      const trace = await getAgentRunTrace(normalizedRunId);
-      agentRunTraceCache.set(normalizedRunId, trace.events);
-    } catch (err) {
-      ztoolkit.log("LLM: Failed to load agent run trace", err);
-    } finally {
-      agentRunTraceLoadingTasks.delete(normalizedRunId);
-      if (body && item) {
-        refreshChat(body, item);
-      }
-    }
-  })();
-  agentRunTraceLoadingTasks.set(normalizedRunId, task);
-  await task;
-}
-
-function getCachedAgentRunEvents(
-  runId: string | undefined,
-): AgentRunEventRecord[] {
-  const normalizedRunId = (runId || "").trim();
-  if (!normalizedRunId) return [];
-  return agentRunTraceCache.get(normalizedRunId) || [];
-}
-
 export function detectReasoningProvider(
   modelName: string,
 ): ReasoningProviderKind {
@@ -986,7 +754,7 @@ function formatDisplayModelName(
 export function getReasoningOptions(
   provider: ReasoningProviderKind,
   modelName: string,
-  apiBase?: string,
+  _apiBase?: string,
 ): ReasoningOption[] {
   if (provider === "unsupported") return [];
   return getRuntimeReasoningOptions(provider, modelName).map((option) => ({
@@ -996,10 +764,7 @@ export function getReasoningOptions(
   }));
 }
 
-export async function copyTextToClipboard(
-  body: Element,
-  text: string,
-): Promise<void> {
+async function copyTextToClipboard(body: Element, text: string): Promise<void> {
   const safeText = sanitizeText(text).trim();
   if (!safeText) return;
 
@@ -1036,11 +801,9 @@ export async function copyTextToClipboard(
 }
 
 /**
- * Render markdown text through renderMarkdownForNote and copy the result
- * to the clipboard as both text/html and text/plain.  When pasted into a
- * Zotero note, the HTML version is used — producing the same rendering as
- * "Save as note".  When pasted into a plain-text editor, the raw markdown
- * is used — matching "Copy chat as md".
+ * Render markdown text and copy both text/html and text/plain to the clipboard.
+ * Rich-text destinations use the rendered HTML; plain-text editors receive the
+ * raw markdown.
  */
 export async function copyRenderedMarkdownToClipboard(
   body: Element,
@@ -1051,13 +814,12 @@ export async function copyRenderedMarkdownToClipboard(
 
   let renderedHtml = "";
   try {
-    renderedHtml = renderMarkdownForNote(safeText);
+    renderedHtml = renderMarkdown(safeText);
   } catch (err) {
     ztoolkit.log("LLM: Copy markdown render error:", err);
   }
 
-  // Try rich clipboard (HTML + plain) first so that paste into Zotero
-  // notes gives properly rendered content with math.
+  // Try rich clipboard first so tables, math, and links paste as rendered HTML.
   if (renderedHtml) {
     const win = body.ownerDocument?.defaultView as
       | (Window & {
@@ -1108,7 +870,7 @@ export function getSelectedReasoningForItem(
   return { provider, level: selectedLevel as LLMReasoningLevel };
 }
 
-export type PanelRequestUI = {
+type PanelRequestUI = {
   inputBox: HTMLTextAreaElement | null;
   chatBox: HTMLDivElement | null;
   sendBtn: HTMLButtonElement | null;
@@ -1129,7 +891,7 @@ function getPanelRequestUI(body: Element): PanelRequestUI {
 }
 
 function setRequestUIBusy(
-  body: Element,
+  _body: Element,
   ui: PanelRequestUI,
   conversationKey: number,
   statusText: string,
@@ -1222,11 +984,11 @@ function createPanelUpdateHelpers(
   };
 }
 
-export type EffectiveRequestConfig = {
+type EffectiveRequestConfig = {
   model: string;
   apiBase: string;
   apiKey: string;
-  authMode: "api_key" | "codex_auth" | "webchat"; // [webchat]
+  authMode: ModelProviderAuthMode;
   providerProtocol?: ProviderProtocol;
   modelEntryId?: string;
   modelProviderLabel?: string;
@@ -1234,18 +996,24 @@ export type EffectiveRequestConfig = {
   advanced: AdvancedModelParams | undefined;
 };
 
-function resolveEffectiveRequestConfig(params: {
-  item: Zotero.Item;
+type RequestConfigOverrides = {
   model?: string;
   apiBase?: string;
   apiKey?: string;
-  authMode?: "api_key" | "codex_auth" | "webchat"; // [webchat]
+  authMode?: ModelProviderAuthMode;
   providerProtocol?: ProviderProtocol;
   modelEntryId?: string;
   modelProviderLabel?: string;
   reasoning?: LLMReasoningConfig;
   advanced?: AdvancedModelParams;
-}): EffectiveRequestConfig {
+  pdfUploadSystemMessages?: string[];
+};
+
+function resolveEffectiveRequestConfig(
+  params: RequestConfigOverrides & {
+    item: Zotero.Item;
+  },
+): EffectiveRequestConfig {
   const fallbackEntry = getSelectedModelEntryForItem(params.item.id);
   const explicitEntry =
     params.model || params.apiBase || params.apiKey
@@ -1256,22 +1024,14 @@ function resolveEffectiveRequestConfig(params: {
             entry.apiKey === (params.apiKey || "").trim(),
         ) || null
       : null;
-  const model = (
-    params.model ||
-    fallbackEntry?.model ||
-    getStringPref("modelPrimary") ||
-    getStringPref("model") ||
-    "gpt-4o-mini"
-  ).trim();
+  const model = (params.model || fallbackEntry?.model || "gpt-4o-mini").trim();
   const apiBase = (params.apiBase || fallbackEntry?.apiBase || "").trim();
   const apiKey = (params.apiKey || fallbackEntry?.apiKey || "").trim();
   const authMode =
     params.authMode ||
-    (fallbackEntry?.authMode === "webchat"
-      ? "webchat"
-      : fallbackEntry?.authMode === "codex_auth"
-        ? "codex_auth"
-        : "api_key");
+    explicitEntry?.authMode ||
+    fallbackEntry?.authMode ||
+    "api_key";
   const reasoning =
     params.reasoning ||
     getSelectedReasoningForItem(params.item.id, model, apiBase);
@@ -1325,142 +1085,91 @@ async function buildContextPlanForRequest(params: {
   recentPaperContexts: PaperContextRef[];
   mineruImages: string[];
 }> {
-  const contextSource = resolveContextSourceItem(params.item);
-  params.setStatusSafely(contextSource.statusText, "sending");
-  const rawActiveContextItem = contextSource.contextItem;
-  // If the active paper is in PDF mode (sent as file attachment),
-  // exclude it from the text retrieval pipeline entirely.
-  const activeContextItemInPdfMode = (() => {
-    if (!rawActiveContextItem || !params.pdfModePaperKeys?.size) return false;
-    const autoLoaded = resolveAutoLoadedPaperContextForItem(params.item);
-    if (!autoLoaded) return false;
-    return params.pdfModePaperKeys.has(
-      `${autoLoaded.itemId}:${autoLoaded.contextItemId}`,
-    );
-  })();
-  const activeContextItem = activeContextItemInPdfMode
-    ? null
-    : rawActiveContextItem;
-  const conversationMode: "open" | "paper" =
-    resolveDisplayConversationKind(params.item) === "global" ? "open" : "paper";
   const systemPrompt = getStringPref("systemPrompt") || undefined;
-
-  const plan = await resolveMultiContextPlan({
-    activeContextItem,
-    conversationMode,
-    question: params.question,
-    contextPrefix: "",
-    // Exclude PDF-mode papers from the text retrieval pipeline
-    paperContexts: params.pdfModePaperKeys?.size
-      ? params.paperContexts.filter(
-          (p) =>
-            !params.pdfModePaperKeys!.has(`${p.itemId}:${p.contextItemId}`),
-        )
-      : params.paperContexts,
-    fullTextPaperContexts: params.fullTextPaperContexts,
-    historyPaperContexts: params.recentPaperContexts,
-    history: params.history,
-    images: params.images,
-    model: params.effectiveRequestConfig.model,
-    reasoning: params.effectiveRequestConfig.reasoning,
-    advanced: params.effectiveRequestConfig.advanced,
-    apiBase: params.effectiveRequestConfig.apiBase,
-    apiKey: params.effectiveRequestConfig.apiKey,
-    providerProtocol: params.effectiveRequestConfig.providerProtocol,
-    systemPrompt,
-    signal: params.signal,
-  });
-
-  if (plan.selectedPaperCount > 0) {
-    const semanticEnabled = getBoolPref("enableSemanticSearch", false);
-    const semanticTag =
-      plan.mode === "retrieval" &&
-      semanticEnabled &&
-      checkEmbeddingAvailability()
-        ? " + semantic search"
-        : "";
-    const modeStatus =
-      plan.strategy === "paper-first-full"
-        ? "Using full paper text (first turn)"
-        : plan.strategy === "paper-followup-retrieval"
-          ? `Retrieval${semanticTag} (${plan.selectedChunkCount} chunks)`
-          : plan.mode === "full"
-            ? `Using full context (${plan.selectedPaperCount} papers)`
-            : `Retrieval${semanticTag} (${plan.selectedPaperCount} papers, ${plan.selectedChunkCount} chunks)`;
-    params.setStatusSafely(modeStatus, "sending");
-  }
-  ztoolkit.log("LLM: Multi-context plan", {
-    mode: plan.mode,
-    strategy: plan.strategy,
-    selectedPaperCount: plan.selectedPaperCount,
-    selectedChunkCount: plan.selectedChunkCount,
-    contextBudgetTokens: plan.contextBudget.contextBudgetTokens,
-    usedContextTokens: plan.usedContextTokens,
-  });
-  const noteContext = buildActiveNoteContextBlock(params.item).trim();
-  const planContext = sanitizeText(plan.contextText || "").trim();
-  // Include provider-uploaded PDF content (Qwen fileid://, Kimi extracted text)
-  const uploadedPdfContext = (params.pdfUploadSystemMessages || [])
-    .map((msg) => sanitizeText(msg).trim())
-    .filter(Boolean)
-    .join("\n\n");
-  const combinedContext = [noteContext, planContext, uploadedPdfContext]
-    .filter(Boolean)
-    .join("\n\n");
-
-  // Extract MinerU figure images from the context (if applicable).
-  // Skip for text-only models (e.g. DeepSeek) that reject image_url content.
-  const effectiveModel = params.effectiveRequestConfig.model || "";
-  let mineruImages: string[] = [];
-  if (planContext && !isTextOnlyModel(effectiveModel)) {
-    // Collect all MinerU-cached attachment IDs from context papers
-    const mineruAttachmentIds: number[] = [];
-    if (activeContextItem) {
-      const activePdfCtx = pdfTextCache.get(activeContextItem.id);
-      if (activePdfCtx?.sourceType === "mineru") {
-        mineruAttachmentIds.push(activeContextItem.id);
-      }
-    }
-    // Also include @-referenced papers with MinerU cache
-    for (const paper of [
-      ...params.paperContexts,
-      ...params.fullTextPaperContexts,
-    ]) {
-      if (
-        paper.contextItemId &&
-        !mineruAttachmentIds.includes(paper.contextItemId)
-      ) {
-        const pdfCtx = pdfTextCache.get(paper.contextItemId);
-        if (pdfCtx?.sourceType === "mineru") {
-          mineruAttachmentIds.push(paper.contextItemId);
+  return buildLeanPaperContextPlanForRequest(
+    {
+      item: params.item,
+      question: params.question,
+      paperContexts: params.paperContexts,
+      fullTextPaperContexts: params.fullTextPaperContexts,
+      recentPaperContexts: params.recentPaperContexts,
+      history: params.history,
+      effectiveModel: params.effectiveRequestConfig.model || "",
+      images: params.images,
+      reasoning: params.effectiveRequestConfig.reasoning,
+      advanced: params.effectiveRequestConfig.advanced,
+      systemPrompt,
+      pdfModePaperKeys: params.pdfModePaperKeys,
+      pdfUploadSystemMessages: params.pdfUploadSystemMessages,
+      signal: params.signal,
+      setStatusSafely: params.setStatusSafely,
+    },
+    {
+      resolveContextSourceItem,
+      resolvePaperContextRefFromAttachment,
+      ensurePaperContextsCached: async (paperContexts, signal) => {
+        for (const paperContext of paperContexts) {
+          if (signal?.aborted) break;
+          const attachment =
+            Zotero.Items.get(paperContext.contextItemId) || null;
+          if (attachment?.attachmentContentType === "application/pdf") {
+            await ensurePDFTextCached(attachment);
+          }
         }
-      }
+      },
+      getPdfContext: (contextItemId) => pdfTextCache.get(contextItemId),
+      buildTruncatedFullPaperContext,
+      buildPaperRetrievalCandidates,
+      renderEvidencePack,
+      resolveContextPlanMineruImages,
+    },
+  );
+}
+
+async function resolveContextPlanMineruImages(params: {
+  contextText: string;
+  effectiveModel: string;
+  activeContextItemId?: number | null;
+  paperContexts: PaperContextRef[];
+  fullTextPaperContexts: PaperContextRef[];
+}): Promise<string[]> {
+  if (!params.contextText || isTextOnlyModel(params.effectiveModel)) {
+    return [];
+  }
+
+  const mineruAttachmentIds: number[] = [];
+  const registerAttachmentId = (attachmentId?: number | null) => {
+    if (!attachmentId || mineruAttachmentIds.includes(attachmentId)) return;
+    const pdfContext = pdfTextCache.get(attachmentId);
+    if (pdfContext?.sourceType === "mineru") {
+      mineruAttachmentIds.push(attachmentId);
     }
-    // Resolve images from all MinerU papers (cap total at 5)
-    for (const attachmentId of mineruAttachmentIds) {
-      if (mineruImages.length >= 5) break;
-      try {
-        const images = await resolveContextImages({
-          contextText: planContext,
-          attachmentId,
-          maxImages: 5 - mineruImages.length,
-        });
-        mineruImages.push(...images);
-      } catch (err) {
-        ztoolkit.log("LLM: MinerU figure resolution failed (best-effort)", err);
-      }
+  };
+
+  registerAttachmentId(params.activeContextItemId);
+  for (const paperContext of [
+    ...params.paperContexts,
+    ...params.fullTextPaperContexts,
+  ]) {
+    registerAttachmentId(paperContext.contextItemId);
+  }
+
+  const mineruImages: string[] = [];
+  for (const attachmentId of mineruAttachmentIds) {
+    if (mineruImages.length >= 5) break;
+    try {
+      const images = await resolveContextImages({
+        contextText: params.contextText,
+        attachmentId,
+        maxImages: 5 - mineruImages.length,
+      });
+      mineruImages.push(...images);
+    } catch (err) {
+      ztoolkit.log("LLM: MinerU figure resolution failed (best-effort)", err);
     }
   }
 
-  return {
-    combinedContext,
-    strategy: plan.strategy,
-    assistantInstruction: plan.assistantInstruction,
-    paperContexts: params.paperContexts,
-    fullTextPaperContexts: params.fullTextPaperContexts,
-    recentPaperContexts: params.recentPaperContexts,
-    mineruImages,
-  };
+  return mineruImages;
 }
 
 function createQueuedRefresh(refresh: () => void): () => void {
@@ -1481,7 +1190,7 @@ function waitForUiStep(): Promise<void> {
   });
 }
 
-export type LatestRetryPair = {
+type LatestRetryPair = {
   userIndex: number;
   userMessage: Message;
   assistantMessage: Message;
@@ -1711,7 +1420,7 @@ function reconstructRetryPayload(userMessage: Message): {
     : [];
   const paperContexts = normalizePaperContexts(userMessage.paperContexts);
   const fullTextPaperContexts = normalizePaperContexts(
-    userMessage.fullTextPaperContexts || userMessage.pinnedPaperContexts,
+    userMessage.fullTextPaperContexts,
   );
   const fileAttachmentsForModel: ChatFileAttachment[] = [];
   for (const attachment of fileAttachments) {
@@ -1785,18 +1494,6 @@ function normalizeModelFileAttachments(
           : undefined,
     }));
 }
-
-export type EditLatestTurnMarker = {
-  conversationKey: number;
-  userTimestamp: number;
-  assistantTimestamp: number;
-};
-
-export type EditLatestTurnResult =
-  | "ok"
-  | "missing"
-  | "stale"
-  | "persist-failed";
 
 function normalizeEditableAttachments(
   attachments?: ChatAttachment[],
@@ -1891,15 +1588,6 @@ function includeAutoLoadedPaperContext(
   const normalizedFullTextPaperContexts = normalizePaperContexts(
     fullTextPaperContexts,
   );
-  if (resolveDisplayConversationKind(item) === "global") {
-    return {
-      paperContexts: normalizedPaperContexts,
-      fullTextPaperContexts:
-        fullTextPaperContexts === undefined
-          ? normalizedPaperContexts
-          : normalizedFullTextPaperContexts,
-    };
-  }
   const autoLoadedPaperContext = resolveAutoLoadedPaperContextForItem(item);
   if (!autoLoadedPaperContext) {
     return {
@@ -1942,16 +1630,11 @@ function syncComposeContextForInlineEdit(
     userMessage.selectedTextPaperContexts,
     selectedTexts.length,
   );
-  const selectedTextNoteContexts = normalizeSelectedTextNoteContextsByIndex(
-    userMessage.selectedTextNoteContexts,
-    selectedTexts.length,
-  );
   const selectedTextEntries: SelectedTextContext[] = selectedTexts.map(
     (text, index) => ({
       text,
       source: selectedTextSources[index] || "pdf",
       paperContext: selectedTextPaperContexts[index],
-      noteContext: selectedTextNoteContexts[index],
     }),
   );
   setSelectedTextContextEntries(conversationKey, selectedTextEntries);
@@ -1978,7 +1661,7 @@ function syncComposeContextForInlineEdit(
 
   const paperContexts = normalizePaperContexts(userMessage.paperContexts);
   const fullTextPaperContexts = normalizePaperContexts(
-    userMessage.fullTextPaperContexts || userMessage.pinnedPaperContexts,
+    userMessage.fullTextPaperContexts,
   );
   const autoLoadedPaperContext = resolveAutoLoadedPaperContextForItem(item);
   const selectedPaperContexts = autoLoadedPaperContext
@@ -2010,197 +1693,10 @@ function syncComposeContextForInlineEdit(
   activeContextPanelStateSync.get(body)?.();
 }
 
-export async function editLatestUserMessageAndRetry(
-  opts: import("./types").EditRetryOptions,
-): Promise<EditLatestTurnResult> {
-  const {
-    body,
-    item,
-    displayQuestion,
-    selectedTexts,
-    selectedTextSources,
-    selectedTextPaperContexts,
-    selectedTextNoteContexts,
-    screenshotImages,
-    paperContexts,
-    fullTextPaperContexts,
-    attachments,
-    pdfUploadSystemMessages,
-    targetRuntimeMode,
-    expected,
-    model,
-    apiBase,
-    apiKey,
-    reasoning,
-    advanced,
-  } = opts;
-  await ensureConversationLoaded(item);
-  const conversationKey = getConversationKey(item);
-  const history = chatHistory.get(conversationKey) || [];
-  const retryPair = findLatestRetryPair(history);
-  if (!retryPair) return "missing";
-  if (retryPair.assistantMessage.streaming) return "stale";
-  const retryRuntimeMode: ChatRuntimeMode =
-    targetRuntimeMode ||
-    (retryPair.assistantMessage.runMode === "agent" ? "agent" : "chat");
-  if (
-    expected &&
-    (expected.conversationKey !== conversationKey ||
-      retryPair.userMessage.timestamp !== expected.userTimestamp ||
-      retryPair.assistantMessage.timestamp !== expected.assistantTimestamp)
-  ) {
-    return "stale";
-  }
-
-  const selectedTextsForMessage = normalizeSelectedTexts(selectedTexts);
-  const selectedTextSourcesForMessage = normalizeSelectedTextSources(
-    selectedTextSources,
-    selectedTextsForMessage.length,
-  );
-  const selectedTextPaperContextsForMessage =
-    normalizeSelectedTextPaperContextsByIndex(
-      selectedTextPaperContexts,
-      selectedTextsForMessage.length,
-    );
-  const selectedTextNoteContextsForMessage =
-    normalizeSelectedTextNoteContextsByIndex(
-      selectedTextNoteContexts,
-      selectedTextsForMessage.length,
-    );
-  const selectedTextForMessage = selectedTextsForMessage[0] || "";
-  const screenshotImagesForMessage = Array.isArray(screenshotImages)
-    ? screenshotImages
-        .filter((entry): entry is string => typeof entry === "string")
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-        .slice(0, MAX_SELECTED_IMAGES)
-    : [];
-  const normalizedPaperContexts = normalizeEditablePaperContexts(paperContexts);
-  const normalizedFullTextPaperContexts =
-    normalizeEditableFullTextPaperContexts(fullTextPaperContexts);
-  const pdfExcludeKeys = derivePdfModePaperKeys(attachments, item);
-  const {
-    paperContexts: paperContextsForMessage,
-    fullTextPaperContexts: fullTextPaperContextsForMessage,
-  } = includeAutoLoadedPaperContext(
-    item,
-    normalizedPaperContexts,
-    normalizedFullTextPaperContexts,
-    pdfExcludeKeys.size > 0 ? pdfExcludeKeys : undefined,
-  );
-  const attachmentsForMessage = normalizeEditableAttachments(attachments);
-  const updatedTimestamp = Date.now();
-  const nextDisplayQuestion = sanitizeText(displayQuestion || "");
-
-  retryPair.userMessage.text = nextDisplayQuestion;
-  retryPair.userMessage.timestamp = updatedTimestamp;
-  retryPair.userMessage.runMode = retryRuntimeMode;
-  retryPair.userMessage.agentRunId = undefined;
-  retryPair.userMessage.selectedText = selectedTextForMessage || undefined;
-  retryPair.userMessage.selectedTextExpanded = false;
-  retryPair.userMessage.selectedTexts = selectedTextsForMessage.length
-    ? selectedTextsForMessage
-    : undefined;
-  retryPair.userMessage.selectedTextSources =
-    selectedTextSourcesForMessage.length
-      ? selectedTextSourcesForMessage
-      : undefined;
-  retryPair.userMessage.selectedTextPaperContexts =
-    selectedTextPaperContextsForMessage.some((entry) => Boolean(entry))
-      ? selectedTextPaperContextsForMessage
-      : undefined;
-  retryPair.userMessage.selectedTextNoteContexts =
-    selectedTextNoteContextsForMessage.some((entry) => Boolean(entry))
-      ? selectedTextNoteContextsForMessage
-      : undefined;
-  retryPair.userMessage.selectedTextExpandedIndex = -1;
-  retryPair.userMessage.screenshotImages = screenshotImagesForMessage.length
-    ? screenshotImagesForMessage
-    : undefined;
-  retryPair.userMessage.screenshotExpanded = false;
-  retryPair.userMessage.screenshotActiveIndex =
-    screenshotImagesForMessage.length ? 0 : undefined;
-  retryPair.userMessage.paperContexts = paperContextsForMessage.length
-    ? paperContextsForMessage
-    : undefined;
-  retryPair.userMessage.fullTextPaperContexts =
-    fullTextPaperContextsForMessage.length
-      ? fullTextPaperContextsForMessage
-      : undefined;
-  retryPair.userMessage.paperContextsExpanded = false;
-  retryPair.userMessage.attachments = attachmentsForMessage.length
-    ? attachmentsForMessage
-    : undefined;
-  retryPair.userMessage.attachmentsExpanded = false;
-  retryPair.userMessage.attachmentActiveIndex = undefined;
-
-  try {
-    await updateStoredLatestUserMessage(conversationKey, {
-      text: retryPair.userMessage.text,
-      timestamp: retryPair.userMessage.timestamp,
-      runMode: retryPair.userMessage.runMode,
-      agentRunId: retryPair.userMessage.agentRunId,
-      selectedText: retryPair.userMessage.selectedText,
-      selectedTexts: retryPair.userMessage.selectedTexts,
-      selectedTextSources: retryPair.userMessage.selectedTextSources,
-      selectedTextPaperContexts:
-        retryPair.userMessage.selectedTextPaperContexts,
-      screenshotImages: retryPair.userMessage.screenshotImages,
-      paperContexts: retryPair.userMessage.paperContexts,
-      fullTextPaperContexts: retryPair.userMessage.fullTextPaperContexts,
-      attachments: retryPair.userMessage.attachments,
-    });
-
-    const storedMessages = await loadConversation(
-      conversationKey,
-      PERSISTED_HISTORY_LIMIT,
-    );
-    const attachmentHashes =
-      collectAttachmentHashesFromStoredMessages(storedMessages);
-    await replaceOwnerAttachmentRefs(
-      "conversation",
-      conversationKey,
-      attachmentHashes,
-    );
-  } catch (err) {
-    ztoolkit.log("LLM: Failed to persist edited latest user message", err);
-    return "persist-failed";
-  }
-
-  if (retryRuntimeMode === "agent") {
-    await retryLatestAgentResponse(
-      body,
-      item,
-      model,
-      apiBase,
-      apiKey,
-      reasoning,
-      advanced,
-    );
-  } else {
-    await retryLatestAssistantResponse(
-      body,
-      item,
-      model,
-      apiBase,
-      apiKey,
-      reasoning,
-      advanced,
-      pdfUploadSystemMessages,
-    );
-  }
-  return "ok";
-}
-
 export async function retryLatestAssistantResponse(
   body: Element,
   item: Zotero.Item,
-  model?: string,
-  apiBase?: string,
-  apiKey?: string,
-  reasoning?: LLMReasoningConfig,
-  advanced?: AdvancedModelParams,
-  pdfUploadSystemMessages?: string[],
+  overrides: RequestConfigOverrides = {},
 ) {
   const ui = getPanelRequestUI(body);
 
@@ -2222,8 +1718,6 @@ export async function retryLatestAssistantResponse(
   assistantMessage.reasoningSummary = undefined;
   assistantMessage.reasoningDetails = undefined;
   assistantMessage.reasoningOpen = isReasoningExpandedByDefault();
-  assistantMessage.runMode = "chat";
-  assistantMessage.agentRunId = undefined;
   assistantMessage.streaming = true;
   const { refreshChatSafely, setStatusSafely } = createPanelUpdateHelpers(
     body,
@@ -2248,11 +1742,7 @@ export async function retryLatestAssistantResponse(
 
   const effectiveRequestConfig = resolveEffectiveRequestConfig({
     item,
-    model,
-    apiBase,
-    apiKey,
-    reasoning,
-    advanced,
+    ...overrides,
   });
   // Update model name before first refresh so streaming UI shows the correct model immediately
   assistantMessage.modelName = effectiveRequestConfig.model;
@@ -2274,8 +1764,6 @@ export async function retryLatestAssistantResponse(
     await updateStoredLatestAssistantMessage(conversationKey, {
       text: assistantMessage.text,
       timestamp: assistantMessage.timestamp,
-      runMode: assistantMessage.runMode,
-      agentRunId: assistantMessage.agentRunId,
       modelName: assistantMessage.modelName,
       modelEntryId: assistantMessage.modelEntryId,
       modelProviderLabel: assistantMessage.modelProviderLabel,
@@ -2312,20 +1800,11 @@ export async function retryLatestAssistantResponse(
       history: llmHistory,
       effectiveRequestConfig,
       pdfModePaperKeys: retryPdfKeys.size > 0 ? retryPdfKeys : undefined,
-      pdfUploadSystemMessages,
+      pdfUploadSystemMessages: overrides.pdfUploadSystemMessages,
       signal: getAbortController(conversationKey)?.signal,
       setStatusSafely,
     });
-    let combinedContext = contextPlan.combinedContext;
-    // Append collection scope context if any collections are selected
-    const retrySelectedCollections =
-      selectedCollectionContextCache.get(item.id) || [];
-    if (retrySelectedCollections.length > 0) {
-      const collectionNames = retrySelectedCollections
-        .map((c) => c.name)
-        .join(", ");
-      combinedContext = `${combinedContext}\n\n[Selected Zotero collections as context scope: ${collectionNames}]`;
-    }
+    const combinedContext = contextPlan.combinedContext;
     retryPair.userMessage.paperContexts = contextPlan.paperContexts.length
       ? contextPlan.paperContexts
       : undefined;
@@ -2336,9 +1815,6 @@ export async function retryLatestAssistantResponse(
     await updateStoredLatestUserMessage(conversationKey, {
       text: retryPair.userMessage.text,
       timestamp: retryPair.userMessage.timestamp,
-      runMode: retryPair.userMessage.runMode,
-      agentRunId: retryPair.userMessage.agentRunId,
-      selectedText: retryPair.userMessage.selectedText,
       selectedTexts: retryPair.userMessage.selectedTexts,
       selectedTextSources: retryPair.userMessage.selectedTextSources,
       selectedTextPaperContexts:
@@ -2458,8 +1934,6 @@ export async function retryLatestAssistantResponse(
     await updateStoredLatestAssistantMessage(conversationKey, {
       text: assistantMessage.text,
       timestamp: assistantMessage.timestamp,
-      runMode: assistantMessage.runMode,
-      agentRunId: assistantMessage.agentRunId,
       modelName: assistantMessage.modelName,
       modelEntryId: assistantMessage.modelEntryId,
       modelProviderLabel: assistantMessage.modelProviderLabel,
@@ -2509,16 +1983,18 @@ export async function editUserTurnAndRetry(opts: {
   selectedTexts?: string[];
   selectedTextSources?: SelectedTextSource[];
   selectedTextPaperContexts?: (PaperContextRef | undefined)[];
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
   screenshotImages?: string[];
   paperContexts?: PaperContextRef[];
   fullTextPaperContexts?: PaperContextRef[];
   attachments?: ChatAttachment[];
   pdfUploadSystemMessages?: string[];
-  targetRuntimeMode?: ChatRuntimeMode;
   model?: string;
   apiBase?: string;
   apiKey?: string;
+  authMode?: ModelProviderAuthMode;
+  providerProtocol?: ProviderProtocol;
+  modelEntryId?: string;
+  modelProviderLabel?: string;
   reasoning?: LLMReasoningConfig;
   advanced?: AdvancedModelParams;
 }): Promise<void> {
@@ -2526,21 +2002,22 @@ export async function editUserTurnAndRetry(opts: {
     body,
     item,
     userTimestamp,
-    assistantTimestamp,
     newText,
     selectedTexts,
     selectedTextSources,
     selectedTextPaperContexts,
-    selectedTextNoteContexts,
     screenshotImages,
     paperContexts,
     fullTextPaperContexts,
     attachments,
     pdfUploadSystemMessages,
-    targetRuntimeMode,
     model,
     apiBase,
     apiKey,
+    authMode,
+    providerProtocol,
+    modelEntryId,
+    modelProviderLabel,
     reasoning,
     advanced,
   } = opts;
@@ -2567,9 +2044,6 @@ export async function editUserTurnAndRetry(opts: {
     ztoolkit.log("LLM: editUserTurnAndRetry — assistant is still streaming");
     return;
   }
-  const retryRuntimeMode: ChatRuntimeMode =
-    targetRuntimeMode ||
-    (history[assistantIndex]?.runMode === "agent" ? "agent" : "chat");
 
   // Collect subsequent pairs for persistence deletion
   const subsequentPairs: Array<{ userTs: number; assistantTs: number }> = [];
@@ -2600,8 +2074,6 @@ export async function editUserTurnAndRetry(opts: {
   const userMsg = history[userIndex]!;
   userMsg.text = sanitizeText(newText) || newText;
   userMsg.timestamp = Date.now();
-  userMsg.runMode = retryRuntimeMode;
-  userMsg.agentRunId = undefined;
   const selectedTextsForMessage = normalizeSelectedTexts(selectedTexts);
   const selectedTextSourcesForMessage = normalizeSelectedTextSources(
     selectedTextSources,
@@ -2612,12 +2084,6 @@ export async function editUserTurnAndRetry(opts: {
       selectedTextPaperContexts,
       selectedTextsForMessage.length,
     );
-  const selectedTextNoteContextsForMessage =
-    normalizeSelectedTextNoteContextsByIndex(
-      selectedTextNoteContexts,
-      selectedTextsForMessage.length,
-    );
-  const selectedTextForMessage = selectedTextsForMessage[0] || "";
   const screenshotImagesForMessage = Array.isArray(screenshotImages)
     ? screenshotImages
         .filter((entry): entry is string => typeof entry === "string")
@@ -2639,8 +2105,6 @@ export async function editUserTurnAndRetry(opts: {
     pdfExcludeKeysEdit.size > 0 ? pdfExcludeKeysEdit : undefined,
   );
   const attachmentsForMessage = normalizeEditableAttachments(attachments);
-  userMsg.selectedText = selectedTextForMessage || undefined;
-  userMsg.selectedTextExpanded = false;
   userMsg.selectedTexts = selectedTextsForMessage.length
     ? selectedTextsForMessage
     : undefined;
@@ -2651,11 +2115,6 @@ export async function editUserTurnAndRetry(opts: {
     (entry) => Boolean(entry),
   )
     ? selectedTextPaperContextsForMessage
-    : undefined;
-  userMsg.selectedTextNoteContexts = selectedTextNoteContextsForMessage.some(
-    (entry) => Boolean(entry),
-  )
-    ? selectedTextNoteContextsForMessage
     : undefined;
   userMsg.selectedTextExpandedIndex = -1;
   userMsg.screenshotImages = screenshotImagesForMessage.length
@@ -2676,16 +2135,12 @@ export async function editUserTurnAndRetry(opts: {
     ? attachmentsForMessage
     : undefined;
   userMsg.attachmentsExpanded = false;
-  userMsg.attachmentActiveIndex = undefined;
 
   // Persist the updated user message
   try {
     await updateStoredLatestUserMessage(conversationKey, {
       text: userMsg.text,
       timestamp: userMsg.timestamp,
-      runMode: userMsg.runMode,
-      agentRunId: userMsg.agentRunId,
-      selectedText: userMsg.selectedText,
       selectedTexts: userMsg.selectedTexts,
       selectedTextSources: userMsg.selectedTextSources,
       selectedTextPaperContexts: userMsg.selectedTextPaperContexts,
@@ -2709,226 +2164,18 @@ export async function editUserTurnAndRetry(opts: {
   const resolvedAdvanced =
     advanced || getAdvancedModelParamsForEntry(profile?.entryId);
 
-  // Route agent-mode retries through the agent runtime so tools are available
-  // and the old trace is properly cleared before the new run starts.
-  const isAgentRetry = retryRuntimeMode === "agent";
-  if (isAgentRetry) {
-    await retryLatestAgentResponse(
-      body,
-      item,
-      resolvedModel,
-      resolvedApiBase,
-      resolvedApiKey,
-      resolvedReasoning,
-      resolvedAdvanced,
-    );
-  } else {
-    await retryLatestAssistantResponse(
-      body,
-      item,
-      resolvedModel,
-      resolvedApiBase,
-      resolvedApiKey,
-      resolvedReasoning,
-      resolvedAdvanced,
-      pdfUploadSystemMessages,
-    );
-  }
-}
-
-export type BuildAgentRuntimeRequestParams = {
-  conversationKey: number;
-  item: Zotero.Item;
-  userText: string;
-  selectedTexts: string[];
-  selectedTextSources?: SelectedTextSource[];
-  paperContexts: PaperContextRef[];
-  fullTextPaperContexts: PaperContextRef[];
-  attachments: ChatAttachment[] | undefined;
-  screenshots: string[] | undefined;
-  forcedSkillIds?: string[];
-  effectiveRequestConfig: EffectiveRequestConfig;
-  history: ChatMessage[];
-};
-
-function buildActiveNoteRuntimeContext(
-  item: Zotero.Item,
-): AgentRuntimeRequest["activeNoteContext"] {
-  const noteSession = resolveActiveNoteSession(item);
-  if (!noteSession) return undefined;
-  const snapshot = readNoteSnapshot(item);
-  if (!snapshot) return undefined;
-  // Only send raw HTML when the note is a styled template (has inline
-  // style= attributes).  Plain notes don't need it — noteText suffices.
-  // Cap at 10 000 chars to avoid inflating the LLM prompt with heavy CSS.
-  const MAX_NOTE_HTML_LEN = 10_000;
-  const isStyledNote =
-    snapshot.html && /<[^>]+\bstyle\s*=/i.test(snapshot.html);
-  const noteHtml = isStyledNote
-    ? snapshot.html.length > MAX_NOTE_HTML_LEN
-      ? snapshot.html.slice(0, MAX_NOTE_HTML_LEN) + "\n[...truncated]"
-      : snapshot.html
-    : undefined;
-
-  return {
-    noteId: noteSession.noteId,
-    title: noteSession.title,
-    noteKind: noteSession.noteKind,
-    parentItemId: noteSession.parentItemId,
-    noteText: snapshot.text,
-    noteHtml,
-  };
-}
-
-async function enrichPaperContextsWithMineruCache(
-  papers: PaperContextRef[] | undefined,
-): Promise<PaperContextRef[] | undefined> {
-  if (!papers?.length) return papers;
-  const enriched: PaperContextRef[] = [];
-  for (const paper of papers) {
-    let mineruCacheDir: string | undefined;
-    try {
-      if (await hasCachedMineruMd(paper.contextItemId)) {
-        mineruCacheDir = getMineruItemDir(paper.contextItemId);
-      }
-    } catch {
-      /* ignore */
-    }
-    enriched.push(mineruCacheDir ? { ...paper, mineruCacheDir } : paper);
-  }
-  return enriched;
-}
-
-async function buildAgentRuntimeRequest(
-  params: BuildAgentRuntimeRequestParams,
-): Promise<AgentRuntimeRequest> {
-  const [enrichedPaperContexts, enrichedFullTextPapers] = await Promise.all([
-    enrichPaperContextsWithMineruCache(params.paperContexts),
-    enrichPaperContextsWithMineruCache(params.fullTextPaperContexts),
-  ]);
-  return {
-    conversationKey: params.conversationKey,
-    mode: "agent",
-    userText: params.userText,
-    activeItemId: params.item.id,
-    selectedTexts: params.selectedTexts,
-    selectedTextSources: params.selectedTextSources,
-    selectedPaperContexts: enrichedPaperContexts,
-    fullTextPaperContexts: enrichedFullTextPapers,
-    attachments: params.attachments,
-    screenshots: params.screenshots,
-    forcedSkillIds: params.forcedSkillIds,
-    model: params.effectiveRequestConfig.model,
-    apiBase: params.effectiveRequestConfig.apiBase,
-    apiKey: params.effectiveRequestConfig.apiKey,
-    authMode: params.effectiveRequestConfig.authMode,
-    providerProtocol: params.effectiveRequestConfig.providerProtocol,
-    reasoning: params.effectiveRequestConfig.reasoning,
-    advanced: params.effectiveRequestConfig.advanced,
-    history: params.history,
-    item: params.item,
-    systemPrompt: getStringPref("systemPrompt") || undefined,
-    modelProviderLabel: params.effectiveRequestConfig.modelProviderLabel,
-    libraryID: params.item.libraryID,
-    activeNoteContext: buildActiveNoteRuntimeContext(params.item),
-  };
-}
-
-function buildAgentEngineDeps(): AgentEngineDeps {
-  return {
-    chatHistory,
-    agentRunTraceCache,
-    cancelledRequestId: (ck: number) => getCancelledRequestId(ck),
-    currentAbortController: (ck: number) => getAbortController(ck),
-    setCurrentAbortController: (ck: number, ctrl: AbortController | null) =>
-      setAbortController(ck, ctrl),
-    getAbortControllerCtor,
-    nextRequestId,
-    setPendingRequestId,
-    getPanelRequestUI,
-    setRequestUIBusy,
-    restoreRequestUIIdle,
-    createPanelUpdateHelpers,
-    ensureConversationLoaded,
-    getConversationKey,
-    buildLLMHistoryMessages,
-    buildAgentRuntimeRequest,
-    resolveEffectiveRequestConfig,
-    normalizeSelectedTexts,
-    normalizeSelectedTextSources,
-    normalizeSelectedTextPaperContextsByIndex,
-    normalizeSelectedTextNoteContextsByIndex,
-    normalizePaperContexts,
-    includeAutoLoadedPaperContext,
-    findLatestRetryPair,
-    reconstructRetryPayload,
-    isReasoningExpandedByDefault,
-    createQueuedRefresh,
-    waitForUiStep,
-    finalizeCancelledAssistantMessage,
-    sanitizeText,
-    persistConversationMessage,
-    updateStoredLatestUserMessage:
-      updateStoredLatestUserMessage as AgentEngineDeps["updateStoredLatestUserMessage"],
-    updateStoredLatestAssistantMessage:
-      updateStoredLatestAssistantMessage as AgentEngineDeps["updateStoredLatestAssistantMessage"],
-    sendChatFallback: sendQuestion,
-    getAgentRuntime,
-    maxSelectedImages: MAX_SELECTED_IMAGES,
-  };
-}
-
-/**
- * Re-runs the latest user→assistant pair in agent mode.
- * Unlike `retryLatestAssistantResponse` (chat mode only), this function calls
- * `runTurn` so the agent can use tools for the retry.
- * It reuses the existing message objects rather than pushing new ones, so the
- * conversation history stays clean.
- */
-async function retryLatestAgentResponse(
-  body: Element,
-  item: Zotero.Item,
-  model?: string,
-  apiBase?: string,
-  apiKey?: string,
-  reasoning?: LLMReasoningConfig,
-  advanced?: AdvancedModelParams,
-): Promise<void> {
-  await retryAgentTurn(
-    body,
-    item,
-    model,
-    apiBase,
-    apiKey,
-    reasoning,
-    advanced,
-    buildAgentEngineDeps(),
-  );
-}
-
-async function sendAgentQuestion(opts: {
-  body: Element;
-  item: Zotero.Item;
-  question: string;
-  images?: string[];
-  model?: string;
-  apiBase?: string;
-  apiKey?: string;
-  reasoning?: LLMReasoningConfig;
-  advanced?: AdvancedModelParams;
-  displayQuestion?: string;
-  selectedTexts?: string[];
-  selectedTextSources?: SelectedTextSource[];
-  selectedTextPaperContexts?: (PaperContextRef | undefined)[];
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
-  paperContexts?: PaperContextRef[];
-  fullTextPaperContexts?: PaperContextRef[];
-  attachments?: ChatAttachment[];
-  pdfModePaperKeys?: Set<string>;
-  forcedSkillIds?: string[];
-  pdfUploadSystemMessages?: string[];
-}): Promise<void> {
-  await sendAgentTurn(opts, buildAgentEngineDeps());
+  await retryLatestAssistantResponse(body, item, {
+    model: resolvedModel,
+    apiBase: resolvedApiBase,
+    apiKey: resolvedApiKey,
+    authMode: authMode ?? profile?.authMode,
+    providerProtocol: providerProtocol ?? profile?.providerProtocol,
+    modelEntryId: modelEntryId ?? profile?.entryId,
+    modelProviderLabel: modelProviderLabel ?? profile?.providerLabel,
+    reasoning: resolvedReasoning,
+    advanced: resolvedAdvanced,
+    pdfUploadSystemMessages,
+  });
 }
 
 export async function sendQuestion(
@@ -2942,46 +2189,21 @@ export async function sendQuestion(
     model,
     apiBase,
     apiKey,
+    authMode,
+    providerProtocol,
+    modelEntryId,
+    modelProviderLabel,
     reasoning,
     advanced,
     displayQuestion,
     selectedTexts,
     selectedTextSources,
     selectedTextPaperContexts,
-    selectedTextNoteContexts,
     paperContexts,
     fullTextPaperContexts,
     attachments,
-    runtimeMode = "chat",
-    agentRunId,
-    skipAgentDispatch = false,
     pdfModePaperKeys,
   } = opts;
-  if (runtimeMode === "agent" && !skipAgentDispatch) {
-    await sendAgentQuestion({
-      body,
-      item,
-      question,
-      images,
-      model,
-      apiBase,
-      apiKey,
-      reasoning,
-      advanced,
-      displayQuestion,
-      selectedTexts,
-      selectedTextSources,
-      selectedTextPaperContexts,
-      selectedTextNoteContexts,
-      paperContexts,
-      fullTextPaperContexts,
-      attachments,
-      pdfModePaperKeys,
-      forcedSkillIds: opts.forcedSkillIds,
-      pdfUploadSystemMessages: opts.pdfUploadSystemMessages,
-    });
-    return;
-  }
   const ui = getPanelRequestUI(body);
 
   // Track this request
@@ -2995,7 +2217,7 @@ export async function sendQuestion(
   await ensureConversationLoaded(item);
   const conversationKey = getConversationKey(item);
 
-  // Add user message with attached selected text / screenshots metadata
+  // Add user message with selected text / image context metadata
   if (!chatHistory.has(conversationKey)) {
     chatHistory.set(conversationKey, []);
   }
@@ -3007,6 +2229,10 @@ export async function sendQuestion(
     model,
     apiBase,
     apiKey,
+    authMode,
+    providerProtocol,
+    modelEntryId,
+    modelProviderLabel,
     reasoning,
     advanced,
   });
@@ -3021,12 +2247,6 @@ export async function sendQuestion(
       selectedTextPaperContexts,
       selectedTextsForMessage.length,
     );
-  const selectedTextNoteContextsForMessage =
-    normalizeSelectedTextNoteContextsByIndex(
-      selectedTextNoteContexts,
-      selectedTextsForMessage.length,
-    );
-  const selectedTextForMessage = selectedTextsForMessage[0] || "";
   const normalizedPaperContexts = normalizePaperContexts(paperContexts);
   const normalizedFullTextPaperContexts = normalizePaperContexts(
     fullTextPaperContexts,
@@ -3055,10 +2275,6 @@ export async function sendQuestion(
     role: "user",
     text: userMessageText,
     timestamp: Date.now(),
-    runMode: runtimeMode,
-    agentRunId: agentRunId || undefined,
-    selectedText: selectedTextForMessage || undefined,
-    selectedTextExpanded: false,
     selectedTexts: selectedTextsForMessage.length
       ? selectedTextsForMessage
       : undefined,
@@ -3069,11 +2285,6 @@ export async function sendQuestion(
       (entry) => Boolean(entry),
     )
       ? selectedTextPaperContextsForMessage
-      : undefined,
-    selectedTextNoteContexts: selectedTextNoteContextsForMessage.some((entry) =>
-      Boolean(entry),
-    )
-      ? selectedTextNoteContextsForMessage
       : undefined,
     selectedTextExpandedIndex: -1,
     paperContexts: paperContextsForMessage.length
@@ -3096,8 +2307,6 @@ export async function sendQuestion(
     role: "assistant",
     text: "",
     timestamp: Date.now(),
-    runMode: runtimeMode,
-    agentRunId: agentRunId || undefined,
     modelName: effectiveRequestConfig.model,
     modelEntryId: effectiveRequestConfig.modelEntryId,
     modelProviderLabel: effectiveRequestConfig.modelProviderLabel,
@@ -3121,9 +2330,6 @@ export async function sendQuestion(
     role: "user",
     text: userMessage.text,
     timestamp: userMessage.timestamp,
-    runMode: userMessage.runMode,
-    agentRunId: userMessage.agentRunId,
-    selectedText: userMessage.selectedText,
     selectedTexts: userMessage.selectedTexts,
     selectedTextSources: userMessage.selectedTextSources,
     selectedTextPaperContexts: userMessage.selectedTextPaperContexts,
@@ -3142,8 +2348,6 @@ export async function sendQuestion(
       role: "assistant",
       text: assistantMessage.text,
       timestamp: assistantMessage.timestamp,
-      runMode: assistantMessage.runMode,
-      agentRunId: assistantMessage.agentRunId,
       modelName: assistantMessage.modelName,
       modelEntryId: assistantMessage.modelEntryId,
       modelProviderLabel: assistantMessage.modelProviderLabel,
@@ -3151,8 +2355,6 @@ export async function sendQuestion(
       reasoningDetails: assistantMessage.reasoningDetails,
       webchatRunState: assistantMessage.webchatRunState,
       webchatCompletionReason: assistantMessage.webchatCompletionReason,
-      webchatChatUrl: assistantMessage.webchatChatUrl,
-      webchatChatId: assistantMessage.webchatChatId,
     });
   };
   const markCancelled = async () => {
@@ -3288,9 +2490,7 @@ export async function sendQuestion(
 
   try {
     const rawLLMHistory = buildLLMHistoryMessages(historyForLLM);
-    // Apply auto-summary compression when the history grows long.
-    const llmHistory =
-      applyHistoryCompression(conversationKey, rawLLMHistory) ?? rawLLMHistory;
+    const llmHistory = compressLongHistory(rawLLMHistory);
     const recentPaperContexts = collectRecentPaperContexts(historyForLLM);
 
     // Create AbortController early so the signal is available during context
@@ -3316,14 +2516,7 @@ export async function sendQuestion(
       signal: getAbortController(conversationKey)?.signal,
       setStatusSafely,
     });
-    let combinedContext = contextPlan.combinedContext;
-    // Append collection scope context if any collections are selected
-    const selectedCollections =
-      selectedCollectionContextCache.get(item.id) || [];
-    if (selectedCollections.length > 0) {
-      const collectionNames = selectedCollections.map((c) => c.name).join(", ");
-      combinedContext = `${combinedContext}\n\n[Selected Zotero collections as context scope: ${collectionNames}]`;
-    }
+    const combinedContext = contextPlan.combinedContext;
     userMessage.paperContexts = contextPlan.paperContexts.length
       ? contextPlan.paperContexts
       : undefined;
@@ -3334,9 +2527,6 @@ export async function sendQuestion(
     await updateStoredLatestUserMessage(conversationKey, {
       text: userMessage.text,
       timestamp: userMessage.timestamp,
-      runMode: userMessage.runMode,
-      agentRunId: userMessage.agentRunId,
-      selectedText: userMessage.selectedText,
       selectedTexts: userMessage.selectedTexts,
       selectedTextSources: userMessage.selectedTextSources,
       selectedTextPaperContexts: userMessage.selectedTextPaperContexts,
@@ -3438,22 +2628,11 @@ export async function sendQuestion(
 
     assistantMessage.text =
       sanitizeText(answer) || assistantMessage.text || "No response.";
-    assistantMessage.runMode = runtimeMode;
-    assistantMessage.agentRunId = agentRunId || assistantMessage.agentRunId;
     assistantMessage.streaming = false;
     refreshChatSafely();
     setStatusSafely("Ready", "ready");
     await waitForUiStep();
     void persistAssistantOnce();
-
-    // After the response is rendered, kick off background persistence and
-    // history summarization so the UI path stays interactive.
-    scheduleLLMSummary(conversationKey, rawLLMHistory, {
-      model: effectiveRequestConfig.model,
-      apiBase: effectiveRequestConfig.apiBase,
-      apiKey: effectiveRequestConfig.apiKey,
-      authMode: effectiveRequestConfig.authMode,
-    });
   } catch (err) {
     const isCancelled =
       getCancelledRequestId(conversationKey) >= thisRequestId ||
@@ -3630,6 +2809,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       "#llm-token-usage",
     ) as HTMLElement | null;
     if (tokenUsageEl) tokenUsageEl.style.display = "none";
+    hideQuestionTimeline(body);
     return;
   }
 
@@ -3639,9 +2819,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
     "#llm-token-usage",
   ) as HTMLElement | null;
   const panelRoot = body.querySelector("#llm-main") as HTMLDivElement | null;
-  const isGlobalConversation =
-    isGlobalPortalItem(item) ||
-    panelRoot?.dataset.conversationKind === "global";
   const mutateChatWithScrollGuard = (fn: () => void) => {
     withScrollGuard(chatBox, conversationKey, fn);
   };
@@ -3674,21 +2851,10 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         targetEntry?.modelName,
       );
     } else {
-      const isStandalone =
-        panelRoot?.dataset?.standalone === "true" ||
-        (body as HTMLElement).dataset?.standalone === "true";
-      const isNoteEditing = !!resolveActiveNoteSession(item);
-      if (isNoteEditing) {
-        chatBox.innerHTML = getNoteEditingStartPageHtml();
-        if (panelRoot) panelRoot.dataset.startPageActive = "true";
-      } else if (isStandalone && isGlobalConversation) {
-        chatBox.innerHTML = getStandaloneLibraryChatStartPageHtml();
-        if (panelRoot) panelRoot.dataset.startPageActive = "true";
-      } else {
-        chatBox.innerHTML = getPaperChatStartPageHtml();
-        if (panelRoot) panelRoot.dataset.startPageActive = "true";
-      }
+      chatBox.innerHTML = getPaperChatStartPageHtml();
+      if (panelRoot) panelRoot.dataset.startPageActive = "true";
     }
+    hideQuestionTimeline(body);
     return;
   }
 
@@ -3752,26 +2918,14 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       inlineEditTarget?.conversationKey === conversationKey &&
       inlineEditTarget.userTimestamp === msg.timestamp,
     );
-    const agentTraceSnapshot =
-      msg.runMode === "agent"
-        ? getCachedAgentRunEvents(msg.agentRunId?.trim()).map((event) => [
-            event.seq,
-            event.eventType,
-            event.createdAt,
-          ])
-        : [];
     return {
       domKey: buildChatMessageDomKey(index, msg),
       renderKey: JSON.stringify({
         text: msg.text,
-        runMode: msg.runMode || "",
-        agentRunId: msg.agentRunId || "",
         streaming: Boolean(msg.streaming),
-        selectedText: msg.selectedText || "",
         selectedTexts: msg.selectedTexts || [],
         selectedTextSources: msg.selectedTextSources || [],
         selectedTextPaperContexts: msg.selectedTextPaperContexts || [],
-        selectedTextNoteContexts: msg.selectedTextNoteContexts || [],
         selectedTextExpandedIndex: getMessageSelectedTextExpandedIndex(
           msg,
           getMessageSelectedTexts(msg).length,
@@ -3813,7 +2967,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         pairedUserPaperContexts: previousUserMessage?.paperContexts || [],
         pairedUserSelectedTextPaperContexts:
           previousUserMessage?.selectedTextPaperContexts || [],
-        agentTraceSnapshot,
       }),
     };
   };
@@ -3862,7 +3015,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
     const msg = history[index];
     const isUser = msg.role === "user";
     const assistantPairMsg = history[index + 1];
-    const hasAssistantPair = isUser && assistantPairMsg?.role === "assistant";
     const canEditUserPrompt = canEditUserPromptTurn({
       isUser,
       hasItem: Boolean(item),
@@ -3938,7 +3090,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         previewWrap.className = "llm-user-screenshots-preview";
         const previewImg = doc.createElement("img") as HTMLImageElement;
         previewImg.className = "llm-user-screenshots-preview-img";
-        previewImg.alt = "Screenshot preview";
+        previewImg.alt = "Image preview";
         previewWrap.appendChild(previewImg);
 
         const thumbButtons: HTMLButtonElement[] = [];
@@ -3946,12 +3098,12 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           const thumbBtn = doc.createElement("button") as HTMLButtonElement;
           thumbBtn.type = "button";
           thumbBtn.className = "llm-user-screenshot-thumb";
-          thumbBtn.title = `Screenshot ${index + 1}`;
+          thumbBtn.title = `Image ${index + 1}`;
 
           const thumbImg = doc.createElement("img") as HTMLImageElement;
           thumbImg.className = "llm-user-screenshot-thumb-img";
           thumbImg.src = imageUrl;
-          thumbImg.alt = `Screenshot ${index + 1}`;
+          thumbImg.alt = `Image ${index + 1}`;
           thumbBtn.appendChild(thumbImg);
 
           const activateScreenshotThumb = (e: Event) => {
@@ -4292,7 +3444,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         );
         const syncSelectedTextExpandedState = () => {
           msg.selectedTextExpandedIndex = selectedTextExpandedIndex;
-          msg.selectedTextExpanded = selectedTextExpandedIndex === 0;
         };
         syncSelectedTextExpandedState();
         const applySelectedTextStates: Array<() => void> = [];
@@ -4307,9 +3458,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           const selectedTextPaperContext =
             selectedTextPaperContexts[contextIndex];
           const selectedTextPaperLabel =
-            isGlobalConversation &&
-            selectedSource === "pdf" &&
-            selectedTextPaperContext
+            selectedSource === "pdf" && selectedTextPaperContext
               ? formatPaperCitationLabel(selectedTextPaperContext)
               : "";
           const selectedBar = doc.createElement("button") as HTMLButtonElement;
@@ -4392,7 +3541,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           conversationKey,
         );
       } else {
-        renderUserBubbleContent(bubble, sanitizeText(msg.text || ""), doc);
+        bubble.textContent = sanitizeText(msg.text || "");
         if (canEditUserPrompt) {
           bubble.classList.add("llm-bubble-editable");
           bubble.addEventListener("click", (e: Event) => {
@@ -4433,9 +3582,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           const responseMenu = body.querySelector(
             "#llm-response-menu",
           ) as HTMLDivElement | null;
-          const exportMenu = body.querySelector(
-            "#llm-export-menu",
-          ) as HTMLDivElement | null;
           const retryModelMenu = body.querySelector(
             "#llm-retry-model-menu",
           ) as HTMLDivElement | null;
@@ -4448,7 +3594,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           }
           if (!canDeletePromptTurn) return;
           if (responseMenu) responseMenu.style.display = "none";
-          if (exportMenu) exportMenu.style.display = "none";
           if (retryModelMenu) {
             retryModelMenu.classList.remove("llm-model-menu-open");
             retryModelMenu.style.display = "none";
@@ -4469,25 +3614,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
     } else {
       const hasModelName = Boolean(msg.modelName?.trim());
       const hasAnswerText = Boolean(msg.text);
-      const previousUserMessage =
-        index > 0 && history[index - 1]?.role === "user"
-          ? history[index - 1]
-          : null;
-      const agentRunId = msg.agentRunId?.trim();
-      const agentTraceEl =
-        msg.runMode === "agent"
-          ? renderAgentTrace({
-              doc,
-              message: msg,
-              userMessage: previousUserMessage,
-              events: getCachedAgentRunEvents(agentRunId),
-              onTraceMissing: agentRunId
-                ? () => {
-                    void ensureAgentRunTraceLoaded(agentRunId, body, item);
-                  }
-                : undefined,
-            })
-          : null;
       if (hasAnswerText) {
         const safeText = sanitizeText(msg.text);
         if (msg.streaming) bubble.classList.add("streaming");
@@ -4509,17 +3635,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           try {
             const pairedUserMessage =
               history[index - 1]?.role === "user" ? history[index - 1] : null;
-            ztoolkit.log(
-              "LLM: calling decorateAssistantCitationLinks",
-              "msgLen =",
-              msg.text.length,
-              "bubbleHTML =",
-              String(bubble.innerHTML || "").length,
-              "hasPairedUser =",
-              Boolean(pairedUserMessage),
-              "pairedPaperContexts =",
-              pairedUserMessage?.paperContexts?.length ?? "none",
-            );
             decorateAssistantCitationLinks({
               body,
               panelItem: item,
@@ -4541,9 +3656,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           const responseMenu = body.querySelector(
             "#llm-response-menu",
           ) as HTMLDivElement | null;
-          const exportMenu = body.querySelector(
-            "#llm-export-menu",
-          ) as HTMLDivElement | null;
           const promptMenu = body.querySelector(
             "#llm-prompt-menu",
           ) as HTMLDivElement | null;
@@ -4561,7 +3673,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           if (responseMenuDeleteBtn) {
             responseMenuDeleteBtn.disabled = !canDeleteResponseTurn;
           }
-          if (exportMenu) exportMenu.style.display = "none";
           if (promptMenu) promptMenu.style.display = "none";
           if (retryModelMenu) {
             retryModelMenu.classList.remove("llm-model-menu-open");
@@ -4607,11 +3718,11 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       const hasReasoningDetails = Boolean(msg.reasoningDetails?.trim());
       if (hasReasoningSummary || hasReasoningDetails) {
         const details = doc.createElement("details") as HTMLDetailsElement;
-        details.className = "llm-agent-reasoning";
+        details.className = "llm-reasoning";
         details.open = Boolean(msg.reasoningOpen);
 
         const summary = doc.createElement("summary") as HTMLElement;
-        summary.className = "llm-agent-reasoning-summary";
+        summary.className = "llm-reasoning-summary";
         summary.textContent = "Thinking";
         const toggleReasoning = (e: Event) => {
           e.preventDefault();
@@ -4636,16 +3747,16 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         details.appendChild(summary);
 
         const bodyWrap = doc.createElement("div") as HTMLDivElement;
-        bodyWrap.className = "llm-agent-reasoning-body";
+        bodyWrap.className = "llm-reasoning-body";
 
         if (hasReasoningSummary) {
           const summaryBlock = doc.createElement("div") as HTMLDivElement;
-          summaryBlock.className = "llm-agent-reasoning-block";
+          summaryBlock.className = "llm-reasoning-block";
           const label = doc.createElement("div") as HTMLDivElement;
-          label.className = "llm-agent-reasoning-label";
+          label.className = "llm-reasoning-label";
           label.textContent = "Summary";
           const text = doc.createElement("div") as HTMLDivElement;
-          text.className = "llm-agent-reasoning-text";
+          text.className = "llm-reasoning-text";
           try {
             text.innerHTML = renderMarkdown(msg.reasoningSummary || "");
           } catch (err) {
@@ -4658,12 +3769,12 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
 
         if (hasReasoningDetails) {
           const detailsBlock = doc.createElement("div") as HTMLDivElement;
-          detailsBlock.className = "llm-agent-reasoning-block";
+          detailsBlock.className = "llm-reasoning-block";
           const label = doc.createElement("div") as HTMLDivElement;
-          label.className = "llm-agent-reasoning-label";
+          label.className = "llm-reasoning-label";
           label.textContent = "Details";
           const text = doc.createElement("div") as HTMLDivElement;
-          text.className = "llm-agent-reasoning-text";
+          text.className = "llm-reasoning-text";
           try {
             text.innerHTML = renderMarkdown(msg.reasoningDetails || "");
           } catch (err) {
@@ -4676,10 +3787,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
 
         details.appendChild(bodyWrap);
         bubbleHeaderNodes.push(details);
-      }
-
-      if (agentTraceEl) {
-        bubbleHeaderNodes.push(agentTraceEl);
       }
 
       for (let i = bubbleHeaderNodes.length - 1; i >= 0; i -= 1) {
@@ -4707,7 +3814,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       index === latestAssistantIndex &&
       !msg.streaming &&
       msg.text.trim() &&
-      msg.runMode !== "agent" &&
       renderProviderProtocol !== "web_sync" // [webchat] no retry in webchat mode
     ) {
       const retryBtn = doc.createElement("button") as HTMLButtonElement;
@@ -4793,6 +3899,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
     const renderState = getRenderState(index);
     wrapper.dataset.messageDomKey = renderState.domKey;
     wrapper.dataset.messageRenderKey = renderState.renderKey;
+    wrapper.dataset.messageIndex = `${index}`;
     if (isUser && hasUserContext) {
       wrapper.classList.add("llm-user-context-aligned");
     }
@@ -4812,6 +3919,20 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
 
   applyChatScrollSnapshot(chatBox, baselineSnapshot);
   persistChatScrollSnapshotByKey(conversationKey, chatBox);
+  syncQuestionTimeline({
+    body,
+    chatBox,
+    history,
+    conversationKey,
+    jumpToMessageIndex: (messageIndex) => {
+      chatBox.dataset.renderedStartIndex = `${Math.max(
+        0,
+        Math.floor(messageIndex),
+      )}`;
+      refreshChat(body, item);
+    },
+    persistScroll: () => persistChatScrollSnapshot(item, chatBox),
+  });
   if (baselineSnapshot.mode === "followBottom") {
     scheduleFollowBottomStabilization(body, conversationKey, chatBox);
   } else {

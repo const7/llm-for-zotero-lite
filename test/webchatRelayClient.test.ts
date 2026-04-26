@@ -5,7 +5,9 @@ type WebChatClientModule = typeof import("../src/webchat/client");
 
 type EndpointReply = [number, string | Record<string, string>, string?];
 
-function parseJsonReply(reply: EndpointReply | number): Record<string, unknown> {
+function parseJsonReply(
+  reply: EndpointReply | number,
+): Record<string, unknown> {
   if (!Array.isArray(reply)) {
     throw new Error(`Unexpected endpoint reply: ${String(reply)}`);
   }
@@ -25,16 +27,20 @@ describe("webchat relay/client", function () {
     method: "GET" | "POST",
     data?: unknown,
   ): Promise<Record<string, unknown>> => {
-    const EndpointClass = (globalThis.Zotero.Server.Endpoints as Record<string, any>)[path];
+    const EndpointClass = (
+      globalThis.Zotero.Server.Endpoints as Record<string, any>
+    )[path];
     assert.isFunction(EndpointClass, `Missing endpoint class for ${path}`);
     const endpoint = new EndpointClass();
-    return parseJsonReply(await endpoint.init({
-      method,
-      pathname: path,
-      query: {},
-      headers: {},
-      data: data ?? null,
-    }));
+    return parseJsonReply(
+      await endpoint.init({
+        method,
+        pathname: path,
+        query: {},
+        headers: {},
+        data: data ?? null,
+      }),
+    );
   };
 
   before(async function () {
@@ -46,8 +52,9 @@ describe("webchat relay/client", function () {
         Endpoints: {},
       },
     } as typeof Zotero;
-    (globalThis as typeof globalThis & { ztoolkit: { log: () => void } })
-      .ztoolkit = {
+    (
+      globalThis as typeof globalThis & { ztoolkit: { log: () => void } }
+    ).ztoolkit = {
       log: () => {},
     };
 
@@ -70,22 +77,30 @@ describe("webchat relay/client", function () {
   });
 
   it("tracks per-site history freshness without wiping other sites on empty updates", async function () {
-    await invokeEndpoint("/llm-for-zotero/webchat/update_chat_history", "POST", {
-      sessions: [
-        {
-          id: "chatgpt-1",
-          title: "ChatGPT thread",
-          chatUrl: "https://chatgpt.com/c/chatgpt-1",
-        },
-      ],
-      siteHostname: "chatgpt.com",
-      scrapedAt: 111,
-    });
-    await invokeEndpoint("/llm-for-zotero/webchat/update_chat_history", "POST", {
-      sessions: [],
-      siteHostname: "chat.deepseek.com",
-      scrapedAt: 222,
-    });
+    await invokeEndpoint(
+      "/llm-for-zotero-lite/webchat/update_chat_history",
+      "POST",
+      {
+        sessions: [
+          {
+            id: "chatgpt-1",
+            title: "ChatGPT thread",
+            chatUrl: "https://chatgpt.com/c/chatgpt-1",
+          },
+        ],
+        siteHostname: "chatgpt.com",
+        scrapedAt: 111,
+      },
+    );
+    await invokeEndpoint(
+      "/llm-for-zotero-lite/webchat/update_chat_history",
+      "POST",
+      {
+        sessions: [],
+        siteHostname: "chat.deepseek.com",
+        scrapedAt: 222,
+      },
+    );
 
     const snapshot = relayServer.relayGetHistorySnapshot();
     assert.deepEqual(snapshot.sessions, [
@@ -107,27 +122,52 @@ describe("webchat relay/client", function () {
     });
   });
 
-  it("preserves existing site history when a fresh invalid source update arrives", async function () {
-    await invokeEndpoint("/llm-for-zotero/webchat/update_chat_history", "POST", {
-      sessions: [
-        {
-          id: "deepseek-1",
-          title: "DeepSeek thread",
-          chatUrl: "https://chat.deepseek.com/a/chat/s/deepseek-1",
-        },
+  it("re-registers relay endpoints on first cold-path command", function () {
+    relayServer.unregisterWebChatRelay();
+    assert.isUndefined(
+      (globalThis.Zotero.Server.Endpoints as Record<string, unknown>)[
+        "/llm-for-zotero-lite/webchat/poll_command"
       ],
-      siteHostname: "chat.deepseek.com",
-      scrapedAt: 300,
-      source: "network",
-    });
+    );
 
-    await invokeEndpoint("/llm-for-zotero/webchat/update_chat_history", "POST", {
-      sessions: [],
-      siteHostname: "chat.deepseek.com",
-      scrapedAt: 301,
-      status: "invalid_source",
-      source: "network",
-    });
+    relayServer.relaySetCommand({ type: "SCRAPE_HISTORY" });
+
+    assert.isFunction(
+      (globalThis.Zotero.Server.Endpoints as Record<string, unknown>)[
+        "/llm-for-zotero-lite/webchat/poll_command"
+      ],
+    );
+  });
+
+  it("preserves existing site history when a fresh invalid source update arrives", async function () {
+    await invokeEndpoint(
+      "/llm-for-zotero-lite/webchat/update_chat_history",
+      "POST",
+      {
+        sessions: [
+          {
+            id: "deepseek-1",
+            title: "DeepSeek thread",
+            chatUrl: "https://chat.deepseek.com/a/chat/s/deepseek-1",
+          },
+        ],
+        siteHostname: "chat.deepseek.com",
+        scrapedAt: 300,
+        source: "network",
+      },
+    );
+
+    await invokeEndpoint(
+      "/llm-for-zotero-lite/webchat/update_chat_history",
+      "POST",
+      {
+        sessions: [],
+        siteHostname: "chat.deepseek.com",
+        scrapedAt: 301,
+        status: "invalid_source",
+        source: "network",
+      },
+    );
 
     const snapshot = relayServer.relayGetHistorySnapshot();
     assert.deepEqual(snapshot.sessions, [
@@ -145,26 +185,34 @@ describe("webchat relay/client", function () {
   });
 
   it("clears existing site history on a fresh empty update and exposes the failure helpers", async function () {
-    await invokeEndpoint("/llm-for-zotero/webchat/update_chat_history", "POST", {
-      sessions: [
-        {
-          id: "deepseek-1",
-          title: "DeepSeek thread",
-          chatUrl: "https://chat.deepseek.com/a/chat/s/deepseek-1",
-        },
-      ],
-      siteHostname: "chat.deepseek.com",
-      scrapedAt: 400,
-      source: "network",
-    });
+    await invokeEndpoint(
+      "/llm-for-zotero-lite/webchat/update_chat_history",
+      "POST",
+      {
+        sessions: [
+          {
+            id: "deepseek-1",
+            title: "DeepSeek thread",
+            chatUrl: "https://chat.deepseek.com/a/chat/s/deepseek-1",
+          },
+        ],
+        siteHostname: "chat.deepseek.com",
+        scrapedAt: 400,
+        source: "network",
+      },
+    );
 
-    await invokeEndpoint("/llm-for-zotero/webchat/update_chat_history", "POST", {
-      sessions: [],
-      siteHostname: "chat.deepseek.com",
-      scrapedAt: 401,
-      status: "empty",
-      source: "network",
-    });
+    await invokeEndpoint(
+      "/llm-for-zotero-lite/webchat/update_chat_history",
+      "POST",
+      {
+        sessions: [],
+        siteHostname: "chat.deepseek.com",
+        scrapedAt: 401,
+        status: "empty",
+        source: "network",
+      },
+    );
 
     const snapshot = await client.fetchChatHistorySnapshot("");
     assert.deepEqual(snapshot.sessions, []);
@@ -184,13 +232,17 @@ describe("webchat relay/client", function () {
   });
 
   it("flags invalid history statuses as failures in the client helper", async function () {
-    await invokeEndpoint("/llm-for-zotero/webchat/update_chat_history", "POST", {
-      sessions: [],
-      siteHostname: "chat.deepseek.com",
-      scrapedAt: 500,
-      status: "timeout",
-      source: "dom",
-    });
+    await invokeEndpoint(
+      "/llm-for-zotero-lite/webchat/update_chat_history",
+      "POST",
+      {
+        sessions: [],
+        siteHostname: "chat.deepseek.com",
+        scrapedAt: 500,
+        status: "timeout",
+        source: "dom",
+      },
+    );
 
     const snapshot = await client.fetchChatHistorySnapshot("");
     assert.equal(
@@ -205,7 +257,7 @@ describe("webchat relay/client", function () {
   });
 
   it("stores scraped transcript metadata and exposes it directly", async function () {
-    await invokeEndpoint("/llm-for-zotero/webchat/chat_history", "POST", {
+    await invokeEndpoint("/llm-for-zotero-lite/webchat/chat_history", "POST", {
       action: "submit_scraped",
       messages: [
         {
@@ -240,7 +292,7 @@ describe("webchat relay/client", function () {
   });
 
   it("does not reuse a fresh scraped transcript for the wrong chat", async function () {
-    await invokeEndpoint("/llm-for-zotero/webchat/chat_history", "POST", {
+    await invokeEndpoint("/llm-for-zotero-lite/webchat/chat_history", "POST", {
       action: "submit_scraped",
       messages: [
         {
@@ -267,7 +319,7 @@ describe("webchat relay/client", function () {
   });
 
   it("accepts a fresh scraped transcript when the chat id matches even if the url differs", async function () {
-    await invokeEndpoint("/llm-for-zotero/webchat/chat_history", "POST", {
+    await invokeEndpoint("/llm-for-zotero-lite/webchat/chat_history", "POST", {
       action: "submit_scraped",
       messages: [
         {
@@ -295,7 +347,7 @@ describe("webchat relay/client", function () {
   });
 
   it("falls back to the latest matching transcript when freshness timing is missed", async function () {
-    await invokeEndpoint("/llm-for-zotero/webchat/chat_history", "POST", {
+    await invokeEndpoint("/llm-for-zotero-lite/webchat/chat_history", "POST", {
       action: "submit_scraped",
       messages: [
         {
@@ -332,19 +384,23 @@ describe("webchat relay/client", function () {
   });
 
   it("fails chat loading instead of falling back to stale scraped messages", async function () {
-    await invokeEndpoint("/llm-for-zotero/webchat/update_chat_history", "POST", {
-      sessions: [
-        {
-          id: "chat-b",
-          title: "DeepSeek thread",
-          chatUrl: "https://chat.deepseek.com/a/chat/s/chat-b",
-        },
-      ],
-      siteHostname: "chat.deepseek.com",
-      scrapedAt: 555,
-    });
+    await invokeEndpoint(
+      "/llm-for-zotero-lite/webchat/update_chat_history",
+      "POST",
+      {
+        sessions: [
+          {
+            id: "chat-b",
+            title: "DeepSeek thread",
+            chatUrl: "https://chat.deepseek.com/a/chat/s/chat-b",
+          },
+        ],
+        siteHostname: "chat.deepseek.com",
+        scrapedAt: 555,
+      },
+    );
 
-    await invokeEndpoint("/llm-for-zotero/webchat/chat_history", "POST", {
+    await invokeEndpoint("/llm-for-zotero-lite/webchat/chat_history", "POST", {
       action: "submit_scraped",
       messages: [
         {
@@ -366,7 +422,7 @@ describe("webchat relay/client", function () {
         remote_chat_id: "chat-b",
         turn_status: "ready",
       });
-      void invokeEndpoint("/llm-for-zotero/webchat/chat_history", "POST", {
+      void invokeEndpoint("/llm-for-zotero-lite/webchat/chat_history", "POST", {
         action: "submit_scraped",
         messages: [],
         chatUrl: "https://chat.deepseek.com/a/chat/s/chat-b",
@@ -392,21 +448,25 @@ describe("webchat relay/client", function () {
   });
 
   it("loads a fresh scraped transcript without requiring remote ready state", async function () {
-    await invokeEndpoint("/llm-for-zotero/webchat/update_chat_history", "POST", {
-      sessions: [
-        {
-          id: "chat-c",
-          title: "DeepSeek thread",
-          chatUrl: "https://chat.deepseek.com/a/chat/s/chat-c",
-        },
-      ],
-      siteHostname: "chat.deepseek.com",
-      scrapedAt: 600,
-    });
+    await invokeEndpoint(
+      "/llm-for-zotero-lite/webchat/update_chat_history",
+      "POST",
+      {
+        sessions: [
+          {
+            id: "chat-c",
+            title: "DeepSeek thread",
+            chatUrl: "https://chat.deepseek.com/a/chat/s/chat-c",
+          },
+        ],
+        siteHostname: "chat.deepseek.com",
+        scrapedAt: 600,
+      },
+    );
 
     const loadPromise = client.loadChatSession("", "chat-c");
     setTimeout(() => {
-      void invokeEndpoint("/llm-for-zotero/webchat/chat_history", "POST", {
+      void invokeEndpoint("/llm-for-zotero-lite/webchat/chat_history", "POST", {
         action: "submit_scraped",
         messages: [
           {
@@ -448,14 +508,18 @@ describe("webchat relay/client", function () {
     const claimed = relayServer.relayClaimQuery(submit.seq);
     assert.isTrue(claimed.ok);
 
-    await invokeEndpoint("/llm-for-zotero/webchat/submit_response", "POST", {
-      seq: submit.seq,
-      attempt: claimed.query?.attempt || 1,
-      response: "",
-      thinking: "Reasoning only",
-      run_state: "done",
-      completion_reason: "settled",
-    });
+    await invokeEndpoint(
+      "/llm-for-zotero-lite/webchat/submit_response",
+      "POST",
+      {
+        seq: submit.seq,
+        attempt: claimed.query?.attempt || 1,
+        response: "",
+        thinking: "Reasoning only",
+        run_state: "done",
+        completion_reason: "settled",
+      },
+    );
 
     const result = await client.pollForResponse(
       "",
@@ -476,14 +540,18 @@ describe("webchat relay/client", function () {
     const claimed = relayServer.relayClaimQuery(submit.seq);
     assert.isTrue(claimed.ok);
 
-    await invokeEndpoint("/llm-for-zotero/webchat/submit_response", "POST", {
-      seq: submit.seq,
-      attempt: claimed.query?.attempt || 1,
-      response: "Final answer",
-      thinking: "Trace",
-      run_state: "done",
-      completion_reason: "settled",
-    });
+    await invokeEndpoint(
+      "/llm-for-zotero-lite/webchat/submit_response",
+      "POST",
+      {
+        seq: submit.seq,
+        attempt: claimed.query?.attempt || 1,
+        response: "Final answer",
+        thinking: "Trace",
+        run_state: "done",
+        completion_reason: "settled",
+      },
+    );
 
     const result = await client.pollForResponse(
       "",
@@ -505,14 +573,18 @@ describe("webchat relay/client", function () {
     const claimed = relayServer.relayClaimQuery(submit.seq);
     assert.isTrue(claimed.ok);
 
-    await invokeEndpoint("/llm-for-zotero/webchat/submit_response", "POST", {
-      seq: submit.seq,
-      attempt: claimed.query?.attempt || 1,
-      response: "",
-      thinking: "",
-      run_state: "done",
-      completion_reason: "settled",
-    });
+    await invokeEndpoint(
+      "/llm-for-zotero-lite/webchat/submit_response",
+      "POST",
+      {
+        seq: submit.seq,
+        attempt: claimed.query?.attempt || 1,
+        response: "",
+        thinking: "",
+        run_state: "done",
+        completion_reason: "settled",
+      },
+    );
 
     let thrown: Error | null = null;
     try {
@@ -528,6 +600,9 @@ describe("webchat relay/client", function () {
     }
 
     assert.instanceOf(thrown, Error);
-    assert.equal(thrown?.message, "Chat finished without a visible final answer.");
+    assert.equal(
+      thrown?.message,
+      "Chat finished without a visible final answer.",
+    );
   });
 });

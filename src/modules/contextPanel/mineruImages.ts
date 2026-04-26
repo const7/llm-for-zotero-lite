@@ -3,7 +3,7 @@ import { readMineruImageAsBase64 } from "./mineruCache";
 const MD_IMAGE_PATTERN = /!\[([^\]]*)\]\(([^)]+)\)/g;
 const MAX_MINERU_CONTEXT_IMAGES = 5;
 
-export type MineruImageRef = {
+type MineruImageRef = {
   alt: string;
   relativePath: string;
 };
@@ -12,7 +12,7 @@ export type MineruImageRef = {
  * Extract markdown image references from text.
  * Dedupes by relativePath, returns in order of appearance.
  */
-export function extractImageRefsFromText(text: string): MineruImageRef[] {
+function extractImageRefsFromText(text: string): MineruImageRef[] {
   const seen = new Set<string>();
   const refs: MineruImageRef[] = [];
   let match: RegExpExecArray | null;

@@ -1,20 +1,15 @@
-import type {
-  ReasoningOption,
-  ReasoningProviderKind,
-} from "../../types";
+import type { ReasoningOption, ReasoningProviderKind } from "../../types";
 import type { ReasoningLevel as LLMReasoningLevel } from "../../../../utils/llmClient";
 
-import {
-  isTextOnlyModel,
-  resolveProviderCapabilities,
-  type PdfSupport,
-} from "../../../../providers";
+import { resolveProviderCapabilities } from "../../../../providers/registry";
+import { isTextOnlyModel } from "../../../../providers/modelChecks";
+import type { PdfSupport } from "../../../../providers/types";
 
-export function isScreenshotUnsupportedModel(modelName: string): boolean {
+export function isImageContextUnsupportedModel(modelName: string): boolean {
   return isTextOnlyModel(modelName);
 }
 
-export type ModelPdfSupport = PdfSupport;
+type ModelPdfSupport = PdfSupport;
 
 export function getModelPdfSupport(
   modelName: string,
@@ -28,11 +23,6 @@ export function getModelPdfSupport(
     authMode,
     apiBase,
   }).pdf;
-}
-
-export function getScreenshotDisabledHint(modelName: string): string {
-  const label = modelName.trim() || "current model";
-  return `Screenshots are disabled for ${label}`;
 }
 
 export function getReasoningLevelDisplayLabel(

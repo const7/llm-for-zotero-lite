@@ -1,4 +1,4 @@
-export type LatestOnlyTaskContext = {
+type LatestOnlyTaskContext = {
   isCurrent: () => boolean;
 };
 
@@ -33,8 +33,9 @@ export function createLatestOnlyTaskScheduler<
     ): number {
       const generation = nextGeneration(key);
       clearPending(key);
-      let handle: THandle;
+      const handleRef: { current?: THandle } = {};
       const run = () => {
+        const handle = handleRef.current;
         if (pendingHandles.get(key) === handle) {
           pendingHandles.delete(key);
         }
@@ -47,7 +48,8 @@ export function createLatestOnlyTaskScheduler<
           options.onError?.(error);
         });
       };
-      handle = options.schedule(key, run);
+      const handle = options.schedule(key, run);
+      handleRef.current = handle;
       pendingHandles.set(key, handle);
       return generation;
     },

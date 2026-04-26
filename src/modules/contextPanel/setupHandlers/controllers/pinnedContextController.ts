@@ -44,32 +44,13 @@ function cleanupPinnedOwnerIfEmpty(
 
 function normalizeTextSource(
   source: SelectedTextContext["source"],
-): "pdf" | "model" | "note" | "note-edit" {
+): "pdf" | "model" {
   if (source === "model") return "model";
-  if (source === "note") return "note";
-  if (source === "note-edit") return "note-edit";
   return "pdf";
 }
 
 function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function buildPinnedNoteKey(
-  noteContext: SelectedTextContext["noteContext"],
-): string {
-  if (!noteContext) return "-";
-  const libraryID = Number.isFinite(noteContext.libraryID)
-    ? Math.max(0, Math.floor(noteContext.libraryID))
-    : 0;
-  const noteItemKey = normalizeText(noteContext.noteItemKey).toUpperCase();
-  if (libraryID && noteItemKey) {
-    return `${libraryID}:${noteItemKey}`;
-  }
-  const noteItemId = Number.isFinite(noteContext.noteItemId)
-    ? Math.max(0, Math.floor(noteContext.noteItemId as number))
-    : 0;
-  return noteItemId ? `legacy:${noteItemId}:${noteContext.noteKind}` : "-";
 }
 
 /** Simple FNV-1a hash for short, collision-resistant text fingerprints. */
@@ -91,7 +72,6 @@ export function buildPinnedSelectedTextKey(
   const paperKey = paperContext
     ? `${Math.floor(paperContext.itemId)}:${Math.floor(paperContext.contextItemId)}`
     : "-";
-  const noteKey = buildPinnedNoteKey(context.noteContext);
   const contextItemId = Number.isFinite(context.contextItemId)
     ? Math.max(0, Math.floor(context.contextItemId!))
     : 0;
@@ -100,14 +80,14 @@ export function buildPinnedSelectedTextKey(
     : -1;
   // Use text hash instead of full text to keep keys short and stable
   const textHash = hashText(text);
-  return `${source}\u241f${noteKey}\u241f${paperKey}\u241f${contextItemId}\u241f${pageIndex}\u241f${textHash}`;
+  return `${source}\u241f${paperKey}\u241f${contextItemId}\u241f${pageIndex}\u241f${textHash}`;
 }
 
-export function buildPinnedImageKey(imageUrl: string): string {
+function buildPinnedImageKey(imageUrl: string): string {
   return normalizeText(imageUrl);
 }
 
-export function buildPinnedFileKey(attachment: ChatAttachment): string {
+function buildPinnedFileKey(attachment: ChatAttachment): string {
   const id = typeof attachment.id === "string" ? attachment.id.trim() : "";
   if (id) return id;
   const name = normalizeText(attachment.name);
@@ -118,7 +98,7 @@ export function buildPinnedFileKey(attachment: ChatAttachment): string {
   return `${name}\u241f${mimeType}\u241f${size}`;
 }
 
-export function buildPinnedPaperKey(paperContext: PaperContextRef): string {
+function buildPinnedPaperKey(paperContext: PaperContextRef): string {
   return `${Math.floor(paperContext.itemId)}:${Math.floor(paperContext.contextItemId)}`;
 }
 
@@ -369,19 +349,6 @@ export function togglePinnedPaper(
   }
   keys.add(key);
   return true;
-}
-
-export function removePinnedPaper(
-  pinnedKeysByOwner: Map<number, Set<string>>,
-  ownerId: number,
-  paperContext: PaperContextRef,
-): void {
-  const key = buildPinnedPaperKey(paperContext);
-  if (!key) return;
-  const keys = getReadonlyPinnedKeySet(pinnedKeysByOwner, ownerId);
-  if (!keys?.size) return;
-  keys.delete(key);
-  cleanupPinnedOwnerIfEmpty(pinnedKeysByOwner, ownerId);
 }
 
 export function retainPinnedPapers(

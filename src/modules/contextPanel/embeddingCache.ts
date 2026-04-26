@@ -1,18 +1,16 @@
 /**
  * Persistent disk cache for paper chunk embeddings.
  *
- * Stores one JSON file per paper in `{dataDir}/llm-for-zotero-embeddings/`.
+ * Stores one JSON file per paper in `{dataDir}/llm-for-zotero-lite-embeddings/`.
  * Uses the same Gecko I/O pattern as mineruCache.ts (IOUtils → OS.File fallback).
  *
- * Cache invalidation:
- *  - chunk content changes (chunkHash mismatch)
- *  - embedding model changes (model mismatch)
- *  - MinerU cache invalidation (cascade via clearEmbeddingCache)
+ * Cache invalidation is implicit: the stored chunk hash, model, and provider
+ * must match the current request.
  */
 
 import { joinLocalPath } from "../../utils/localPath";
 
-const EMBEDDING_CACHE_DIR = "llm-for-zotero-embeddings";
+const EMBEDDING_CACHE_DIR = "llm-for-zotero-lite-embeddings";
 const CACHE_VERSION = 2; // v2: added provider field for cross-provider cache isolation
 
 // ── Gecko I/O helpers (mirrors mineruCache.ts) ──────────────────────────────
@@ -25,10 +23,6 @@ type IOUtilsLike = {
     options?: { createAncestors?: boolean; ignoreExisting?: boolean },
   ) => Promise<void>;
   write?: (path: string, data: Uint8Array) => Promise<unknown>;
-  remove?: (
-    path: string,
-    options?: { recursive?: boolean; ignoreAbsent?: boolean },
-  ) => Promise<void>;
 };
 
 type OSFileLike = {
@@ -39,14 +33,6 @@ type OSFileLike = {
     options?: { from?: string; ignoreExisting?: boolean },
   ) => Promise<void>;
   writeAtomic?: (path: string, data: Uint8Array) => Promise<void>;
-  remove?: (
-    path: string,
-    options?: { ignoreAbsent?: boolean },
-  ) => Promise<void>;
-  removeDir?: (
-    path: string,
-    options?: { ignoreAbsent?: boolean; ignorePermissions?: boolean },
-  ) => Promise<void>;
 };
 
 function getIOUtils(): IOUtilsLike | undefined {
@@ -119,10 +105,7 @@ async function readFileBytes(path: string): Promise<Uint8Array | null> {
   return null;
 }
 
-async function writeFileBytes(
-  path: string,
-  bytes: Uint8Array,
-): Promise<void> {
+async function writeFileBytes(path: string, bytes: Uint8Array): Promise<void> {
   const io = getIOUtils();
   if (io?.write) {
     await io.write(path, bytes);
@@ -131,35 +114,6 @@ async function writeFileBytes(
   const osFile = getOSFile();
   if (osFile?.writeAtomic) {
     await osFile.writeAtomic(path, bytes);
-  }
-}
-
-async function removePath(path: string): Promise<void> {
-  const io = getIOUtils();
-  if (io?.remove) {
-    try {
-      await io.remove(path, { recursive: true, ignoreAbsent: true });
-    } catch {
-      /* ignore */
-    }
-    return;
-  }
-  const osFile = getOSFile();
-  if (osFile?.removeDir) {
-    try {
-      await osFile.removeDir(path, {
-        ignoreAbsent: true,
-        ignorePermissions: false,
-      });
-    } catch {
-      /* ignore */
-    }
-  } else if (osFile?.remove) {
-    try {
-      await osFile.remove(path, { ignoreAbsent: true });
-    } catch {
-      /* ignore */
-    }
   }
 }
 
@@ -261,19 +215,5 @@ export async function saveCachedEmbeddings(
     await writeFileBytes(getCachePath(itemId), new TextEncoder().encode(json));
   } catch (err) {
     ztoolkit.log("Failed to save embedding cache:", err);
-  }
-}
-
-/**
- * Clear cached embeddings.
- * @param itemId  If provided, clear only that item. Otherwise clear all.
- */
-export async function clearEmbeddingCache(
-  itemId?: number,
-): Promise<void> {
-  if (itemId != null) {
-    await removePath(getCachePath(itemId));
-  } else {
-    await removePath(getCacheDir());
   }
 }

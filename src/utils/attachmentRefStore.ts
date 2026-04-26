@@ -1,21 +1,24 @@
 import {
   ATTACHMENT_BLOBS_TABLE,
-  extractManagedBlobHash,
   removeAttachmentFile,
 } from "../modules/contextPanel/attachmentStorage";
-import { fileUrlToPath } from "./pathFileUrl";
-
-export type AttachmentRefOwnerType = "conversation" | "note";
 
 const ATTACHMENT_REFS_TABLE = "llm_for_zotero_attachment_refs";
+const TEMP_ATTACHMENT_REFS_TABLE = `${ATTACHMENT_REFS_TABLE}_old`;
 const ATTACHMENT_REFS_BLOB_INDEX = "llm_for_zotero_attachment_refs_blob_idx";
 export const ATTACHMENT_GC_MIN_AGE_MS = 24 * 60 * 60 * 1000;
 
 let refStoreInitTask: Promise<void> | null = null;
 
-function normalizeOwnerId(ownerId: number): number | null {
-  if (!Number.isFinite(ownerId)) return null;
-  const normalized = Math.floor(ownerId);
+const ATTACHMENT_REF_COLUMNS = [
+  "conversation_key",
+  "blob_hash",
+  "updated_at",
+] as const;
+
+function normalizeConversationKey(conversationKey: number): number | null {
+  if (!Number.isFinite(conversationKey)) return null;
+  const normalized = Math.floor(conversationKey);
   return normalized > 0 ? normalized : null;
 }
 
@@ -43,13 +46,13 @@ async function ensureAttachmentRefTables(): Promise<void> {
       );
       await Zotero.DB.queryAsync(
         `CREATE TABLE IF NOT EXISTS ${ATTACHMENT_REFS_TABLE} (
-          owner_type TEXT NOT NULL CHECK(owner_type IN ('conversation', 'note')),
-          owner_id INTEGER NOT NULL,
+          conversation_key INTEGER NOT NULL,
           blob_hash TEXT NOT NULL,
           updated_at INTEGER NOT NULL,
-          PRIMARY KEY(owner_type, owner_id, blob_hash)
+          PRIMARY KEY(conversation_key, blob_hash)
         )`,
       );
+      await rebuildAttachmentRefsTableIfNeeded();
       await Zotero.DB.queryAsync(
         `CREATE INDEX IF NOT EXISTS ${ATTACHMENT_REFS_BLOB_INDEX}
          ON ${ATTACHMENT_REFS_TABLE} (blob_hash)`,
@@ -57,6 +60,59 @@ async function ensureAttachmentRefTables(): Promise<void> {
     })();
   }
   await refStoreInitTask;
+}
+
+async function rebuildAttachmentRefsTableIfNeeded(): Promise<void> {
+  const columns = (await Zotero.DB.queryAsync(
+    `PRAGMA table_info(${ATTACHMENT_REFS_TABLE})`,
+  )) as Array<{ name?: unknown }> | undefined;
+  const existingColumns = (columns || [])
+    .map((column) => (typeof column.name === "string" ? column.name : ""))
+    .filter(Boolean);
+  const existingColumnSet = new Set(existingColumns);
+  const hasCurrentSchema =
+    ATTACHMENT_REF_COLUMNS.every((column) => existingColumnSet.has(column)) &&
+    !existingColumnSet.has("owner_type") &&
+    !existingColumnSet.has("owner_id");
+  if (hasCurrentSchema) return;
+
+  await Zotero.DB.queryAsync(
+    `DROP INDEX IF EXISTS ${ATTACHMENT_REFS_BLOB_INDEX}`,
+  );
+  await Zotero.DB.queryAsync(
+    `DROP TABLE IF EXISTS ${TEMP_ATTACHMENT_REFS_TABLE}`,
+  );
+  await Zotero.DB.queryAsync(
+    `ALTER TABLE ${ATTACHMENT_REFS_TABLE}
+     RENAME TO ${TEMP_ATTACHMENT_REFS_TABLE}`,
+  );
+  await Zotero.DB.queryAsync(
+    `CREATE TABLE ${ATTACHMENT_REFS_TABLE} (
+      conversation_key INTEGER NOT NULL,
+      blob_hash TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY(conversation_key, blob_hash)
+    )`,
+  );
+  if (existingColumnSet.has("conversation_key")) {
+    await Zotero.DB.queryAsync(
+      `INSERT OR REPLACE INTO ${ATTACHMENT_REFS_TABLE}
+        (conversation_key, blob_hash, updated_at)
+       SELECT conversation_key, blob_hash, updated_at
+       FROM ${TEMP_ATTACHMENT_REFS_TABLE}`,
+    );
+  } else if (existingColumnSet.has("owner_id")) {
+    await Zotero.DB.queryAsync(
+      `INSERT OR REPLACE INTO ${ATTACHMENT_REFS_TABLE}
+        (conversation_key, blob_hash, updated_at)
+       SELECT owner_id, blob_hash, updated_at
+       FROM ${TEMP_ATTACHMENT_REFS_TABLE}
+       WHERE owner_type = 'conversation'`,
+    );
+  }
+  await Zotero.DB.queryAsync(
+    `DROP TABLE IF EXISTS ${TEMP_ATTACHMENT_REFS_TABLE}`,
+  );
 }
 
 async function filterKnownBlobHashes(hashes: string[]): Promise<string[]> {
@@ -74,101 +130,44 @@ async function filterKnownBlobHashes(hashes: string[]): Promise<string[]> {
   );
 }
 
-function extractManagedBlobHashesFromNoteHtml(noteHtml: string): string[] {
-  if (!noteHtml.trim()) return [];
-  const hashes = new Set<string>();
-  const hrefPattern = /href\s*=\s*(["'])(.*?)\1/gi;
-  let match: RegExpExecArray | null = null;
-  while ((match = hrefPattern.exec(noteHtml))) {
-    const href = (match[2] || "").trim();
-    if (!href) continue;
-    const path = fileUrlToPath(href) || href;
-    const hash = extractManagedBlobHash(path);
-    if (!hash) continue;
-    hashes.add(hash);
-  }
-  return Array.from(hashes);
-}
-
-export async function initAttachmentRefStore(): Promise<void> {
-  await ensureAttachmentRefTables();
-}
-
-export async function replaceOwnerAttachmentRefs(
-  ownerType: AttachmentRefOwnerType,
-  ownerId: number,
+export async function replaceConversationAttachmentRefs(
+  conversationKey: number,
   hashes: readonly string[],
 ): Promise<void> {
-  const normalizedOwnerId = normalizeOwnerId(ownerId);
-  if (!normalizedOwnerId) return;
+  const normalizedConversationKey = normalizeConversationKey(conversationKey);
+  if (!normalizedConversationKey) return;
   await ensureAttachmentRefTables();
   const normalizedHashes = await filterKnownBlobHashes(normalizeHashes(hashes));
   await Zotero.DB.executeTransaction(async () => {
     await Zotero.DB.queryAsync(
       `DELETE FROM ${ATTACHMENT_REFS_TABLE}
-       WHERE owner_type = ?
-         AND owner_id = ?`,
-      [ownerType, normalizedOwnerId],
+       WHERE conversation_key = ?`,
+      [normalizedConversationKey],
     );
     if (!normalizedHashes.length) return;
     const now = Date.now();
     for (const hash of normalizedHashes) {
       await Zotero.DB.queryAsync(
         `INSERT OR REPLACE INTO ${ATTACHMENT_REFS_TABLE}
-          (owner_type, owner_id, blob_hash, updated_at)
-         VALUES (?, ?, ?, ?)`,
-        [ownerType, normalizedOwnerId, hash, now],
+          (conversation_key, blob_hash, updated_at)
+         VALUES (?, ?, ?)`,
+        [normalizedConversationKey, hash, now],
       );
     }
   });
 }
 
-export async function clearOwnerAttachmentRefs(
-  ownerType: AttachmentRefOwnerType,
-  ownerId: number,
+export async function clearConversationAttachmentRefs(
+  conversationKey: number,
 ): Promise<void> {
-  const normalizedOwnerId = normalizeOwnerId(ownerId);
-  if (!normalizedOwnerId) return;
+  const normalizedConversationKey = normalizeConversationKey(conversationKey);
+  if (!normalizedConversationKey) return;
   await ensureAttachmentRefTables();
   await Zotero.DB.queryAsync(
     `DELETE FROM ${ATTACHMENT_REFS_TABLE}
-     WHERE owner_type = ?
-       AND owner_id = ?`,
-    [ownerType, normalizedOwnerId],
+     WHERE conversation_key = ?`,
+    [normalizedConversationKey],
   );
-}
-
-export async function reconcileNoteAttachmentRefsFromNoteContent(): Promise<void> {
-  await ensureAttachmentRefTables();
-  const rows = (await Zotero.DB.queryAsync(
-    `SELECT DISTINCT owner_id AS ownerId
-     FROM ${ATTACHMENT_REFS_TABLE}
-     WHERE owner_type = 'note'`,
-  )) as Array<{ ownerId?: unknown }> | undefined;
-  if (!rows?.length) return;
-
-  for (const row of rows) {
-    const ownerId = Number(row.ownerId);
-    if (!Number.isFinite(ownerId) || ownerId <= 0) continue;
-    let note: Zotero.Item | null = null;
-    try {
-      note = Zotero.Items.get(ownerId) || null;
-    } catch (_err) {
-      note = null;
-    }
-    if (!note || (typeof note.isNote === "function" && !note.isNote())) {
-      await clearOwnerAttachmentRefs("note", ownerId);
-      continue;
-    }
-    let noteHtml = "";
-    try {
-      noteHtml = typeof note.getNote === "function" ? note.getNote() || "" : "";
-    } catch (_err) {
-      noteHtml = "";
-    }
-    const hashes = extractManagedBlobHashesFromNoteHtml(noteHtml);
-    await replaceOwnerAttachmentRefs("note", ownerId, hashes);
-  }
 }
 
 export async function collectAndDeleteUnreferencedBlobs(

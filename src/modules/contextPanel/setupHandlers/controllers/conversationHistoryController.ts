@@ -1,13 +1,10 @@
 import { sanitizeText } from "../../textUtils";
 
-export const GLOBAL_HISTORY_UNDO_WINDOW_MS = 6_000;
-export const GLOBAL_HISTORY_TITLE_MAX_LENGTH = 64;
-export const HISTORY_ROW_TITLE_MAX_LENGTH = 42;
+export const PAPER_HISTORY_UNDO_WINDOW_MS = 6_000;
+const PAPER_HISTORY_TITLE_MAX_LENGTH = 64;
+const HISTORY_ROW_TITLE_MAX_LENGTH = 42;
 
 export type ConversationHistoryEntry = {
-  kind: "paper" | "global";
-  section: "paper" | "open";
-  sectionTitle: string;
   conversationKey: number;
   title: string;
   timestampText: string;
@@ -19,13 +16,9 @@ export type ConversationHistoryEntry = {
   sessionVersion?: number;
 };
 
-export type HistorySwitchTarget =
-  | { kind: "paper"; conversationKey: number }
-  | { kind: "global"; conversationKey: number }
-  | null;
+export type HistorySwitchTarget = { conversationKey: number } | null;
 
 export type PendingHistoryDeletion = {
-  kind: "paper" | "global";
   conversationKey: number;
   libraryID: number;
   paperItemID?: number;
@@ -36,7 +29,7 @@ export type PendingHistoryDeletion = {
   timeoutId: number | null;
 };
 
-export function formatGlobalHistoryTimestamp(timestamp: number): string {
+export function formatPaperHistoryTimestamp(timestamp: number): string {
   try {
     const parsed = Number(timestamp);
     if (!Number.isFinite(parsed) || parsed <= 0) return "";
@@ -54,7 +47,7 @@ export function formatGlobalHistoryTimestamp(timestamp: number): string {
 
 export function normalizeConversationTitleSeed(
   raw: unknown,
-  maxLength = GLOBAL_HISTORY_TITLE_MAX_LENGTH,
+  maxLength = PAPER_HISTORY_TITLE_MAX_LENGTH,
 ): string {
   const normalized = sanitizeText(String(raw || ""))
     .replace(/[\u0000-\u001F\u007F]/g, " ")
@@ -70,7 +63,7 @@ export function normalizeConversationTitleSeed(
 }
 
 export function normalizeHistoryTitle(raw: unknown): string {
-  return normalizeConversationTitleSeed(raw, GLOBAL_HISTORY_TITLE_MAX_LENGTH);
+  return normalizeConversationTitleSeed(raw, PAPER_HISTORY_TITLE_MAX_LENGTH);
 }
 
 export function formatHistoryRowDisplayTitle(title: string): string {

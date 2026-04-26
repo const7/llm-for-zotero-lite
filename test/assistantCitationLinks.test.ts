@@ -4,7 +4,7 @@ import {
   decorateAssistantCitationLinks,
   extractInlineCitationMentions,
   extractBlockquoteTailCitation,
-  extractStandalonePaperSourceLabel,
+  extractPaperSourceLabel,
   formatSourceLabelWithPage,
   lookupCachedCitationPage,
   matchAssistantCitationCandidates,
@@ -17,10 +17,8 @@ describe("assistantCitationLinks", function () {
     clearCachedCitationPagesForTests();
   });
 
-  it("extracts a standalone paper source label from a citation line", function () {
-    const extracted = extractStandalonePaperSourceLabel(
-      " (Smith et al., 2024) ",
-    );
+  it("extracts a paper source label from a citation line", function () {
+    const extracted = extractPaperSourceLabel(" (Smith et al., 2024) ");
 
     assert.deepInclude(extracted, {
       sourceLabel: "(Smith et al., 2024)",
@@ -41,9 +39,9 @@ describe("assistantCitationLinks", function () {
     assert.equal(mentions[0]?.extractedCitation.citationLabel, "Kossio et al");
   });
 
-  it("rejects non-standalone citation lines", function () {
+  it("rejects non-citation lines", function () {
     assert.isNull(
-      extractStandalonePaperSourceLabel(
+      extractPaperSourceLabel(
         "According to (Smith et al., 2024), the effect was strong.",
       ),
     );

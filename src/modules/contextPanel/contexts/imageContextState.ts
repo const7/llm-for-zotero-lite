@@ -1,5 +1,5 @@
 /**
- * Image/screenshot context state — pure state operations with no DOM dependencies.
+ * Image context state — pure state operations with no DOM dependencies.
  */
 
 import {
@@ -33,8 +33,7 @@ export function retainPinnedImageState(
   );
   if (retained.length) {
     selectedImageCache.set(itemId, retained);
-    const currentActiveIndex =
-      selectedImagePreviewActiveIndexCache.get(itemId);
+    const currentActiveIndex = selectedImagePreviewActiveIndexCache.get(itemId);
     const normalizedActiveIndex =
       typeof currentActiveIndex === "number" &&
       Number.isFinite(currentActiveIndex)

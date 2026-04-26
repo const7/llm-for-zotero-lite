@@ -1,6 +1,5 @@
 import {
   config,
-  ASSISTANT_NOTE_MAP_PREF_KEY,
   CUSTOM_SHORTCUT_ID_PREFIX,
   FONT_SCALE_DEFAULT_PERCENT,
   FONT_SCALE_MIN_PERCENT,
@@ -9,14 +8,11 @@ import {
 import type { CustomShortcut, ReasoningLevelSelection } from "./types";
 import { selectedModelCache, panelFontScalePercent } from "./state";
 import {
-  deriveProviderLabel,
   getDefaultModelEntry,
   getLastUsedModelEntryId,
   getModelEntryById,
-  getModelProviderGroups,
   getRuntimeModelEntries,
   setLastUsedModelEntryId,
-  type ModelProviderGroup,
   type RuntimeModelEntry,
 } from "../../utils/modelProviders";
 import {
@@ -39,21 +35,6 @@ function getZoteroPrefs(): ZoteroPrefsAPI | null {
 export function getStringPref(key: string): string {
   const value = getZoteroPrefs()?.get?.(`${config.prefsPrefix}.${key}`, true);
   return typeof value === "string" ? value : "";
-}
-
-export function getBoolPref(key: string, defaultValue = false): boolean {
-  const value = getZoteroPrefs()?.get?.(`${config.prefsPrefix}.${key}`, true);
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true") return true;
-    if (normalized === "false") return false;
-  }
-  return defaultValue;
-}
-
-export function getAgentModeEnabled(): boolean {
-  return getBoolPref("enableAgentMode", false);
 }
 
 const LAST_REASONING_LEVEL_PREF_KEY = "lastUsedReasoningLevel";
@@ -141,10 +122,6 @@ export function removeLastUsedPaperConversationKey(
   removeRememberedPaperConversationKey(libraryID, paperItemID);
 }
 
-export function getModelConfigGroups(): ModelProviderGroup[] {
-  return getModelProviderGroups();
-}
-
 export function getAvailableModelEntries(): RuntimeModelEntry[] {
   return getRuntimeModelEntries();
 }
@@ -189,13 +166,6 @@ export function getAdvancedModelParamsForEntry(
 ): RuntimeModelEntry["advanced"] | undefined {
   const selected = getModelEntryById(entryId);
   return selected?.advanced;
-}
-
-export function getProviderLabelForSettings(
-  apiBase: string,
-  providerIndex: number,
-): string {
-  return deriveProviderLabel(apiBase, providerIndex);
 }
 
 export function applyPanelFontScale(panel: HTMLElement | null): void {
@@ -327,109 +297,4 @@ export function resetShortcutsToDefault(): void {
   setDeletedShortcutIds([]);
   setCustomShortcuts([]);
   setShortcutOrder([]);
-}
-
-function getAssistantNoteMap(): Record<string, string> {
-  try {
-    return getJsonPref(ASSISTANT_NOTE_MAP_PREF_KEY);
-  } catch (err) {
-    ztoolkit.log("LLM: Failed to read assistantNoteMap pref:", err);
-    return {};
-  }
-}
-
-function setAssistantNoteMap(value: Record<string, string>): void {
-  try {
-    setJsonPref(ASSISTANT_NOTE_MAP_PREF_KEY, value);
-  } catch (err) {
-    ztoolkit.log("LLM: Failed to write assistantNoteMap pref:", err);
-  }
-}
-
-export function removeAssistantNoteMapEntry(parentItemId: number): void {
-  const parentKey = String(parentItemId);
-  const map = getAssistantNoteMap();
-  if (!(parentKey in map)) return;
-  delete map[parentKey];
-  setAssistantNoteMap(map);
-}
-
-export function getTrackedAssistantNoteForParent(
-  parentItemId: number,
-): Zotero.Item | null {
-  const parentKey = String(parentItemId);
-  const map = getAssistantNoteMap();
-  const rawNoteId = map[parentKey];
-  if (!rawNoteId) return null;
-  const noteId = Number.parseInt(rawNoteId, 10);
-  if (!Number.isFinite(noteId) || noteId <= 0) {
-    removeAssistantNoteMapEntry(parentItemId);
-    return null;
-  }
-  let note: Zotero.Item | null = null;
-  try {
-    note = Zotero.Items.get(noteId) || null;
-  } catch {
-    ztoolkit.log(`LLM: Failed to get note item ${noteId}`);
-    removeAssistantNoteMapEntry(parentItemId);
-    return null;
-  }
-  if (
-    !note ||
-    !note.isNote?.() ||
-    note.deleted ||
-    note.parentID !== parentItemId
-  ) {
-    removeAssistantNoteMapEntry(parentItemId);
-    return null;
-  }
-  return note;
-}
-
-export function rememberAssistantNoteForParent(
-  parentItemId: number,
-  noteId: number,
-): void {
-  if (!Number.isFinite(noteId) || noteId <= 0) return;
-  const map = getAssistantNoteMap();
-  map[String(parentItemId)] = String(noteId);
-  setAssistantNoteMap(map);
-}
-
-// =============================================================================
-// Locked Global Conversation Preference
-// =============================================================================
-
-const LOCKED_GLOBAL_CONVERSATION_PREF_KEY = "lockedGlobalConversation";
-
-/**
- * Returns the conversation key that is locked as the default open-chat session
- * for the given library, or null if no lock is active.
- */
-export function getLockedGlobalConversationKey(
-  libraryID: number,
-): number | null {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return null;
-  const prefKey = `${config.prefsPrefix}.${LOCKED_GLOBAL_CONVERSATION_PREF_KEY}.${Math.floor(libraryID)}`;
-  const raw = getZoteroPrefs()?.get?.(prefKey, true);
-  const normalized = Number(raw);
-  if (!Number.isFinite(normalized) || normalized <= 0) return null;
-  return Math.floor(normalized);
-}
-
-/**
- * Locks (or unlocks) a global-chat session as the default for the given library.
- * Pass null or 0 to clear the lock.
- */
-export function setLockedGlobalConversationKey(
-  libraryID: number,
-  key: number | null,
-): void {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return;
-  const prefKey = `${config.prefsPrefix}.${LOCKED_GLOBAL_CONVERSATION_PREF_KEY}.${Math.floor(libraryID)}`;
-  if (key === null || !Number.isFinite(key) || key <= 0) {
-    getZoteroPrefs()?.set?.(prefKey, 0, true);
-  } else {
-    getZoteroPrefs()?.set?.(prefKey, Math.floor(key), true);
-  }
 }

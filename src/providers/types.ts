@@ -1,6 +1,6 @@
 export type PdfSupport = "native" | "upload" | "image_url" | "vision" | "none";
 
-export type ProviderTier =
+type ProviderTier =
   | "native"
   | "server_upload"
   | "third_party"

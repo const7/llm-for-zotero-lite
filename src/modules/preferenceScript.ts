@@ -43,30 +43,8 @@ import {
   callEmbeddings,
 } from "../utils/llmClient";
 import { resetEmbeddingFailedFlags } from "./contextPanel/pdfContext";
-import { clearRetrievalCandidateCache } from "./contextPanel/multiContextPlanner";
 import { joinLocalPath } from "../utils/localPath";
-import {
-  isMineruEnabled,
-  getMineruApiKey,
-  setMineruEnabled,
-  setMineruApiKey,
-  isGlobalAutoParseEnabled,
-  setGlobalAutoParseEnabled,
-  getMineruExcludePatterns,
-  setMineruExcludePatterns,
-} from "../utils/mineruConfig";
-import {
-  getNotesDirectoryPath,
-  setNotesDirectoryPath,
-  getNotesDirectoryFolder,
-  setNotesDirectoryFolder,
-  getNotesDirectoryAttachmentsFolder,
-  setNotesDirectoryAttachmentsFolder,
-  getNotesDirectoryNickname,
-  setNotesDirectoryNickname,
-} from "../utils/notesDirectoryConfig";
-import { testMineruConnection } from "../utils/mineruClient";
-import { registerMineruManagerScript } from "./mineruManagerScript";
+import { isMineruEnabled, setMineruEnabled } from "../utils/mineruConfig";
 
 type PrefKey = "systemPrompt";
 
@@ -342,51 +320,6 @@ async function readCodexAccessToken(): Promise<string> {
   return token;
 }
 
-function extractTextFromCodexSSE(raw: string): string {
-  const lines = raw.split(/\r?\n/);
-  let out = "";
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("data:")) continue;
-    const payload = trimmed.slice(5).trim();
-    if (!payload || payload === "[DONE]") continue;
-    try {
-      const parsed = JSON.parse(payload) as {
-        type?: string;
-        delta?: string;
-        response?: {
-          output_text?: string;
-          output?: Array<{
-            content?: Array<{ type?: string; text?: string }>;
-          }>;
-        };
-      };
-      if (typeof parsed.delta === "string") {
-        out += parsed.delta;
-      }
-      const completedText = parsed.response?.output_text;
-      if (typeof completedText === "string" && completedText.trim()) {
-        out += completedText;
-      }
-      const outputItems = parsed.response?.output || [];
-      for (const item of outputItems) {
-        const content = item.content || [];
-        for (const part of content) {
-          if (
-            (part.type === "output_text" || part.type === "text") &&
-            typeof part.text === "string"
-          ) {
-            out += part.text;
-          }
-        }
-      }
-    } catch (_err) {
-      continue;
-    }
-  }
-  return out.trim();
-}
-
 // ── Style tokens ───────────────────────────────────────────────────
 
 // Inputs use CSS system colors (Field / FieldText) so they automatically
@@ -423,13 +356,17 @@ const OUTLINE_BTN_STYLE =
   " background: transparent; color: var(--color-accent, #2563eb);" +
   " border: 1px solid var(--color-accent, #2563eb); border-radius: 5px; cursor: pointer;";
 
+// Keep provider cards visually rounded, but do not clip descendant native
+// select popups. Gecko/XUL can render the popup inside the ancestor box,
+// so `overflow: hidden` makes auth/provider/protocol dropdowns appear stuck.
 const CARD_STYLE =
-  "border: 1px solid var(--stroke-secondary, #c8c8c8); border-radius: 8px; overflow: hidden;";
+  "border: 1px solid var(--stroke-secondary, #c8c8c8); border-radius: 8px;";
 
 const CARD_HEADER_STYLE =
   "display: flex; align-items: center; justify-content: space-between; padding: 8px 12px;" +
   " background: Field; color: FieldText;" +
-  " border-bottom: 1px solid var(--stroke-secondary, #c8c8c8);";
+  " border-bottom: 1px solid var(--stroke-secondary, #c8c8c8);" +
+  " border-radius: 8px 8px 0 0;";
 
 const CARD_BODY_STYLE =
   "display: flex; flex-direction: column; gap: 12px; padding: 14px;";
@@ -443,7 +380,6 @@ const ADV_ROW_STYLE =
 
 export async function registerPrefsScripts(_window: Window | undefined | null) {
   if (!_window) {
-    ztoolkit.log("Preferences window not available");
     return;
   }
 
@@ -525,12 +461,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   if (systemPrompt?.placeholder) {
     systemPrompt.placeholder = t(systemPrompt.placeholder);
   }
-  const mineruApiKeyEl = doc.querySelector(
-    `#${config.addonRef}-mineru-api-key`,
-  ) as HTMLInputElement | null;
-  if (mineruApiKeyEl?.placeholder) {
-    mineruApiKeyEl.placeholder = t(mineruApiKeyEl.placeholder);
-  }
   // Translate language dropdown options
   const localeSelectEl = doc.querySelector(
     `#${config.addonRef}-locale-select`,
@@ -599,13 +529,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   const systemPromptInput = doc.querySelector(
     `#${config.addonRef}-system-prompt`,
   ) as HTMLTextAreaElement | null;
-  const popupAddTextEnabledInput = doc.querySelector(
-    `#${config.addonRef}-popup-add-text-enabled`,
-  ) as HTMLInputElement | null;
-  const enableAgentModeInput = doc.querySelector(
-    `#${config.addonRef}-enable-agent-mode`,
-  ) as HTMLInputElement | null;
-
   if (!modelSections) return;
 
   const storedGroupsRaw = Zotero.Prefs.get(
@@ -728,8 +651,13 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         if (nextAuthMode === "webchat") {
           group.providerProtocol = "web_sync";
           // Set default webchat model to chatgpt.com (user can change it)
-          const webchatModelNames: string[] = WEBCHAT_TARGETS.map((wt) => wt.modelName);
-          if (!group.models[0]?.model || !webchatModelNames.includes(group.models[0].model)) {
+          const webchatModelNames: string[] = WEBCHAT_TARGETS.map(
+            (wt) => wt.modelName,
+          );
+          if (
+            !group.models[0]?.model ||
+            !webchatModelNames.includes(group.models[0].model)
+          ) {
             group.models = [{ ...group.models[0], model: "chatgpt.com" }];
           }
         } else if (nextAuthMode === "codex_auth") {
@@ -754,14 +682,18 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       });
       const authModeHelperText =
         group.authMode === "webchat"
-          ? t(`Relay questions to ${WEBCHAT_TARGETS.map((wt) => wt.label).join(" / ")} via the Sync for Zotero browser extension. `
-            + "Download extension: github.com/yilewang/sync-for-zotero → Releases. "
-            + "Unzip, open chrome://extensions, enable Developer Mode, click \"Load unpacked\", select the extension folder. "
-            + "Keep the corresponding chat tab open while using WebChat mode.")
+          ? t(
+              `Relay questions to ${WEBCHAT_TARGETS.map((wt) => wt.label).join(" / ")} via the Sync for Zotero browser extension. ` +
+                "Download extension: github.com/yilewang/sync-for-zotero → Releases. " +
+                'Unzip, open chrome://extensions, enable Developer Mode, click "Load unpacked", select the extension folder. ' +
+                "Keep the corresponding chat tab open while using WebChat mode.",
+            )
           : group.authMode === "copilot_auth"
             ? t(COPILOT_API_HELPER_TEXT)
             : group.authMode === "codex_auth"
-              ? t("codex auth reuses local `codex login` credentials from ~/.codex/auth.json")
+              ? t(
+                  "codex auth reuses local `codex login` credentials from ~/.codex/auth.json",
+                )
               : "";
       authModeWrap.append(
         authModeLabel,
@@ -1299,13 +1231,20 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       if (group.authMode === "webchat") {
         // [webchat] Replace "+" with a "Fetch Models" button that adds all webchat targets
         addModelBtn.style.display = "none";
-        const fetchModelsBtn = el(doc, "button", OUTLINE_BTN_STYLE, t("Fetch Models")) as HTMLButtonElement;
+        const fetchModelsBtn = el(
+          doc,
+          "button",
+          OUTLINE_BTN_STYLE,
+          t("Fetch Models"),
+        ) as HTMLButtonElement;
         fetchModelsBtn.type = "button";
         fetchModelsBtn.style.fontSize = "11px";
         fetchModelsBtn.style.padding = "2px 8px";
         fetchModelsBtn.addEventListener("click", () => {
           const allTargets = WEBCHAT_TARGETS.map((wt) => wt.modelName);
-          const existing = new Set(group.models.map((m: { model: string }) => m.model));
+          const existing = new Set(
+            group.models.map((m: { model: string }) => m.model),
+          );
           let added = false;
           for (const target of allTargets) {
             if (!existing.has(target)) {
@@ -1396,8 +1335,8 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
             doc,
             "select",
             "flex: 1; min-width: 0; padding: 6px 10px; font-size: 13px;" +
-            " border: 1px solid var(--stroke-secondary, #c8c8c8); border-radius: 6px;" +
-            " box-sizing: border-box; background: Field; color: FieldText;",
+              " border: 1px solid var(--stroke-secondary, #c8c8c8); border-radius: 6px;" +
+              " box-sizing: border-box; background: Field; color: FieldText;",
           ) as HTMLSelectElement;
           for (const opt of validWebchatModels) {
             const option = doc.createElement("option");
@@ -1647,7 +1586,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
             });
             statusLine.textContent =
               `${t("✓ Success — model says: ")}"${result.reply}"\n` +
-              `${t("Agent capability: ")}${result.capabilityLabel}`;
+              `${t("Provider capability: ")}${result.capabilityLabel}`;
             statusLine.style.color = "green";
           } catch (error) {
             statusLine.textContent = `✗ ${(error as Error).message}`;
@@ -1671,11 +1610,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       );
       if (group.authMode === "webchat") {
         // [webchat] Minimal layout: only auth mode + model names (webchat target selector)
-        cardBody.append(
-          authModeWrap,
-          divider,
-          modelsWrap,
-        );
+        cardBody.append(authModeWrap, divider, modelsWrap);
       } else if (group.authMode === "copilot_auth") {
         cardBody.append(
           authModeWrap,
@@ -1765,130 +1700,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     }
   }
 
-  if (popupAddTextEnabledInput) {
-    const prefValue = Zotero.Prefs.get(
-      `${config.prefsPrefix}.showPopupAddText`,
-      true,
-    );
-    popupAddTextEnabledInput.checked =
-      prefValue !== false && `${prefValue || ""}`.toLowerCase() !== "false";
-    popupAddTextEnabledInput.addEventListener("change", () => {
-      Zotero.Prefs.set(
-        `${config.prefsPrefix}.showPopupAddText`,
-        popupAddTextEnabledInput.checked,
-        true,
-      );
-    });
-  }
-
-  if (enableAgentModeInput) {
-    const prefValue = Zotero.Prefs.get(
-      `${config.prefsPrefix}.enableAgentMode`,
-      true,
-    );
-    enableAgentModeInput.checked =
-      prefValue === true || `${prefValue || ""}`.toLowerCase() === "true";
-    enableAgentModeInput.addEventListener("change", () => {
-      Zotero.Prefs.set(
-        `${config.prefsPrefix}.enableAgentMode`,
-        enableAgentModeInput.checked,
-        true,
-      );
-    });
-  }
-
-  // ── Notes Directory settings ─────────────────────────────────────
-  {
-    const notesDirNicknameInput = doc.querySelector(
-      `#${config.addonRef}-notes-dir-nickname`,
-    ) as HTMLInputElement | null;
-    const notesDirPathInput = doc.querySelector(
-      `#${config.addonRef}-obsidian-vault-path`,
-    ) as HTMLInputElement | null;
-    const notesDirFolderInput = doc.querySelector(
-      `#${config.addonRef}-obsidian-target-folder`,
-    ) as HTMLInputElement | null;
-    const notesDirTestBtn = doc.querySelector(
-      `#${config.addonRef}-obsidian-test`,
-    ) as HTMLButtonElement | null;
-    const notesDirTestStatus = doc.querySelector(
-      `#${config.addonRef}-obsidian-test-status`,
-    ) as HTMLSpanElement | null;
-
-    if (notesDirNicknameInput) {
-      notesDirNicknameInput.value = getNotesDirectoryNickname();
-      notesDirNicknameInput.addEventListener("input", () => {
-        setNotesDirectoryNickname(notesDirNicknameInput.value);
-      });
-    }
-    if (notesDirPathInput) {
-      notesDirPathInput.value = getNotesDirectoryPath();
-      notesDirPathInput.addEventListener("input", () => {
-        setNotesDirectoryPath(notesDirPathInput.value);
-      });
-    }
-    if (notesDirFolderInput) {
-      notesDirFolderInput.value = getNotesDirectoryFolder();
-      notesDirFolderInput.addEventListener("input", () => {
-        setNotesDirectoryFolder(notesDirFolderInput.value);
-      });
-    }
-    const notesDirAttachmentsInput = doc.querySelector(
-      `#${config.addonRef}-obsidian-attachments-folder`,
-    ) as HTMLInputElement | null;
-    if (notesDirAttachmentsInput) {
-      notesDirAttachmentsInput.value = getNotesDirectoryAttachmentsFolder();
-      notesDirAttachmentsInput.addEventListener("input", () => {
-        setNotesDirectoryAttachmentsFolder(notesDirAttachmentsInput.value);
-      });
-    }
-    if (notesDirTestBtn && notesDirTestStatus) {
-      notesDirTestBtn.addEventListener("click", async () => {
-        const dirPath = (notesDirPathInput?.value || "").trim();
-        if (!dirPath) {
-          notesDirTestStatus.style.display = "inline";
-          notesDirTestStatus.style.color = "#dc2626";
-          notesDirTestStatus.textContent = t("Enter a directory path first");
-          return;
-        }
-        const targetFolder = (notesDirFolderInput?.value || "").trim();
-        const fullPath = targetFolder
-          ? joinLocalPath(dirPath, targetFolder)
-          : dirPath;
-
-        notesDirTestBtn.disabled = true;
-        notesDirTestStatus.style.display = "inline";
-        notesDirTestStatus.style.color = "var(--fill-secondary, #888)";
-        notesDirTestStatus.textContent = "Testing...";
-
-        try {
-          const IOUtils = (globalThis as any).IOUtils;
-          if (!IOUtils?.exists || !IOUtils?.write || !IOUtils?.remove) {
-            throw new Error("File I/O not available");
-          }
-          const exists = await IOUtils.exists(fullPath);
-          if (!exists) {
-            throw new Error(`Directory not found: ${fullPath}`);
-          }
-          const testFile = joinLocalPath(fullPath, ".llm-for-zotero-test");
-          const bytes = new TextEncoder().encode("test");
-          await IOUtils.write(testFile, bytes);
-          await IOUtils.remove(testFile);
-          notesDirTestStatus.style.color = "#16a34a";
-          notesDirTestStatus.textContent = t("Write access verified");
-        } catch (err) {
-          notesDirTestStatus.style.color = "#dc2626";
-          notesDirTestStatus.textContent =
-            err instanceof Error ? err.message : String(err);
-        } finally {
-          notesDirTestBtn.disabled = false;
-        }
-      });
-    }
-  }
-
-
-
   // ── Semantic Search settings ───────────────────────────────────
   // Follows the same toggle + sub-settings pattern as MinerU.
 
@@ -1902,7 +1713,11 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     `#${config.addonRef}-semantic-search-mount`,
   ) as HTMLDivElement | null;
 
-  if (semanticSearchToggle && semanticSearchSubSettings && semanticSearchMount) {
+  if (
+    semanticSearchToggle &&
+    semanticSearchSubSettings &&
+    semanticSearchMount
+  ) {
     const EMBEDDING_PRESETS: Record<
       string,
       {
@@ -1915,18 +1730,37 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         apiBase: "https://api.openai.com/v1",
         defaultModel: "text-embedding-3-small",
         models: [
-          { value: "text-embedding-3-small", label: "text-embedding-3-small", pricing: "$0.02 / 1M tokens" },
-          { value: "text-embedding-3-large", label: "text-embedding-3-large", pricing: "$0.13 / 1M tokens" },
-          { value: "text-embedding-ada-002", label: "text-embedding-ada-002 (legacy)", pricing: "$0.10 / 1M tokens" },
+          {
+            value: "text-embedding-3-small",
+            label: "text-embedding-3-small",
+            pricing: "$0.02 / 1M tokens",
+          },
+          {
+            value: "text-embedding-3-large",
+            label: "text-embedding-3-large",
+            pricing: "$0.13 / 1M tokens",
+          },
+          {
+            value: "text-embedding-ada-002",
+            label: "text-embedding-ada-002",
+            pricing: "$0.10 / 1M tokens",
+          },
         ],
       },
       gemini: {
-        apiBase:
-          "https://generativelanguage.googleapis.com/v1beta/openai",
+        apiBase: "https://generativelanguage.googleapis.com/v1beta/openai",
         defaultModel: "gemini-embedding-001",
         models: [
-          { value: "gemini-embedding-001", label: "gemini-embedding-001", pricing: "Free tier available · $0.15 / 1M tokens" },
-          { value: "text-embedding-004", label: "text-embedding-004", pricing: "$0.10 / 1M tokens" },
+          {
+            value: "gemini-embedding-001",
+            label: "gemini-embedding-001",
+            pricing: "Free tier available · $0.15 / 1M tokens",
+          },
+          {
+            value: "text-embedding-004",
+            label: "text-embedding-004",
+            pricing: "$0.10 / 1M tokens",
+          },
         ],
       },
     };
@@ -1948,8 +1782,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     const writeEmbPref = (key: string, val: string | boolean) =>
       Zotero.Prefs.set(`${config.prefsPrefix}.${key}`, val, true);
 
-    // Read the current embedding provider; migrates legacy or unset
-    // values to a concrete provider on first open.
+    // Read the current embedding provider and choose a concrete default on first open.
     const resolveEmbeddingProvider = (): string => {
       const stored = readEmbPref("embeddingProvider");
       if (stored === "openai" || stored === "gemini" || stored === "custom") {
@@ -1968,7 +1801,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       return "gemini";
     };
 
-    // Toggle visibility (same pattern as MinerU)
     const syncSemanticVisibility = () => {
       semanticSearchSubSettings.style.display = semanticSearchToggle.checked
         ? "flex"
@@ -2001,7 +1833,12 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       // Card header
       const cardHeader = el(doc, "div", CARD_HEADER_STYLE);
       cardHeader.appendChild(
-        el(doc, "span", "font-weight: 700; font-size: 13px;", t("Embedding Provider")),
+        el(
+          doc,
+          "span",
+          "font-weight: 700; font-size: 13px;",
+          t("Embedding Provider"),
+        ),
       );
       card.appendChild(cardHeader);
 
@@ -2044,8 +1881,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         }
         // Reset failed-embedding flags so queries retry with the new config
         resetEmbeddingFailedFlags();
-        // Cached retrieval candidates carry scores from the old provider
-        clearRetrievalCandidateCache();
         // Defer re-render so Gecko finishes processing the select change event
         // before we destroy the element (avoids "this.element is null" error).
         doc.defaultView?.setTimeout(() => renderEmbeddingCard(), 0);
@@ -2060,9 +1895,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           "div",
           "display: flex; flex-direction: column;",
         );
-        apiBaseWrap.appendChild(
-          el(doc, "label", LABEL_STYLE, t("API URL")),
-        );
+        apiBaseWrap.appendChild(el(doc, "label", LABEL_STYLE, t("API URL")));
         const apiBaseInput = el(doc, "input", INPUT_STYLE) as HTMLInputElement;
         apiBaseInput.type = "text";
         apiBaseInput.placeholder = "https://api.openai.com/v1";
@@ -2078,20 +1911,13 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           "div",
           "display: flex; flex-direction: column;",
         );
-        apiKeyWrap.appendChild(
-          el(doc, "label", LABEL_STYLE, t("API Key")),
-        );
-        const apiKeyInput = el(
-          doc,
-          "input",
-          INPUT_STYLE,
-        ) as HTMLInputElement;
+        apiKeyWrap.appendChild(el(doc, "label", LABEL_STYLE, t("API Key")));
+        const apiKeyInput = el(doc, "input", INPUT_STYLE) as HTMLInputElement;
         apiKeyInput.type = "password";
         apiKeyInput.value = readEmbPref("embeddingApiKey");
         apiKeyInput.addEventListener("change", () => {
           writeEmbPref("embeddingApiKey", apiKeyInput.value.trim());
           resetEmbeddingFailedFlags();
-          clearRetrievalCandidateCache();
         });
         apiKeyWrap.appendChild(apiKeyInput);
         cardBody.appendChild(apiKeyWrap);
@@ -2125,21 +1951,14 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
             "div",
             "display: flex; flex-direction: column;",
           );
-          apiKeyWrap.appendChild(
-            el(doc, "label", LABEL_STYLE, t("API Key")),
-          );
-          const apiKeyInput = el(
-            doc,
-            "input",
-            INPUT_STYLE,
-          ) as HTMLInputElement;
+          apiKeyWrap.appendChild(el(doc, "label", LABEL_STYLE, t("API Key")));
+          const apiKeyInput = el(doc, "input", INPUT_STYLE) as HTMLInputElement;
           apiKeyInput.type = "password";
           apiKeyInput.placeholder = "sk-…";
           apiKeyInput.value = "";
           apiKeyInput.addEventListener("change", () => {
             writeEmbPref("embeddingApiKey", apiKeyInput.value.trim());
             resetEmbeddingFailedFlags();
-            clearRetrievalCandidateCache();
             doc.defaultView?.setTimeout(() => renderEmbeddingCard(), 0);
           });
           apiKeyWrap.appendChild(apiKeyInput);
@@ -2218,7 +2037,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         modelSelect.addEventListener("change", () => {
           writeEmbPref("embeddingModel", modelSelect.value);
           resetEmbeddingFailedFlags();
-          clearRetrievalCandidateCache();
           updatePricingHint(modelSelect.value);
         });
         modelRow.appendChild(modelSelect);
@@ -2299,96 +2117,10 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   const mineruEnabledInput = doc.querySelector(
     `#${config.addonRef}-mineru-enabled`,
   ) as HTMLInputElement | null;
-  const mineruSubSettings = doc.querySelector(
-    `#${config.addonRef}-mineru-sub-settings`,
-  ) as HTMLDivElement | null;
-  const mineruApiKeyInput = doc.querySelector(
-    `#${config.addonRef}-mineru-api-key`,
-  ) as HTMLInputElement | null;
-  const mineruTestBtn = doc.querySelector(
-    `#${config.addonRef}-mineru-test`,
-  ) as HTMLButtonElement | null;
-  const mineruTestStatus = doc.querySelector(
-    `#${config.addonRef}-mineru-test-status`,
-  ) as HTMLSpanElement | null;
   if (mineruEnabledInput) {
     mineruEnabledInput.checked = isMineruEnabled();
-    const syncSubVisibility = () => {
-      if (mineruSubSettings) {
-        mineruSubSettings.style.display = mineruEnabledInput.checked
-          ? "flex"
-          : "none";
-      }
-    };
-    syncSubVisibility();
     mineruEnabledInput.addEventListener("change", () => {
       setMineruEnabled(mineruEnabledInput.checked);
-      syncSubVisibility();
-    });
-  }
-
-  const mineruGlobalAutoParseInput = doc.querySelector(
-    `#${config.addonRef}-mineru-global-auto-parse`,
-  ) as HTMLInputElement | null;
-  if (mineruGlobalAutoParseInput) {
-    mineruGlobalAutoParseInput.checked = isGlobalAutoParseEnabled();
-    mineruGlobalAutoParseInput.addEventListener("change", () => {
-      setGlobalAutoParseEnabled(mineruGlobalAutoParseInput.checked);
-    });
-  }
-
-  if (mineruApiKeyInput) {
-    mineruApiKeyInput.value = getMineruApiKey();
-    mineruApiKeyInput.addEventListener("input", () => {
-      setMineruApiKey(mineruApiKeyInput.value);
-    });
-  }
-
-  if (mineruTestBtn && mineruTestStatus) {
-    const runMineruTest = async () => {
-      const apiKey = getMineruApiKey().trim();
-      if (!apiKey) {
-        mineruTestStatus.style.display = "inline";
-        mineruTestStatus.textContent = t("Enter an API key first");
-        mineruTestStatus.style.color = "var(--fill-secondary, #888)";
-        return;
-      }
-      mineruTestBtn.disabled = true;
-      mineruTestStatus.style.display = "inline";
-      mineruTestStatus.textContent = t("Testing…");
-      mineruTestStatus.style.color = "var(--fill-secondary, #888)";
-      try {
-        await testMineruConnection(apiKey);
-        mineruTestStatus.textContent = t("✓ Connection successful");
-        mineruTestStatus.style.color = "green";
-      } catch (error) {
-        mineruTestStatus.textContent = `\u2717 ${(error as Error).message}`;
-        mineruTestStatus.style.color = "red";
-      } finally {
-        mineruTestBtn.disabled = false;
-      }
-    };
-    mineruTestBtn.addEventListener("click", () => void runMineruTest());
-    mineruTestBtn.addEventListener("command", () => void runMineruTest());
-  }
-
-  // ── Filename exclusion patterns ────────────────────────────────
-  const mineruExcludePatternsInput = doc.querySelector(
-    `#${config.addonRef}-mineru-exclude-patterns`,
-  ) as HTMLInputElement | null;
-  if (mineruExcludePatternsInput) {
-    const patterns = getMineruExcludePatterns();
-    mineruExcludePatternsInput.value = patterns.join(", ");
-    let saveTimer: ReturnType<typeof setTimeout> | null = null;
-    mineruExcludePatternsInput.addEventListener("input", () => {
-      if (saveTimer) clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => {
-        const parsed = mineruExcludePatternsInput.value
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
-        setMineruExcludePatterns(parsed);
-      }, 500);
     });
   }
 
@@ -2410,13 +2142,5 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         localeRestartHint.style.display = "block";
       }
     });
-  }
-
-  // ── Embedded MinerU manager ──────────────────────────────────────
-  const mineruMgrSidebar = doc.querySelector(
-    `#${config.addonRef}-mineru-mgr-sidebar`,
-  );
-  if (mineruMgrSidebar && _window) {
-    void registerMineruManagerScript(_window, config.addonRef);
   }
 }

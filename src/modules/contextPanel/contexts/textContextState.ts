@@ -10,7 +10,6 @@ import {
   getSelectedTextContextEntries,
   setSelectedTextContextEntries,
   setSelectedTextExpandedIndex,
-  setNoteContextExpanded,
 } from "../contextResolution";
 
 export function clearSelectedTextState(
@@ -19,7 +18,6 @@ export function clearSelectedTextState(
 ): void {
   setSelectedTextContextEntries(itemId, []);
   setSelectedTextExpandedIndex(itemId, null);
-  setNoteContextExpanded(itemId, null);
   clearPinnedContextOwner(pinnedSelectedTextKeys, itemId);
 }
 
@@ -34,5 +32,4 @@ export function retainPinnedTextState(
   );
   setSelectedTextContextEntries(itemId, retained);
   setSelectedTextExpandedIndex(itemId, null);
-  setNoteContextExpanded(itemId, null);
 }

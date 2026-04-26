@@ -15,7 +15,7 @@ describe("sendFlowController", function () {
   };
   const selectedFile: ChatAttachment = {
     id: "file-1",
-    name: "notes.md",
+    name: "paper-summary.md",
     mimeType: "text/markdown",
     sizeBytes: 20,
     category: "markdown",
@@ -25,36 +25,47 @@ describe("sendFlowController", function () {
   ];
 
   function createBaseDeps(overrides: Record<string, unknown> = {}) {
-    const inputBox = { value: "ask question" } as HTMLTextAreaElement;
+    const inputBox = {
+      value: "ask question",
+      dataset: {},
+    } as HTMLTextAreaElement;
     let draftValue = inputBox.value;
     let sendCalled = 0;
-    let editCalled = 0;
     let retainImageCalled = 0;
     let retainPaperStateCalled = 0;
     let consumePaperModeStateCalled = 0;
     let retainFileCalled = 0;
     let retainTextCalled = 0;
     let persistDraftInputCalls = 0;
-    let setActiveEditSessionCalls = 0;
     let lastSentQuestion = "";
-    let lastRuntimeMode = "";
-    let lastEditRuntimeMode = "";
-    let lastEditPdfUploadSystemMessages: string[] | undefined;
+    let lastPdfUploadSystemMessages: string[] | undefined;
+    let resolvePdfPaperAttachmentsCalls = 0;
+    let renderPdfPagesAsImagesCalls = 0;
+    let uploadPdfForProviderCalls = 0;
 
     const deps = {
       body: {} as Element,
       inputBox,
       getItem: () => item,
-      closeSlashMenu: () => undefined,
+      closeAddMenu: () => undefined,
       closePaperPicker: () => undefined,
       getSelectedTextContextEntries: () => selectedTextContexts,
       getSelectedPaperContexts: () => [selectedPaper],
       getFullTextPaperContexts: () => [selectedPaper],
       getPdfModePaperContexts: () => [],
-      resolvePdfPaperAttachments: async () => [],
-      renderPdfPagesAsImages: async () => [],
+      resolvePdfPaperAttachments: async () => {
+        resolvePdfPaperAttachmentsCalls += 1;
+        return [];
+      },
+      renderPdfPagesAsImages: async () => {
+        renderPdfPagesAsImagesCalls += 1;
+        return [];
+      },
       getModelPdfSupport: () => "none" as const,
-      uploadPdfForProvider: async () => null,
+      uploadPdfForProvider: async () => {
+        uploadPdfForProviderCalls += 1;
+        return null;
+      },
       resolvePdfBytes: async () => new Uint8Array(),
       encodeBytesBase64: () => "",
       getSelectedFiles: () => [selectedFile],
@@ -69,32 +80,18 @@ describe("sendFlowController", function () {
         question: string,
         attachments: ChatAttachment[],
       ) => `${question} [files=${attachments.length}]`,
-      isAgentMode: () => false,
-      isGlobalMode: () => false,
       normalizeConversationTitleSeed: (raw: unknown) => String(raw || ""),
       getConversationKey: () => item.id,
-      touchGlobalConversationTitle: async () => undefined,
       touchPaperConversationTitle: async () => undefined,
       getSelectedProfile: () => null,
       getCurrentModelName: () => "",
-      isScreenshotUnsupportedModel: () => false,
+      isImageContextUnsupportedModel: () => false,
       getSelectedReasoning: () => undefined,
       getAdvancedModelParams: () => undefined,
-      getActiveEditSession: () => null,
-      setActiveEditSession: () => {
-        setActiveEditSessionCalls += 1;
-      },
-      getLatestEditablePair: async () => null,
-      editLatestUserMessageAndRetry: async (opts: any) => {
-        editCalled += 1;
-        lastEditRuntimeMode = opts.targetRuntimeMode || "";
-        lastEditPdfUploadSystemMessages = opts.pdfUploadSystemMessages;
-        return "ok" as const;
-      },
       sendQuestion: async (opts: any) => {
         sendCalled += 1;
         lastSentQuestion = opts.question;
-        lastRuntimeMode = opts.runtimeMode || "";
+        lastPdfUploadSystemMessages = opts.pdfUploadSystemMessages;
       },
       retainPinnedImageState: () => {
         retainImageCalled += 1;
@@ -116,13 +113,11 @@ describe("sendFlowController", function () {
       updateImagePreviewPreservingScroll: () => undefined,
       updateSelectedTextPreviewPreservingScroll: () => undefined,
       scheduleAttachmentGc: () => undefined,
-      refreshGlobalHistoryHeader: () => undefined,
+      refreshPaperHistoryHeader: () => undefined,
       persistDraftInput: () => {
         persistDraftInputCalls += 1;
         draftValue = inputBox.value;
       },
-      autoLockGlobalChat: () => undefined,
-      autoUnlockGlobalChat: () => undefined,
       setStatusMessage: () => undefined,
       editStaleStatusText: "stale",
       ...overrides,
@@ -134,22 +129,21 @@ describe("sendFlowController", function () {
       inputBox,
       getCounts: () => ({
         sendCalled,
-        editCalled,
         retainImageCalled,
         retainPaperStateCalled,
         consumePaperModeStateCalled,
         retainFileCalled,
         retainTextCalled,
         persistDraftInputCalls,
-        setActiveEditSessionCalls,
+        resolvePdfPaperAttachmentsCalls,
+        renderPdfPagesAsImagesCalls,
+        uploadPdfForProviderCalls,
       }),
       getDraftValue: () => draftValue,
       getLastSend: () => ({
         lastSentQuestion,
-        lastRuntimeMode,
+        lastPdfUploadSystemMessages,
       }),
-      getLastEditRuntimeMode: () => lastEditRuntimeMode,
-      getLastEditPdfUploadSystemMessages: () => lastEditPdfUploadSystemMessages,
     };
   }
 
@@ -160,7 +154,6 @@ describe("sendFlowController", function () {
 
     assert.equal(inputBox.value, "");
     assert.equal(counts.sendCalled, 1);
-    assert.equal(counts.editCalled, 0);
     assert.equal(counts.retainImageCalled, 1);
     assert.equal(counts.consumePaperModeStateCalled, 1);
     assert.equal(counts.retainPaperStateCalled, 1);
@@ -168,63 +161,8 @@ describe("sendFlowController", function () {
     assert.equal(counts.retainTextCalled, 1);
   });
 
-  it("uses retain-pinned callbacks for edit-latest flow", async function () {
-    const { controller, inputBox, getCounts, getLastEditRuntimeMode } = createBaseDeps({
-      getActiveEditSession: () => ({
-        conversationKey: item.id,
-        userTimestamp: 10,
-        assistantTimestamp: 20,
-      }),
-      getLatestEditablePair: async () => ({
-        conversationKey: item.id,
-        pair: {
-          userMessage: { timestamp: 10 },
-          assistantMessage: { timestamp: 20, streaming: false },
-        },
-      }),
-    });
-    await controller.doSend();
-    const counts = getCounts();
-
-    assert.equal(inputBox.value, "");
-    assert.equal(counts.sendCalled, 0);
-    assert.equal(counts.editCalled, 1);
-    assert.equal(counts.retainImageCalled, 1);
-    assert.equal(counts.consumePaperModeStateCalled, 1);
-    assert.equal(counts.retainPaperStateCalled, 1);
-    assert.equal(counts.retainFileCalled, 1);
-    assert.equal(counts.retainTextCalled, 1);
-    assert.isAtLeast(counts.setActiveEditSessionCalls, 1);
-    assert.equal(getLastEditRuntimeMode(), "chat");
-  });
-
-  it("passes the current runtime mode into latest-turn edit retries", async function () {
-    const { controller, getLastEditRuntimeMode } = createBaseDeps({
-      isAgentMode: () => true,
-      getActiveEditSession: () => ({
-        conversationKey: item.id,
-        userTimestamp: 10,
-        assistantTimestamp: 20,
-      }),
-      getLatestEditablePair: async () => ({
-        conversationKey: item.id,
-        pair: {
-          userMessage: { timestamp: 10 },
-          assistantMessage: { timestamp: 20, streaming: false },
-        },
-      }),
-    });
-
-    await controller.doSend();
-
-    assert.equal(getLastEditRuntimeMode(), "agent");
-  });
-
-  it("passes provider-uploaded PDF context through latest-turn edit retries", async function () {
-    const {
-      controller,
-      getLastEditPdfUploadSystemMessages,
-    } = createBaseDeps({
+  it("passes provider-uploaded PDF context through normal sends", async function () {
+    const { controller, getLastSend } = createBaseDeps({
       getSelectedFiles: () => [],
       getFullTextPaperContexts: () => [],
       getPdfModePaperContexts: () => [selectedPaper],
@@ -243,23 +181,11 @@ describe("sendFlowController", function () {
         systemMessageContent: "uploaded pdf context",
         label: "Uploaded",
       }),
-      getActiveEditSession: () => ({
-        conversationKey: item.id,
-        userTimestamp: 10,
-        assistantTimestamp: 20,
-      }),
-      getLatestEditablePair: async () => ({
-        conversationKey: item.id,
-        pair: {
-          userMessage: { timestamp: 10 },
-          assistantMessage: { timestamp: 20, streaming: false },
-        },
-      }),
     });
 
     await controller.doSend();
 
-    assert.deepEqual(getLastEditPdfUploadSystemMessages(), [
+    assert.deepEqual(getLastSend().lastPdfUploadSystemMessages, [
       "uploaded pdf context",
     ]);
   });
@@ -288,51 +214,32 @@ describe("sendFlowController", function () {
     assert.equal(counts.persistDraftInputCalls, 1);
   });
 
-  it("persists the cleared draft before preview sync in edit flow", async function () {
-    const { controller, inputBox, getCounts, getDraftValue } = createBaseDeps({
-      getActiveEditSession: () => ({
-        conversationKey: item.id,
-        userTimestamp: 10,
-        assistantTimestamp: 20,
+  it("keeps normal paper chat on the lean fast path", async function () {
+    const { controller, getCounts, getLastSend } = createBaseDeps({
+      getSelectedFiles: () => [],
+      getPdfModePaperContexts: () => [selectedPaper],
+      getSelectedProfile: () => ({
+        entryId: "entry-1",
+        model: "gpt-5",
+        apiBase: "https://chatgpt.com/backend-api/codex/responses",
+        apiKey: "test-key",
+        providerLabel: "OpenAI (codex auth)",
+        authMode: "codex_auth",
+        providerProtocol: "responses",
       }),
-      getLatestEditablePair: async () => ({
-        conversationKey: item.id,
-        pair: {
-          userMessage: { timestamp: 10 },
-          assistantMessage: { timestamp: 20, streaming: false },
-        },
-      }),
-      updatePaperPreviewPreservingScroll: () => {
-        inputBox.value = getDraftValue();
-      },
-      updateFilePreviewPreservingScroll: () => {
-        inputBox.value = getDraftValue();
-      },
-      updateImagePreviewPreservingScroll: () => {
-        inputBox.value = getDraftValue();
-      },
-      updateSelectedTextPreviewPreservingScroll: () => {
-        inputBox.value = getDraftValue();
-      },
+      resolvePromptText: () => "summarize the paper",
     });
 
     await controller.doSend();
+
     const counts = getCounts();
-
-    assert.equal(getDraftValue(), "");
-    assert.equal(inputBox.value, "");
-    assert.equal(counts.persistDraftInputCalls, 1);
-  });
-
-  it("sends raw prompt text in agent mode and marks runtime mode as agent", async function () {
-    const { controller, getLastSend } = createBaseDeps({
-      isAgentMode: () => true,
-    });
-
-    await controller.doSend();
     const lastSend = getLastSend();
-
-    assert.equal(lastSend.lastSentQuestion, "ask question");
-    assert.equal(lastSend.lastRuntimeMode, "agent");
+    assert.equal(counts.resolvePdfPaperAttachmentsCalls, 0);
+    assert.equal(counts.renderPdfPagesAsImagesCalls, 0);
+    assert.equal(counts.uploadPdfForProviderCalls, 0);
+    assert.equal(
+      lastSend.lastSentQuestion,
+      "summarize the paper (with selected text) [files=0]",
+    );
   });
 });

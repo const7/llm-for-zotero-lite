@@ -1,11 +1,9 @@
 import { assert } from "chai";
 import { config } from "../package.json";
 import {
-  buildModelProviderGroupsFromLegacySlots,
   deriveProviderLabel,
   getRuntimeModelEntries,
   setModelProviderGroups,
-  type LegacyModelSlot,
   type ModelProviderGroup,
 } from "../src/utils/modelProviders";
 
@@ -59,57 +57,6 @@ describe("modelProviders", function () {
       "custom.provider.example",
     );
     assert.equal(deriveProviderLabel("", 3), "Provider 3");
-  });
-
-  it("migrates legacy slots into grouped providers while preserving per-model advanced params", function () {
-    const legacySlots: LegacyModelSlot[] = [
-      {
-        key: "primary",
-        apiBase: "https://api.openai.com/v1",
-        apiKey: "sk-openai",
-        model: "gpt-4o-mini",
-        temperature: 0.3,
-        maxTokens: 4096,
-        inputTokenCap: 128000,
-      },
-      {
-        key: "secondary",
-        apiBase: "https://api.openai.com/v1/",
-        apiKey: "sk-openai",
-        model: "gpt-4o",
-        temperature: 0.1,
-        maxTokens: 2048,
-        inputTokenCap: 64000,
-      },
-      {
-        key: "tertiary",
-        apiBase: "",
-        apiKey: "",
-        model: "local-model",
-        temperature: 0.7,
-        maxTokens: 1024,
-        inputTokenCap: 16000,
-      },
-    ];
-
-    const result = buildModelProviderGroupsFromLegacySlots(legacySlots);
-
-    assert.lengthOf(result.groups, 2);
-    assert.lengthOf(result.groups[0].models, 2);
-    assert.equal(result.groups[0].apiBase, "https://api.openai.com/v1");
-    assert.equal(result.groups[0].apiKey, "sk-openai");
-    assert.equal(result.groups[0].authMode, "api_key");
-    assert.equal(result.groups[0].providerProtocol, "openai_chat_compat");
-    assert.equal(result.groups[0].models[0].model, "gpt-4o-mini");
-    assert.equal(result.groups[0].models[1].model, "gpt-4o");
-    assert.equal(result.groups[0].models[1].temperature, 0.1);
-    assert.equal(result.groups[0].models[1].maxTokens, 2048);
-    assert.equal(result.groups[0].models[1].inputTokenCap, 64000);
-    assert.equal(result.groups[1].apiBase, "");
-    assert.equal(result.groups[1].models[0].model, "local-model");
-    assert.isString(result.legacyToEntryId.primary);
-    assert.isString(result.legacyToEntryId.secondary);
-    assert.isString(result.legacyToEntryId.tertiary);
   });
 
   it("keeps duplicate model names and disambiguates runtime display labels within a provider", function () {
@@ -193,7 +140,7 @@ describe("modelProviders", function () {
       `${config.prefsPrefix}.modelProviderGroups`,
       JSON.stringify([
         {
-          id: "provider-legacy",
+          id: "provider-missing-auth",
           apiBase: "https://chatgpt.com/backend-api/codex/responses",
           apiKey: "",
           models: [

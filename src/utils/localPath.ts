@@ -75,12 +75,24 @@ function decodeFileUrlSegments(pathname: string): string[] {
     .map((segment) => decodeURIComponent(segment));
 }
 
-export function isUncPath(path: string | undefined): boolean {
-  return parseLocalPath(path).kind === "unc";
-}
+function parseUncFileUrl(raw: string): string | undefined {
+  const match = raw.match(/^file:\/\/([^/?#]+)(\/[^?#]*)?(?:[?#].*)?$/i);
+  if (!match) return undefined;
 
-export function isWindowsDriveAbsolutePath(path: string | undefined): boolean {
-  return parseLocalPath(path).kind === "windows-drive";
+  const host = match[1];
+  if (!host || host.toLowerCase() === "localhost" || /^[A-Za-z]:$/.test(host)) {
+    return undefined;
+  }
+
+  const [share, ...segments] = decodeFileUrlSegments(match[2] || "");
+  if (!share) return undefined;
+
+  return formatLocalPath({
+    kind: "unc",
+    host,
+    share,
+    segments,
+  });
 }
 
 export function joinLocalPath(...parts: string[]): string {
@@ -155,6 +167,9 @@ export function fileUrlToPath(url: string | undefined): string | undefined {
   const raw = (url || "").trim();
   if (!raw) return undefined;
   if (!/^file:\/\//i.test(raw)) return undefined;
+
+  const uncPath = parseUncFileUrl(raw);
+  if (uncPath) return uncPath;
 
   try {
     const parsed = new URL(raw);

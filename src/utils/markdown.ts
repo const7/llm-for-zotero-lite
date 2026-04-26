@@ -38,18 +38,6 @@ interface TextBlock {
   raw: string;
 }
 
-// =============================================================================
-// Module State
-// =============================================================================
-
-/**
- * When true, math blocks are rendered as Zotero note-editor native format
- * (<pre class="math">$$...$$</pre> and <span class="math">$...$</span>)
- * instead of KaTeX HTML. This is needed because note.setNote() loads HTML
- * through ProseMirror's schema parser which only recognises these tags,
- * unlike the paste handler which can transform KaTeX/MathML on the fly.
- */
-let zoteroNoteMode = false;
 let activeImageResolver: ((src: string) => string | null) | null = null;
 
 // =============================================================================
@@ -229,10 +217,7 @@ function buildWrappedDisplayMath(math: string): string | null {
 
   const terms = splitTopLevelAdditiveTerms(math);
   if (terms.length < 3) return null;
-  const lines = [
-    `& ${terms[0]}`,
-    ...terms.slice(1).map((term) => `& ${term}`),
-  ];
+  const lines = [`& ${terms[0]}`, ...terms.slice(1).map((term) => `& ${term}`)];
   return `\\begin{aligned}${lines.join(" \\\\ ")}\\end{aligned}`;
 }
 
@@ -275,7 +260,6 @@ function hasBalancedInlineDelimiter(text: string, delimiter: string): boolean {
 /** Split text into independent blocks for isolated rendering */
 function splitIntoBlocks(text: string): TextBlock[] {
   const blocks: TextBlock[] = [];
-  const remaining = text;
 
   // First, extract fenced code blocks (they're atomic)
   const codeBlockRegex = /```(\w*)\n?([\s\S]*?)```/g;
@@ -348,17 +332,11 @@ export function normalizeBlockBoundaries(text: string): string {
   // Safe because #{1,4} followed by a space is an unambiguous header marker
   // and almost never appears as inline text outside code blocks (which are
   // already extracted before this function is called).
-  result = result.replace(
-    /([^\n])([ \t]+)(#{1,4} )/g,
-    "$1\n\n$3",
-  );
+  result = result.replace(/([^\n])([ \t]+)(#{1,4} )/g, "$1\n\n$3");
 
   // Blockquote markers (> ) after sentence / citation-ending punctuation.
   // More conservative than headers because `>` is common in comparisons.
-  result = result.replace(
-    /([.!?:)\]"])([ \t]+)(> )/g,
-    "$1\n\n$3",
-  );
+  result = result.replace(/([.!?:)\]"])([ \t]+)(> )/g, "$1\n\n$3");
 
   return result;
 }
@@ -608,11 +586,6 @@ function renderMathBlock(content: string): string {
   }
   math = math.trim();
 
-  if (zoteroNoteMode) {
-    // Zotero note-editor expects <pre class="math">$$LaTeX$$</pre>
-    return `<pre class="math">$$${escapeHtml(math)}$$</pre>`;
-  }
-
   const rendered = renderDisplayLatex(math);
   return `<div class="math-display">${rendered}</div>`;
 }
@@ -665,13 +638,15 @@ function renderBlockquote(content: string): string {
   // constructs (display math, code blocks, etc.) inside blockquotes work.
   const innerText = innerLines.join("\n");
   const innerBlocks = splitTextBlocks(innerText);
-  const innerHtml = innerBlocks.map((block) => {
-    try {
-      return renderBlock(block);
-    } catch {
-      return `<div class="render-fallback">${escapeHtml(block.raw)}</div>`;
-    }
-  }).join("\n");
+  const innerHtml = innerBlocks
+    .map((block) => {
+      try {
+        return renderBlock(block);
+      } catch {
+        return `<div class="render-fallback">${escapeHtml(block.raw)}</div>`;
+      }
+    })
+    .join("\n");
   return `<blockquote>${innerHtml}</blockquote>`;
 }
 
@@ -736,12 +711,6 @@ function renderInline(text: string): string {
   if (hasBalancedInlineDelimiter(result, "$")) {
     // Display math first ($$...$$)
     result = result.replace(/\$\$([^$]+?)\$\$/g, (_match, math) => {
-      if (zoteroNoteMode) {
-        // Zotero note-editor: <span class="math">$LaTeX$</span>
-        return protect(
-          `<span class="math">$${escapeHtml(math.trim())}$</span>`,
-        );
-      }
       const rendered = renderDisplayLatex(math.trim());
       return protect(`<span class="math-display-inline">${rendered}</span>`);
     });
@@ -752,10 +721,6 @@ function renderInline(text: string): string {
       // Skip currency-like patterns
       if (!trimmed || /^\d+([.,]\d+)?$/.test(trimmed)) {
         return `$${inner}$`;
-      }
-      if (zoteroNoteMode) {
-        // Zotero note-editor: <span class="math">$LaTeX$</span>
-        return protect(`<span class="math">$${escapeHtml(trimmed)}$</span>`);
       }
       const rendered = renderLatex(trimmed, false);
       return protect(`<span class="math-inline">${rendered}</span>`);
@@ -902,23 +867,5 @@ export function renderMarkdown(
     return renderedBlocks.join("\n");
   } finally {
     activeImageResolver = prevResolver;
-  }
-}
-
-/**
- * Render markdown to HTML suitable for Zotero note-editor.
- *
- * Math is emitted as the editor's native format
- * (`<pre class="math">$$…$$</pre>` for display,
- *  `<span class="math">$…$</span>` for inline)
- * so that `note.setNote(html)` loads correctly through ProseMirror's
- * schema parser, matching what happens when the user pastes into a note.
- */
-export function renderMarkdownForNote(text: string): string {
-  zoteroNoteMode = true;
-  try {
-    return renderMarkdown(text);
-  } finally {
-    zoteroNoteMode = false;
   }
 }

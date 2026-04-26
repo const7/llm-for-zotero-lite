@@ -9,7 +9,7 @@ export type ProviderProtocol =
   | "gemini_native"
   | "web_sync"; // [webchat]
 
-export type ProviderProtocolSpec = {
+type ProviderProtocolSpec = {
   id: ProviderProtocol;
   label: string;
   helperText: string;
@@ -20,9 +20,9 @@ export type ProviderProtocolSpec = {
   reasoning: boolean;
 };
 
-export type AgentCapabilityClass =
-  | "full_agent"
-  | "agent_without_file_upload"
+type ProviderCapabilityClass =
+  | "file_input_and_tools"
+  | "tools_only"
   | "chat_only";
 
 export const PROVIDER_PROTOCOL_SPECS: ProviderProtocolSpec[] = [
@@ -39,7 +39,8 @@ export const PROVIDER_PROTOCOL_SPECS: ProviderProtocolSpec[] = [
   {
     id: "responses_api",
     label: "Responses API",
-    helperText: "Use OpenAI-style Responses APIs with tool calls and direct file input.",
+    helperText:
+      "Use OpenAI-style Responses APIs with tool calls and direct file input.",
     streaming: true,
     toolCalls: true,
     multimodal: true,
@@ -82,8 +83,7 @@ export const PROVIDER_PROTOCOL_SPECS: ProviderProtocolSpec[] = [
   {
     id: "web_sync",
     label: "Web Sync (ChatGPT / DeepSeek)",
-    helperText:
-      `Relay questions to ${WEBCHAT_TARGETS.map((wt) => wt.label).join(", ")} via the browser extension web-sync bridge.`,
+    helperText: `Relay questions to ${WEBCHAT_TARGETS.map((wt) => wt.label).join(", ")} via the browser extension web-sync bridge.`,
     streaming: false,
     toolCalls: false,
     multimodal: true,
@@ -97,7 +97,10 @@ const PROVIDER_PROTOCOL_IDS = new Set<ProviderProtocol>(
 );
 
 export function isProviderProtocol(value: unknown): value is ProviderProtocol {
-  return typeof value === "string" && PROVIDER_PROTOCOL_IDS.has(value as ProviderProtocol);
+  return (
+    typeof value === "string" &&
+    PROVIDER_PROTOCOL_IDS.has(value as ProviderProtocol)
+  );
 }
 
 export function getProviderProtocolSpec(
@@ -110,7 +113,7 @@ export function getProviderProtocolSpec(
   return found;
 }
 
-export function inferLegacyProviderProtocol(params: {
+function inferProviderProtocolFromEndpoint(params: {
   authMode?: string;
   apiBase?: string;
 }): ProviderProtocol {
@@ -125,7 +128,7 @@ export function inferLegacyProviderProtocol(params: {
     : "openai_chat_compat";
 }
 
-export function normalizeProviderProtocol(
+function normalizeProviderProtocol(
   value: unknown,
   fallback: ProviderProtocol = "openai_chat_compat",
 ): ProviderProtocol {
@@ -139,7 +142,7 @@ export function normalizeProviderProtocolForAuthMode(params: {
   fallback?: ProviderProtocol;
   model?: string;
 }): ProviderProtocol {
-  const inferred = inferLegacyProviderProtocol(params);
+  const inferred = inferProviderProtocolFromEndpoint(params);
   const fallback = params.fallback || inferred;
   const normalized = normalizeProviderProtocol(params.protocol, fallback);
   if (params.authMode === "codex_auth") {
@@ -160,26 +163,18 @@ export function normalizeProviderProtocolForAuthMode(params: {
   return normalized;
 }
 
-export function supportsProviderProtocolFileInputs(
-  protocol: ProviderProtocol,
-): boolean {
-  return getProviderProtocolSpec(protocol).fileInputs;
-}
-
-export function getAgentCapabilityClass(params: {
+export function getProviderCapabilityClass(params: {
   toolCalls: boolean;
   fileInputs: boolean;
-}): AgentCapabilityClass {
+}): ProviderCapabilityClass {
   if (!params.toolCalls) return "chat_only";
-  return params.fileInputs ? "full_agent" : "agent_without_file_upload";
+  return params.fileInputs ? "file_input_and_tools" : "tools_only";
 }
 
-export function describeAgentCapabilityClass(
-  capabilityClass: AgentCapabilityClass,
+export function describeProviderCapabilityClass(
+  capabilityClass: ProviderCapabilityClass,
 ): string {
-  if (capabilityClass === "full_agent") return "full agent";
-  if (capabilityClass === "agent_without_file_upload") {
-    return "agent without file upload";
-  }
+  if (capabilityClass === "file_input_and_tools") return "file input + tools";
+  if (capabilityClass === "tools_only") return "tools only";
   return "chat-only";
 }

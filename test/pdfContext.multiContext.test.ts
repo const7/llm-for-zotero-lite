@@ -55,12 +55,15 @@ function buildPdfContext(chunks: string[]): PdfContext {
 describe("pdfContext multi-context helpers", function () {
   let originalZotero: unknown;
   before(function () {
-    originalZotero = (globalThis as typeof globalThis & { Zotero?: unknown }).Zotero;
+    originalZotero = (globalThis as typeof globalThis & { Zotero?: unknown })
+      .Zotero;
     const prefs: Record<string, unknown> = {};
     (globalThis as typeof globalThis & { Zotero?: unknown }).Zotero = {
       Prefs: {
         get: (key: string) => prefs[key],
-        set: (key: string, value: unknown) => { prefs[key] = value; },
+        set: (key: string, value: unknown) => {
+          prefs[key] = value;
+        },
       },
     };
   });
@@ -86,7 +89,6 @@ describe("pdfContext multi-context helpers", function () {
       paper,
       context,
       "gamma delta finding",
-      undefined,
       { topK: 2 },
     );
     assert.lengthOf(candidates, 2);

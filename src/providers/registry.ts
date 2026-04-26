@@ -15,7 +15,7 @@ const TIERS = [copilot, codex, serverUpload, native, thirdParty] as const;
 /**
  * Resolve the full provider capability set for the given request
  * parameters.  This is the single entry point that replaces the
- * scattered getModelPdfSupport / isScreenshotUnsupportedModel /
+ * scattered getModelPdfSupport / isImageContextUnsupportedModel /
  * isMultimodalRequestSupported checks.
  */
 export function resolveProviderCapabilities(

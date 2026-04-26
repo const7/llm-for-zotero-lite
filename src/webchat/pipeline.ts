@@ -30,7 +30,10 @@ async function resolveItemPdfPath(
   item: Zotero.Item,
 ): Promise<{ path: string; filename: string } | null> {
   // If the item itself is a PDF attachment
-  if (item.isAttachment?.() && item.attachmentContentType === "application/pdf") {
+  if (
+    item.isAttachment?.() &&
+    item.attachmentContentType === "application/pdf"
+  ) {
     const path = await getFilePath(item);
     if (path) return { path, filename: extractFilename(path) };
   }
@@ -39,12 +42,16 @@ async function resolveItemPdfPath(
   const attachmentIds = item.getAttachments?.() || [];
   for (const attId of attachmentIds) {
     const att = Zotero.Items.get(attId);
-    if (!att?.isAttachment?.() || att.attachmentContentType !== "application/pdf") continue;
+    if (
+      !att?.isAttachment?.() ||
+      att.attachmentContentType !== "application/pdf"
+    )
+      continue;
     const path = await getFilePath(att);
     if (path) return { path, filename: extractFilename(path) };
   }
 
-  // Check parentItem if item is something like a note
+  // Fall back to a parent item for child attachments.
   if (item.parentID) {
     const parent = Zotero.Items.get(item.parentID);
     if (parent) return resolveItemPdfPath(parent);
@@ -61,13 +68,19 @@ async function getFilePath(att: Zotero.Item): Promise<string | null> {
   if (asyncPath) return asyncPath as string;
 
   // Fallback: getFilePath (sync)
-  if (typeof (att as unknown as { getFilePath?: () => string | undefined }).getFilePath === "function") {
-    const syncPath = (att as unknown as { getFilePath: () => string | undefined }).getFilePath();
+  if (
+    typeof (att as unknown as { getFilePath?: () => string | undefined })
+      .getFilePath === "function"
+  ) {
+    const syncPath = (
+      att as unknown as { getFilePath: () => string | undefined }
+    ).getFilePath();
     if (syncPath) return syncPath;
   }
 
   // Fallback: attachmentPath property
-  const rawPath = (att as unknown as { attachmentPath?: string }).attachmentPath;
+  const rawPath = (att as unknown as { attachmentPath?: string })
+    .attachmentPath;
   return rawPath || null;
 }
 
@@ -79,7 +92,7 @@ function extractFilename(path: string): string {
 // Main send function
 // ---------------------------------------------------------------------------
 
-export type WebChatSendOptions = {
+type WebChatSendOptions = {
   item: Zotero.Item;
   question: string;
   host: string;
@@ -87,7 +100,7 @@ export type WebChatSendOptions = {
   sendPdf?: boolean;
   /** When true, force the next query into a fresh conversation. */
   forceNewChat?: boolean;
-  /** Screenshot images as base64 data URLs to attach. */
+  /** Context images as base64 data URLs to attach. */
   images?: string[];
   /** ChatGPT mode: "instant", "thinking_standard", or "thinking_extended". */
   chatgptMode?: string;
@@ -124,8 +137,6 @@ export async function sendWebChatQuestion(
     onAnswerSnapshot,
     onThinkingSnapshot,
   } = opts;
-
-  ztoolkit.log(`[webchat] sendWebChatQuestion: sendPdf=${sendPdf}`);
 
   // --- Resolve and read the current paper's PDF (only when explicitly requested) ---
   let pdfBase64: string | null = null;

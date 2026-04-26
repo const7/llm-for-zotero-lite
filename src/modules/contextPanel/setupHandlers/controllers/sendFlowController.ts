@@ -3,13 +3,10 @@ import type { ProviderProtocol } from "../../../../utils/providerProtocol";
 import type {
   AdvancedModelParams,
   ChatAttachment,
-  ChatRuntimeMode,
-  NoteContextRef,
   PaperContextRef,
   SelectedTextContext,
+  SelectedTextSource,
 } from "../../types";
-import type { SelectedTextSource } from "../../types";
-import type { EditLatestTurnMarker, EditLatestTurnResult } from "../../chat";
 import type { ReasoningConfig as LLMReasoningConfig } from "../../../../utils/llmClient";
 
 type StatusLevel = "ready" | "warning" | "error";
@@ -24,24 +21,11 @@ type SelectedProfile = {
   providerProtocol?: ProviderProtocol;
 };
 
-type LatestEditablePair = {
-  conversationKey: number;
-  pair: {
-    userMessage: {
-      timestamp: number;
-    };
-    assistantMessage: {
-      timestamp: number;
-      streaming?: boolean;
-    };
-  };
-};
-
 type SendFlowControllerDeps = {
   body: Element;
   inputBox: HTMLTextAreaElement;
   getItem: () => Zotero.Item | null;
-  closeSlashMenu: () => void;
+  closeAddMenu: () => void;
   closePaperPicker: () => void;
   getSelectedTextContextEntries: (itemId: number) => SelectedTextContext[];
   getSelectedPaperContexts: (itemId: number) => PaperContextRef[];
@@ -59,7 +43,12 @@ type SendFlowControllerDeps = {
   renderPdfPagesAsImages: (
     paperContexts: PaperContextRef[],
   ) => Promise<string[]>;
-  getModelPdfSupport: (modelName: string, providerProtocol?: string, authMode?: string, apiBase?: string) => "native" | "upload" | "image_url" | "vision" | "none";
+  getModelPdfSupport: (
+    modelName: string,
+    providerProtocol?: string,
+    authMode?: string,
+    apiBase?: string,
+  ) => "native" | "upload" | "image_url" | "vision" | "none";
   uploadPdfForProvider: (params: {
     apiBase: string;
     apiKey: string;
@@ -88,31 +77,19 @@ type SendFlowControllerDeps = {
     question: string,
     attachments: ChatAttachment[],
   ) => string;
-  isAgentMode: () => boolean;
-  isGlobalMode: () => boolean;
   normalizeConversationTitleSeed: (raw: unknown) => string;
   getConversationKey: (item: Zotero.Item) => number;
-  touchGlobalConversationTitle: (
-    conversationKey: number,
-    title: string,
-  ) => Promise<void>;
   touchPaperConversationTitle: (
     conversationKey: number,
     title: string,
   ) => Promise<void>;
   getSelectedProfile: () => SelectedProfile | null;
   getCurrentModelName: () => string;
-  isScreenshotUnsupportedModel: (modelName: string) => boolean;
+  isImageContextUnsupportedModel: (modelName: string) => boolean;
   getSelectedReasoning: () => LLMReasoningConfig | undefined;
   getAdvancedModelParams: (
     entryId: string | undefined,
   ) => AdvancedModelParams | undefined;
-  getActiveEditSession: () => EditLatestTurnMarker | null;
-  setActiveEditSession: (value: EditLatestTurnMarker | null) => void;
-  getLatestEditablePair: () => Promise<LatestEditablePair | null>;
-  editLatestUserMessageAndRetry: (
-    opts: import("../../types").EditRetryOptions,
-  ) => Promise<EditLatestTurnResult>;
   sendQuestion: (
     opts: import("../../types").SendQuestionOptions,
   ) => Promise<void>;
@@ -126,16 +103,14 @@ type SendFlowControllerDeps = {
   updateImagePreviewPreservingScroll: () => void;
   updateSelectedTextPreviewPreservingScroll: () => void;
   scheduleAttachmentGc: () => void;
-  refreshGlobalHistoryHeader: () => void;
+  refreshPaperHistoryHeader: () => void;
   persistDraftInput: () => void;
-  autoLockGlobalChat: () => void;
-  autoUnlockGlobalChat: () => void;
   setStatusMessage?: (message: string, level: StatusLevel) => void;
-  editStaleStatusText: string;
-  /** Consume forced skill IDs from slash menu selection. Returns the IDs and clears state. */
-  consumeForcedSkillIds?: () => string[] | undefined;
   // [webchat]
-  hasActivePdfFullTextPapers?: (item: Zotero.Item, paperContexts?: any[]) => boolean;
+  hasActivePdfFullTextPapers?: (
+    item: Zotero.Item,
+    paperContexts?: PaperContextRef[],
+  ) => boolean;
   hasUploadedPdfInCurrentWebChatConversation?: () => boolean;
   markWebChatPdfUploadedForCurrentConversation?: () => void;
   consumeWebChatForceNewChatIntent?: () => boolean;
@@ -148,11 +123,9 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     const item = deps.getItem();
     if (!item) return;
 
-    deps.closeSlashMenu();
+    deps.closeAddMenu();
     deps.closePaperPicker();
-    deps.autoLockGlobalChat();
 
-    try {
     const textContextConversationKey = deps.getConversationKey(item);
     const text = deps.inputBox.value.trim();
     const selectedContexts = deps.getSelectedTextContextEntries(
@@ -163,15 +136,19 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     const selectedTextPaperContexts = selectedContexts.map(
       (entry) => entry.paperContext,
     );
-    const selectedTextNoteContexts = selectedContexts.map(
-      (entry) => entry.noteContext,
-    );
     const primarySelectedText = selectedTexts[0] || "";
     const allSelectedPaperContexts = deps.getSelectedPaperContexts(item.id);
-    // Agent mode uses text/MinerU pipeline by default, but if the user
-    // explicitly forced PDF mode on a paper, honour that choice.
-    const pdfModePaperContexts = deps.getPdfModePaperContexts(item, allSelectedPaperContexts);
-    // Papers in PDF mode are sent as file attachments, not through the text pipeline
+    const pdfModePaperContexts = deps.getPdfModePaperContexts(
+      item,
+      allSelectedPaperContexts,
+    );
+    const selectedProfile = deps.getSelectedProfile();
+    const isWebChat = selectedProfile?.authMode === "webchat";
+    const activeModelName = (
+      selectedProfile?.model ||
+      deps.getCurrentModelName() ||
+      ""
+    ).trim();
     const pdfModeKeySet = new Set(
       pdfModePaperContexts.map((p) => `${p.itemId}:${p.contextItemId}`),
     );
@@ -182,44 +159,46 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       item,
       selectedPaperContexts,
     );
-    // Resolve PDF-mode papers based on model capability
-    const earlyProfile = deps.getSelectedProfile();
-    const isWebChat = earlyProfile?.authMode === "webchat";
-    const earlyModelName = (
-      earlyProfile?.model || deps.getCurrentModelName() || ""
-    ).trim();
-    const pdfSupport = deps.getModelPdfSupport(
-      earlyModelName, earlyProfile?.providerProtocol, earlyProfile?.authMode, earlyProfile?.apiBase,
-    );
     let pdfFileAttachments: ChatAttachment[] = [];
     let pdfPageImageDataUrls: string[] = [];
-    let pdfUploadSystemMessages: string[] = [];
-    // [webchat] Skip provider-capability PDF processing — webchat handles PDF
-    // through its own pipeline (sendPdf → relay → extension → attachPDF).
+    const pdfUploadSystemMessages: string[] = [];
     if (pdfModePaperContexts.length && !isWebChat) {
+      const pdfSupport = deps.getModelPdfSupport(
+        activeModelName,
+        selectedProfile?.providerProtocol,
+        selectedProfile?.authMode,
+        selectedProfile?.apiBase,
+      );
       if (pdfSupport === "none") {
         deps.setStatusMessage?.(
           "This model does not support PDF or image input. PDF papers were skipped.",
           "error",
         );
-      } else if (pdfSupport === "upload" && earlyProfile?.apiBase && earlyProfile?.apiKey) {
-        // Qwen/Kimi: upload PDF to provider, inject file reference as system message.
-        // For Qwen (DashScope), only qwen-long supports PDF upload.
-        const isQwen = (earlyProfile.apiBase || "").toLowerCase().includes("dashscope");
-        const isQwenLong = /^qwen-long(?:[.-]|$)/i.test(earlyModelName);
+      } else if (
+        pdfSupport === "upload" &&
+        selectedProfile?.apiBase &&
+        selectedProfile.apiKey
+      ) {
+        const isQwen = selectedProfile.apiBase
+          .toLowerCase()
+          .includes("dashscope");
+        const isQwenLong = /^qwen-long(?:[.-]|$)/i.test(activeModelName);
         if (isQwen && !isQwenLong) {
           deps.setStatusMessage?.(
-            `Only qwen-long supports PDF upload on DashScope. Current model: ${earlyModelName}. PDF papers were skipped.`,
+            `Only qwen-long supports PDF upload on DashScope. Current model: ${activeModelName}. PDF papers were skipped.`,
             "error",
           );
         } else {
           deps.inputBox.disabled = true;
-          deps.setStatusMessage?.(`Uploading PDF to ${earlyModelName}...`, "ready");
+          deps.setStatusMessage?.(
+            `Uploading PDF to ${activeModelName}...`,
+            "ready",
+          );
           for (const pc of pdfModePaperContexts) {
             try {
               const result = await deps.uploadPdfForProvider({
-                apiBase: earlyProfile.apiBase,
-                apiKey: earlyProfile.apiKey,
+                apiBase: selectedProfile.apiBase,
+                apiKey: selectedProfile.apiKey,
                 pdfBytes: await deps.resolvePdfBytes(pc),
                 fileName: (() => {
                   const raw = pc.attachmentTitle || pc.title || "document";
@@ -232,13 +211,14 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
               }
             } catch (err) {
               ztoolkit.log("LLM: PDF upload failed for", pc.contextItemId, err);
-              deps.setStatusMessage?.("PDF upload failed. Falling back to text mode.", "error");
+              deps.setStatusMessage?.(
+                "PDF upload failed. Falling back to text mode.",
+                "error",
+              );
             }
           }
         }
       } else if (pdfSupport === "image_url") {
-        // Tier 3 (third-party): encode full PDF as base64 data URI and send
-        // as image_url — relay services pass this through.
         deps.inputBox.disabled = true;
         deps.setStatusMessage?.(
           `PDF upload via third-party provider may not work. Attempting base64 encoding...`,
@@ -250,28 +230,45 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
             const base64 = deps.encodeBytesBase64(pdfBytes);
             pdfPageImageDataUrls.push(`data:application/pdf;base64,${base64}`);
           } catch (err) {
-            ztoolkit.log("LLM: PDF base64 encoding failed for", pc.contextItemId, err);
-            // Fall back to vision (render pages as images) for this paper
+            ztoolkit.log(
+              "LLM: PDF base64 encoding failed for",
+              pc.contextItemId,
+              err,
+            );
             const fallback = await deps.renderPdfPagesAsImages([pc]);
             pdfPageImageDataUrls.push(...fallback);
           }
         }
-        deps.setStatusMessage?.(`Sending ${pdfPageImageDataUrls.length} PDF(s)...`, "ready");
+        deps.setStatusMessage?.(
+          `Sending ${pdfPageImageDataUrls.length} PDF(s)...`,
+          "ready",
+        );
       } else if (pdfSupport === "vision") {
-        if (deps.isScreenshotUnsupportedModel(earlyModelName)) {
+        if (deps.isImageContextUnsupportedModel(activeModelName)) {
           deps.setStatusMessage?.(
             "This model does not support image input. PDF pages will be sent as text.",
             "warning",
           );
         } else {
           deps.inputBox.disabled = true;
-          deps.setStatusMessage?.(`PDF will be sent as page images (vision mode) for ${earlyModelName}...`, "ready");
-          pdfPageImageDataUrls = await deps.renderPdfPagesAsImages(pdfModePaperContexts);
-          deps.setStatusMessage?.(`Sending ${pdfPageImageDataUrls.length} page image(s)...`, "ready");
+          deps.setStatusMessage?.(
+            `PDF will be sent as page images (vision mode) for ${activeModelName}...`,
+            "ready",
+          );
+          pdfPageImageDataUrls =
+            await deps.renderPdfPagesAsImages(pdfModePaperContexts);
+          deps.setStatusMessage?.(
+            `Sending ${pdfPageImageDataUrls.length} page image(s)...`,
+            "ready",
+          );
         }
       } else {
-        deps.setStatusMessage?.(`Sending native PDF to ${earlyModelName}...`, "ready");
-        pdfFileAttachments = await deps.resolvePdfPaperAttachments(pdfModePaperContexts);
+        deps.setStatusMessage?.(
+          `Sending native PDF to ${activeModelName}...`,
+          "ready",
+        );
+        pdfFileAttachments =
+          await deps.resolvePdfPaperAttachments(pdfModePaperContexts);
       }
       deps.inputBox.disabled = false;
     }
@@ -279,7 +276,6 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       ...deps.getSelectedFiles(item.id),
       ...pdfFileAttachments,
     ];
-    const hasPaperComposeState = allSelectedPaperContexts.length > 0 || !deps.isGlobalMode();
 
     if (
       !text &&
@@ -312,133 +308,50 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
           resolvedPromptText,
           {
             selectedTextPaperContexts,
-            includePaperAttribution: deps.isGlobalMode(),
+            includePaperAttribution: false,
           },
         )
       : resolvedPromptText;
 
-    const composedQuestion = deps.isAgentMode()
+    const composedQuestion = deps.buildModelPromptWithFileContext(
+      composedQuestionBase,
+      selectedFiles,
+    );
+    const displayQuestion = primarySelectedText
       ? resolvedPromptText
-      : deps.buildModelPromptWithFileContext(
-          composedQuestionBase,
-          selectedFiles,
-        );
-    const runtimeMode: ChatRuntimeMode = deps.isAgentMode() ? "agent" : "chat";
-    // Check for command action metadata (set by handleInlineCommand for /command display)
-    const commandAction = deps.inputBox.dataset.commandAction;
-    const commandParams = deps.inputBox.dataset.commandParams ?? "";
-    if (commandAction) {
-      delete deps.inputBox.dataset.commandAction;
-      delete deps.inputBox.dataset.commandParams;
-    }
-    const displayQuestion = commandAction
-      ? (commandParams ? `/${commandAction} ${commandParams}` : `/${commandAction}`)
-      : (primarySelectedText ? resolvedPromptText : text || resolvedPromptText);
+      : text || resolvedPromptText;
 
     const titleSeed =
       deps.normalizeConversationTitleSeed(text) ||
       deps.normalizeConversationTitleSeed(resolvedPromptText);
     if (titleSeed) {
-      if (deps.isGlobalMode()) {
-        void deps
-          .touchGlobalConversationTitle(
-            deps.getConversationKey(item),
-            titleSeed,
-          )
-          .catch((err) => {
-            ztoolkit.log("LLM: Failed to touch global conversation title", err);
-          });
-      } else {
-        void deps
-          .touchPaperConversationTitle(deps.getConversationKey(item), titleSeed)
-          .catch((err) => {
-            ztoolkit.log("LLM: Failed to touch paper conversation title", err);
-          });
-      }
+      void deps
+        .touchPaperConversationTitle(deps.getConversationKey(item), titleSeed)
+        .catch((err) => {
+          ztoolkit.log("LLM: Failed to touch paper conversation title", err);
+        });
     }
 
-    const selectedProfile = deps.getSelectedProfile();
-    const activeModelName = (
-      selectedProfile?.model ||
-      deps.getCurrentModelName() ||
-      ""
-    ).trim();
     const selectedImages = deps
       .getSelectedImages(item.id)
       .slice(0, MAX_SELECTED_IMAGES);
     const images = [
-      ...(deps.isScreenshotUnsupportedModel(activeModelName) ? [] : selectedImages),
+      ...(deps.isImageContextUnsupportedModel(activeModelName)
+        ? []
+        : selectedImages),
       ...pdfPageImageDataUrls,
-    ];
+    ].slice(0, MAX_SELECTED_IMAGES);
     const selectedReasoning = deps.getSelectedReasoning();
-    const advancedParams = deps.getAdvancedModelParams(selectedProfile?.entryId);
-
-    const activeEditSession = deps.getActiveEditSession();
-    if (activeEditSession) {
-      const latest = await deps.getLatestEditablePair();
-      if (!latest) {
-        deps.setActiveEditSession(null);
-        deps.setStatusMessage?.("No editable latest prompt", "error");
-        return;
-      }
-      const { conversationKey: latestKey, pair } = latest;
-      if (
-        pair.assistantMessage.streaming ||
-        activeEditSession.conversationKey !== latestKey ||
-        activeEditSession.userTimestamp !== pair.userMessage.timestamp ||
-        activeEditSession.assistantTimestamp !== pair.assistantMessage.timestamp
-      ) {
-        deps.setActiveEditSession(null);
-        deps.setStatusMessage?.(deps.editStaleStatusText, "error");
-        return;
-      }
-
-      const editResult = await deps.editLatestUserMessageAndRetry({
-        body: deps.body,
-        item,
-        displayQuestion,
-        selectedTexts: selectedTexts.length ? selectedTexts : undefined,
-        selectedTextSources: selectedTexts.length ? selectedTextSources : undefined,
-        selectedTextPaperContexts: selectedTexts.length ? selectedTextPaperContexts : undefined,
-        selectedTextNoteContexts: selectedTexts.length ? selectedTextNoteContexts : undefined,
-        screenshotImages: images,
-        paperContexts: selectedPaperContexts,
-        fullTextPaperContexts,
-        attachments: selectedFiles.length ? selectedFiles : undefined,
-        pdfUploadSystemMessages: pdfUploadSystemMessages.length
-          ? pdfUploadSystemMessages
-          : undefined,
-        targetRuntimeMode: runtimeMode,
-        expected: activeEditSession,
-        model: selectedProfile?.model,
-        apiBase: selectedProfile?.apiBase,
-        apiKey: selectedProfile?.apiKey,
-        reasoning: selectedReasoning,
-        advanced: advancedParams,
-      });
-      if (editResult !== "ok") {
-        if (editResult === "stale") {
-          deps.setActiveEditSession(null);
-          deps.setStatusMessage?.(deps.editStaleStatusText, "error");
-          return;
-        }
-        if (editResult === "missing") {
-          deps.setActiveEditSession(null);
-          deps.setStatusMessage?.("No editable latest prompt", "error");
-          return;
-        }
-        deps.setStatusMessage?.("Failed to save edited prompt", "error");
-        return;
-      }
-
+    const advancedParams = deps.getAdvancedModelParams(
+      selectedProfile?.entryId,
+    );
+    const clearDraftAndRetainContext = (): void => {
       deps.inputBox.value = "";
       deps.persistDraftInput();
       deps.retainPinnedImageState(item.id);
-      if (hasPaperComposeState) {
-        deps.consumePaperModeState(item.id);
-        deps.retainPaperState(item.id);
-        deps.updatePaperPreviewPreservingScroll();
-      }
+      deps.consumePaperModeState(item.id);
+      deps.retainPaperState(item.id);
+      deps.updatePaperPreviewPreservingScroll();
       if (selectedFiles.length) {
         deps.retainPinnedFileState(item.id);
         deps.updateFilePreviewPreservingScroll();
@@ -448,38 +361,20 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         deps.retainPinnedTextState(textContextConversationKey);
         deps.updateSelectedTextPreviewPreservingScroll();
       }
-      deps.setActiveEditSession(null);
-      deps.scheduleAttachmentGc();
-      deps.refreshGlobalHistoryHeader();
-      return;
-    }
+    };
 
-    deps.inputBox.value = "";
-    deps.persistDraftInput();
-    deps.retainPinnedImageState(item.id);
-    if (selectedFiles.length) {
-      deps.retainPinnedFileState(item.id);
-      deps.updateFilePreviewPreservingScroll();
-    }
-    deps.updateImagePreviewPreservingScroll();
-    if (primarySelectedText) {
-      deps.retainPinnedTextState(textContextConversationKey);
-      deps.updateSelectedTextPreviewPreservingScroll();
-    }
+    clearDraftAndRetainContext();
 
-    // [webchat] Determine whether to send PDF and/or force a new chat
-    // (isWebChat already computed early from earlyProfile)
     const webchatForceNewChat = isWebChat
       ? (deps.consumeWebChatForceNewChatIntent?.() ?? false)
       : false;
     const webchatSendPdf = isWebChat
-      ? (
-        (deps.hasActivePdfFullTextPapers?.(item, allSelectedPaperContexts) ?? false) &&
-        (webchatForceNewChat || !(deps.hasUploadedPdfInCurrentWebChatConversation?.() ?? false))
-      )
+      ? (deps.hasActivePdfFullTextPapers?.(item, allSelectedPaperContexts) ??
+          false) &&
+        (webchatForceNewChat ||
+          !(deps.hasUploadedPdfInCurrentWebChatConversation?.() ?? false))
       : false;
 
-    const forcedSkillIds = deps.consumeForcedSkillIds?.();
     const sendTask = deps.sendQuestion({
       body: deps.body,
       item,
@@ -488,42 +383,41 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       model: selectedProfile?.model,
       apiBase: selectedProfile?.apiBase,
       apiKey: selectedProfile?.apiKey,
+      authMode: selectedProfile?.authMode,
+      providerProtocol: selectedProfile?.providerProtocol,
+      modelEntryId: selectedProfile?.entryId,
+      modelProviderLabel: selectedProfile?.providerLabel,
       reasoning: selectedReasoning,
       advanced: advancedParams,
       displayQuestion,
       selectedTexts: selectedTexts.length ? selectedTexts : undefined,
-      selectedTextSources: selectedTexts.length ? selectedTextSources : undefined,
-      selectedTextPaperContexts: selectedTexts.length ? selectedTextPaperContexts : undefined,
-      selectedTextNoteContexts: selectedTexts.length ? selectedTextNoteContexts : undefined,
+      selectedTextSources: selectedTexts.length
+        ? selectedTextSources
+        : undefined,
+      selectedTextPaperContexts: selectedTexts.length
+        ? selectedTextPaperContexts
+        : undefined,
       paperContexts: selectedPaperContexts,
       fullTextPaperContexts,
       attachments: selectedFiles.length ? selectedFiles : undefined,
-      runtimeMode,
       pdfModePaperKeys: pdfModeKeySet.size > 0 ? pdfModeKeySet : undefined,
-      forcedSkillIds,
-      pdfUploadSystemMessages: pdfUploadSystemMessages.length ? pdfUploadSystemMessages : undefined,
+      pdfUploadSystemMessages: pdfUploadSystemMessages.length
+        ? pdfUploadSystemMessages
+        : undefined,
       webchatSendPdf,
       webchatForceNewChat,
     });
-    if (hasPaperComposeState) {
-      deps.consumePaperModeState(item.id);
-      deps.retainPaperState(item.id);
-      deps.updatePaperPreviewPreservingScroll();
-    }
     const win = deps.body.ownerDocument?.defaultView;
     if (win) {
       win.setTimeout(() => {
-        deps.refreshGlobalHistoryHeader();
+        deps.refreshPaperHistoryHeader();
       }, 120);
     }
     await sendTask;
     if (isWebChat && webchatSendPdf) {
       deps.markWebChatPdfUploadedForCurrentConversation?.();
     }
-    deps.refreshGlobalHistoryHeader();
-    } finally {
-      deps.autoUnlockGlobalChat();
-    }
+    deps.refreshPaperHistoryHeader();
   };
 
   return { doSend };

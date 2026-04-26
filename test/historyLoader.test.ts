@@ -11,71 +11,17 @@ describe("historyLoader", function () {
     globalScope.Zotero = originalZotero;
   });
 
-  it("loads normalized open-chat history rows including drafts", async function () {
-    globalScope.Zotero = {
-      ...(originalZotero || {}),
-      DB: {
-        queryAsync: async (sql: string) => {
-          if (sql.includes("FROM llm_for_zotero_global_conversations gc")) {
-            return [
-              {
-                conversationKey: 2_000_000_001,
-                libraryID: 1,
-                createdAt: 100,
-                title: "First chat",
-                lastActivityAt: 300,
-                userTurnCount: 2,
-              },
-              {
-                conversationKey: 2_000_000_002,
-                libraryID: 1,
-                createdAt: 400,
-                title: "",
-                lastActivityAt: 400,
-                userTurnCount: 0,
-              },
-            ];
-          }
-          return [];
-        },
-      },
-    };
-
-    const rows = await loadConversationHistoryScope({
-      mode: "open",
-      libraryID: 1,
-      limit: 20,
-    });
-
-    assert.deepEqual(rows, [
-      {
-        mode: "open",
-        conversationKey: 2_000_000_001,
-        title: "First chat",
-        createdAt: 100,
-        lastActivityAt: 300,
-        userTurnCount: 2,
-        isDraft: false,
-      },
-      {
-        mode: "open",
-        conversationKey: 2_000_000_002,
-        title: "New chat",
-        createdAt: 400,
-        lastActivityAt: 400,
-        userTurnCount: 0,
-        isDraft: true,
-      },
-    ]);
-  });
-
   it("loads normalized paper-chat history rows", async function () {
     globalScope.Zotero = {
       ...(originalZotero || {}),
       DB: {
         queryAsync: async (sql: string, params?: unknown[]) => {
           const normalizedParams = Array.isArray(params) ? params : [];
-          if (sql.includes("INSERT OR IGNORE INTO llm_for_zotero_paper_conversations")) {
+          if (
+            sql.includes(
+              "INSERT OR IGNORE INTO llm_for_zotero_paper_conversations",
+            )
+          ) {
             return [];
           }
           if (
@@ -118,7 +64,6 @@ describe("historyLoader", function () {
     };
 
     const rows = await loadConversationHistoryScope({
-      mode: "paper",
       libraryID: 3,
       paperItemID: 321,
       limit: 20,

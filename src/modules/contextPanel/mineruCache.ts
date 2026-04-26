@@ -1,42 +1,17 @@
-import { getLocalParentPath, joinLocalPath } from "../../utils/localPath";
+import { joinLocalPath } from "../../utils/localPath";
 
-const MINERU_CACHE_DIR_NAME = "llm-for-zotero-mineru";
-
-export type MineruCacheFile = {
-  relativePath: string;
-  data: Uint8Array;
-};
+const MINERU_CACHE_DIR_NAME = "llm-for-zotero-lite-mineru";
 
 type IOUtilsLike = {
   exists?: (path: string) => Promise<boolean>;
   read?: (path: string) => Promise<Uint8Array | ArrayBuffer>;
-  makeDirectory?: (
-    path: string,
-    options?: { createAncestors?: boolean; ignoreExisting?: boolean },
-  ) => Promise<void>;
   write?: (path: string, data: Uint8Array) => Promise<unknown>;
-  remove?: (
-    path: string,
-    options?: { recursive?: boolean; ignoreAbsent?: boolean },
-  ) => Promise<void>;
 };
 
 type OSFileLike = {
   exists?: (path: string) => Promise<boolean>;
   read?: (path: string) => Promise<Uint8Array | ArrayBuffer>;
-  makeDir?: (
-    path: string,
-    options?: { from?: string; ignoreExisting?: boolean },
-  ) => Promise<void>;
   writeAtomic?: (path: string, data: Uint8Array) => Promise<void>;
-  remove?: (
-    path: string,
-    options?: { ignoreAbsent?: boolean },
-  ) => Promise<void>;
-  removeDir?: (
-    path: string,
-    options?: { ignoreAbsent?: boolean; ignorePermissions?: boolean },
-  ) => Promise<void>;
 };
 
 function getIOUtils(): IOUtilsLike | undefined {
@@ -60,42 +35,17 @@ function getBaseDir(): string {
   throw new Error("Cannot resolve data directory for MinerU cache");
 }
 
-export function getMineruCacheDir(): string {
+function getMineruCacheDir(): string {
   return joinLocalPath(getBaseDir(), MINERU_CACHE_DIR_NAME);
 }
 
-export function getMineruItemDir(id: number): string {
+function getMineruItemDir(id: number): string {
   return joinLocalPath(getMineruCacheDir(), String(id));
 }
 
 // The md content is stored at a well-known path for quick access
 function getMineruMdPath(id: number): string {
   return joinLocalPath(getMineruItemDir(id), "full.md");
-}
-
-// Legacy path (pre-full.md, used _content.md as the well-known name)
-function getLegacyContentMdPath(id: number): string {
-  return joinLocalPath(getMineruItemDir(id), "_content.md");
-}
-
-// Legacy path (pre-directory cache)
-function getLegacyMdPath(id: number): string {
-  return joinLocalPath(getMineruCacheDir(), `${id}.md`);
-}
-
-async function ensureDir(path: string): Promise<void> {
-  const io = getIOUtils();
-  if (io?.makeDirectory) {
-    await io.makeDirectory(path, {
-      createAncestors: true,
-      ignoreExisting: true,
-    });
-    return;
-  }
-  const osFile = getOSFile();
-  if (osFile?.makeDir) {
-    await osFile.makeDir(path, { ignoreExisting: true });
-  }
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -144,10 +94,7 @@ async function readFileBytes(path: string): Promise<Uint8Array | null> {
   return null;
 }
 
-async function writeFileBytes(
-  path: string,
-  bytes: Uint8Array,
-): Promise<void> {
+async function writeFileBytes(path: string, bytes: Uint8Array): Promise<void> {
   const io = getIOUtils();
   if (io?.write) {
     await io.write(path, bytes);
@@ -159,108 +106,16 @@ async function writeFileBytes(
   }
 }
 
-async function removePath(path: string): Promise<void> {
-  const io = getIOUtils();
-  if (io?.remove) {
-    try {
-      await io.remove(path, { recursive: true, ignoreAbsent: true });
-    } catch {
-      /* ignore */
-    }
-    return;
-  }
-  const osFile = getOSFile();
-  if (osFile?.removeDir) {
-    try {
-      await osFile.removeDir(path, {
-        ignoreAbsent: true,
-        ignorePermissions: false,
-      });
-    } catch {
-      /* ignore */
-    }
-  } else if (osFile?.remove) {
-    try {
-      await osFile.remove(path, { ignoreAbsent: true });
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function hasCachedMineruMd(id: number): Promise<boolean> {
-  if (await pathExists(getMineruMdPath(id))) return true;
-  // Check legacy _content.md path
-  if (await pathExists(getLegacyContentMdPath(id))) return true;
-  // Check legacy single-file cache
-  return await pathExists(getLegacyMdPath(id));
+  return await pathExists(getMineruMdPath(id));
 }
 
-export async function readCachedMineruMd(
-  id: number,
-): Promise<string | null> {
-  // Try full.md (current canonical path)
+export async function readCachedMineruMd(id: number): Promise<string | null> {
   const bytes = await readFileBytes(getMineruMdPath(id));
   if (bytes) return new TextDecoder("utf-8").decode(bytes);
-  // Try legacy _content.md
-  const legacyContentBytes = await readFileBytes(getLegacyContentMdPath(id));
-  if (legacyContentBytes) return new TextDecoder("utf-8").decode(legacyContentBytes);
-  // Try legacy single-file cache
-  const legacyBytes = await readFileBytes(getLegacyMdPath(id));
-  if (legacyBytes) return new TextDecoder("utf-8").decode(legacyBytes);
   return null;
-}
-
-export async function writeMineruCacheFiles(
-  id: number,
-  mdContent: string,
-  files: MineruCacheFile[],
-): Promise<void> {
-  const itemDir = getMineruItemDir(id);
-  await ensureDir(itemDir);
-
-  // Write all extracted files from ZIP, skipping PDFs (the original
-  // PDF is included in the MinerU ZIP but we already have it in Zotero)
-  for (const file of files) {
-    if (/\.pdf$/i.test(file.relativePath)) continue;
-    // Split relative path into individual components so PathUtils.join
-    // doesn't reject segments containing '/'.
-    const parts = file.relativePath.split(/[\\/]+/).filter(Boolean);
-    const filePath = joinLocalPath(itemDir, ...parts);
-    const parentDir = getLocalParentPath(filePath);
-    if (parentDir !== itemDir) {
-      await ensureDir(parentDir);
-    }
-    await writeFileBytes(filePath, file.data);
-  }
-
-  // Ensure full.md exists (the ZIP normally includes it, but write as
-  // a safety fallback in case the MinerU ZIP structure changes)
-  const mdPath = getMineruMdPath(id);
-  if (!(await pathExists(mdPath))) {
-    await writeFileBytes(mdPath, new TextEncoder().encode(mdContent));
-  }
-
-  // Clean up legacy _content.md if it exists
-  const legacyContentPath = getLegacyContentMdPath(id);
-  if (await pathExists(legacyContentPath)) {
-    await removePath(legacyContentPath);
-  }
-
-  // Clean up legacy single-file cache if it exists
-  const legacyPath = getLegacyMdPath(id);
-  if (await pathExists(legacyPath)) {
-    await removePath(legacyPath);
-  }
-
-  // Build manifest.json from content_list + full.md (best effort)
-  try {
-    await buildAndWriteManifest(id);
-  } catch {
-    // Non-critical — manifest is an optimization, not required
-  }
 }
 
 const EXT_MIME: Record<string, string> = {
@@ -274,7 +129,8 @@ const EXT_MIME: Record<string, string> = {
 
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i++)
+    binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
 
@@ -293,14 +149,14 @@ export async function readMineruImageAsBase64(
 
 // ── Manifest ─────────────────────────────────────────────────────────────────
 
-export type ManifestFigure = {
+type ManifestFigure = {
   label: string;
   path: string;
   caption: string;
   page?: number;
 };
 
-export type ManifestTable = {
+type ManifestTable = {
   label: string;
   path: string;
   caption: string;
@@ -396,9 +252,9 @@ type ContentListEntry = {
  *
  * 1. Scan full.md for `^# heading` lines to get char offsets for sections.
  * 2. Parse content_list.json for figure/table metadata per section.
- * 3. Combine into a lightweight manifest the agent can read quickly.
+ * 3. Combine into a lightweight manifest paper chat can read quickly.
  */
-export function buildManifest(
+function buildManifest(
   mdContent: string,
   contentList: ContentListEntry[],
 ): MineruManifest {
@@ -534,7 +390,11 @@ export function buildManifest(
         prevSection.tables.push(...section.tables);
         prevSection.equationCount += section.equationCount;
       } else {
-        merged.push({ ...section, figures: [...section.figures], tables: [...section.tables] });
+        merged.push({
+          ...section,
+          figures: [...section.figures],
+          tables: [...section.tables],
+        });
       }
     }
     sections.length = 0;
@@ -595,7 +455,9 @@ async function findContentListPath(itemDir: string): Promise<string | null> {
  * Build and write manifest.json for a cached paper.
  * Reads full.md and content_list.json from the cache directory.
  */
-export async function buildAndWriteManifest(id: number): Promise<MineruManifest | null> {
+async function buildAndWriteManifest(
+  id: number,
+): Promise<MineruManifest | null> {
   const itemDir = getMineruItemDir(id);
   if (!(await pathExists(itemDir))) return null;
 
@@ -620,7 +482,10 @@ export async function buildAndWriteManifest(id: number): Promise<MineruManifest 
 
   // Write manifest.json
   const manifestPath = getManifestPath(id);
-  await writeFileBytes(manifestPath, new TextEncoder().encode(JSON.stringify(manifest)));
+  await writeFileBytes(
+    manifestPath,
+    new TextEncoder().encode(JSON.stringify(manifest)),
+  );
 
   return manifest;
 }
@@ -628,7 +493,7 @@ export async function buildAndWriteManifest(id: number): Promise<MineruManifest 
 /**
  * Read a previously built manifest.json from cache.
  */
-export async function readManifest(id: number): Promise<MineruManifest | null> {
+async function readManifest(id: number): Promise<MineruManifest | null> {
   const manifestPath = getManifestPath(id);
   const bytes = await readFileBytes(manifestPath);
   if (!bytes) return null;
@@ -643,68 +508,10 @@ export async function readManifest(id: number): Promise<MineruManifest | null> {
  * Get or build the manifest for a cached paper.
  * Reads from disk if available, otherwise builds and writes it.
  */
-export async function ensureManifest(id: number): Promise<MineruManifest | null> {
+export async function ensureManifest(
+  id: number,
+): Promise<MineruManifest | null> {
   const existing = await readManifest(id);
   if (existing) return existing;
   return buildAndWriteManifest(id);
-}
-
-export async function invalidateMineruMd(id: number): Promise<void> {
-  // Remove the directory-based cache
-  await removePath(getMineruItemDir(id));
-  // Also remove legacy single-file cache
-  await removePath(getLegacyMdPath(id));
-  // Cascade: clear embedding cache since chunks will change
-  try {
-    const { clearEmbeddingCache } = await import("./embeddingCache");
-    await clearEmbeddingCache(id);
-  } catch {
-    /* embedding cache module may not be loaded yet */
-  }
-}
-
-/**
- * One-time migration: remove legacy `_content.md` files from all cache
- * directories where `full.md` already exists.
- */
-export async function cleanupLegacyContentMdFiles(): Promise<void> {
-  const cacheDir = getMineruCacheDir();
-  if (!(await pathExists(cacheDir))) return;
-
-  const io = getIOUtils();
-  if (!io?.exists || !io?.remove) return;
-
-  // IOUtils.getChildren lists immediate children of a directory
-  const ioAny = io as Record<string, unknown>;
-  const getChildren =
-    typeof ioAny.getChildren === "function"
-      ? (ioAny.getChildren as (path: string) => Promise<string[]>)
-      : null;
-  if (!getChildren) return;
-
-  let entries: string[];
-  try {
-    entries = await getChildren(cacheDir);
-  } catch {
-    return;
-  }
-
-  let cleaned = 0;
-  for (const entry of entries) {
-    // Only process numbered directories (attachment IDs)
-    const basename = entry.split(/[\\/]/).pop() || "";
-    if (!/^\d+$/.test(basename)) continue;
-
-    const fullMdPath = joinLocalPath(entry, "full.md");
-    const contentMdPath = joinLocalPath(entry, "_content.md");
-
-    if ((await pathExists(fullMdPath)) && (await pathExists(contentMdPath))) {
-      await removePath(contentMdPath);
-      cleaned += 1;
-    }
-  }
-
-  if (cleaned > 0) {
-    ztoolkit.log(`LLM: Cleaned up ${cleaned} legacy _content.md file(s).`);
-  }
 }

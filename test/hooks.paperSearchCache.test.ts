@@ -70,8 +70,9 @@ describe("hooks paper search cache invalidation", function () {
         getByLibrary: () => [],
       },
     } as typeof Zotero;
-    (globalThis as typeof globalThis & { ztoolkit: { log: () => void } })
-      .ztoolkit = {
+    (
+      globalThis as typeof globalThis & { ztoolkit: { log: () => void } }
+    ).ztoolkit = {
       log: () => {},
     };
   });
@@ -90,6 +91,7 @@ describe("hooks paper search cache invalidation", function () {
     assert.equal(getAllCount, 1);
 
     await hooks.onNotify("modify", "item", [1], {});
+    await new Promise((resolve) => setTimeout(resolve, 550));
     await searchPaperCandidates(1, "notify");
     assert.equal(getAllCount, 2);
   });

@@ -7,9 +7,17 @@ export default zotero({
     {
       files: ["**/*.ts"],
       rules: {
-        // We disable this rule here because the template
-        // contains some unused examples and variables
         "@typescript-eslint/no-unused-vars": "off",
+        "@typescript-eslint/no-require-imports": "off",
+        "no-control-regex": "off",
+      },
+    },
+    {
+      files: ["test/**/*.ts"],
+      rules: {
+        "mocha/consistent-spacing-between-blocks": "off",
+        "mocha/max-top-level-suites": "off",
+        "mocha/no-setup-in-describe": "off",
       },
     },
   ],

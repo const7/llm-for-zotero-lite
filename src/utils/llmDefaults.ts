@@ -5,7 +5,7 @@ export const DEFAULT_INPUT_TOKEN_CAP = 128000;
 export const MAX_ALLOWED_INPUT_TOKEN_CAP = 2000000;
 
 // ---------------------------------------------------------------------------
-// Default system prompt for non-agent (direct chat) mode.
+// Default system prompt for paper chat.
 // Editing this single location updates the prompt everywhere it is used.
 // ---------------------------------------------------------------------------
 export const DEFAULT_SYSTEM_PROMPT = `You are an intelligent research assistant integrated into Zotero. You help users analyze and understand academic papers and documents.

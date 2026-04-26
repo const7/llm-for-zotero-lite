@@ -13,13 +13,7 @@ import {
 import { detectProviderPreset, getProviderPreset } from "./providerPresets";
 import type { ProviderPresetId } from "./providerPresets";
 
-export type LegacyModelSlotKey =
-  | "primary"
-  | "secondary"
-  | "tertiary"
-  | "quaternary";
-
-export type AdvancedModelConfig = {
+type AdvancedModelConfig = {
   temperature: number;
   maxTokens: number;
   inputTokenCap?: number;
@@ -32,7 +26,11 @@ export type ModelProviderModel = AdvancedModelConfig & {
   providerProtocol?: ProviderProtocol;
 };
 
-export type ModelProviderAuthMode = "api_key" | "codex_auth" | "copilot_auth" | "webchat"; // [webchat]
+export type ModelProviderAuthMode =
+  | "api_key"
+  | "codex_auth"
+  | "copilot_auth"
+  | "webchat"; // [webchat]
 
 export type ModelProviderGroup = {
   id: string;
@@ -59,18 +57,6 @@ export type RuntimeModelEntry = {
   advanced: AdvancedModelConfig;
 };
 
-export type LegacyModelSlot = AdvancedModelConfig & {
-  key: LegacyModelSlotKey;
-  apiBase: string;
-  apiKey: string;
-  model: string;
-};
-
-export type LegacyMigrationResult = {
-  groups: ModelProviderGroup[];
-  legacyToEntryId: Partial<Record<LegacyModelSlotKey, string>>;
-};
-
 type AdvancedModelConfigInput = {
   temperature?: number | string | null;
   maxTokens?: number | string | null;
@@ -86,7 +72,6 @@ const MODEL_PROVIDER_GROUPS_PREF_KEY = "modelProviderGroups";
 const MODEL_PROVIDER_GROUPS_MIGRATION_VERSION_PREF_KEY =
   "modelProviderGroupsMigrationVersion";
 const LAST_USED_MODEL_ENTRY_ID_PREF_KEY = "lastUsedModelEntryId";
-const LEGACY_LAST_MODEL_PROFILE_PREF_KEY = "lastUsedModelProfile";
 const MODEL_PROVIDER_GROUPS_MIGRATION_VERSION = 3;
 
 function getZoteroPrefs(): ZoteroPrefsAPI | null {
@@ -291,9 +276,7 @@ function normalizeGroupModel(model: unknown): ModelProviderModel | null {
   };
 }
 
-export function normalizeModelProviderGroups(
-  raw: unknown,
-): ModelProviderGroup[] {
+function normalizeModelProviderGroups(raw: unknown): ModelProviderGroup[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((group) => normalizeGroup(group))
@@ -317,142 +300,6 @@ function storeModelProviderGroups(groups: ModelProviderGroup[]): void {
   );
 }
 
-function resolveLegacyModelSlot(
-  key: LegacyModelSlotKey,
-): LegacyModelSlot | null {
-  const suffixMap: Record<
-    LegacyModelSlotKey,
-    "" | "Primary" | "Secondary" | "Tertiary" | "Quaternary"
-  > = {
-    primary: "Primary",
-    secondary: "Secondary",
-    tertiary: "Tertiary",
-    quaternary: "Quaternary",
-  };
-  const suffix = suffixMap[key];
-  const modelName =
-    key === "primary"
-      ? (
-          getStringPref(`model${suffix}`) ||
-          getStringPref("model") ||
-          "gpt-4o-mini"
-        ).trim()
-      : getStringPref(`model${suffix}`).trim();
-  const apiBase =
-    key === "primary"
-      ? normalizeApiBase(
-          getStringPref(`apiBase${suffix}`) || getStringPref("apiBase") || "",
-        )
-      : normalizeApiBase(getStringPref(`apiBase${suffix}`));
-  const apiKey =
-    key === "primary"
-      ? (
-          getStringPref(`apiKey${suffix}`) ||
-          getStringPref("apiKey") ||
-          ""
-        ).trim()
-      : getStringPref(`apiKey${suffix}`).trim();
-  const temperature = normalizeTemperature(
-    getStringPref(`temperature${suffix}`) || `${DEFAULT_TEMPERATURE}`,
-  );
-  const maxTokens = normalizeMaxTokens(
-    getStringPref(`maxTokens${suffix}`) || `${DEFAULT_MAX_TOKENS}`,
-  );
-  const inputTokenCap = normalizeOptionalInputTokenCap(
-    getStringPref(`inputTokenCap${suffix}`),
-  );
-
-  if (!apiBase && !apiKey && !modelName) return null;
-
-  return {
-    key,
-    apiBase,
-    apiKey,
-    model: modelName,
-    temperature,
-    maxTokens,
-    inputTokenCap,
-  };
-}
-
-export function buildModelProviderGroupsFromLegacySlots(
-  legacySlots: LegacyModelSlot[],
-): LegacyMigrationResult {
-  const groups: ModelProviderGroup[] = [];
-  const groupByCredentials = new Map<string, ModelProviderGroup>();
-  const legacyToEntryId: Partial<Record<LegacyModelSlotKey, string>> = {};
-
-  for (const slot of legacySlots) {
-    const normalizedBase = normalizeApiBase(slot.apiBase);
-    const normalizedKey = slot.apiKey.trim();
-    const sharedKey =
-      normalizedBase || normalizedKey
-        ? `${normalizedBase}\u0000${normalizedKey}`
-        : "";
-
-    let group: ModelProviderGroup | undefined;
-    if (sharedKey) {
-      group = groupByCredentials.get(sharedKey);
-    }
-    if (!group) {
-      group = {
-        id: createId("provider"),
-        apiBase: normalizedBase,
-        apiKey: normalizedKey,
-        authMode: "api_key",
-        providerProtocol: normalizeProviderProtocolForAuthMode({
-          authMode: "api_key",
-          apiBase: normalizedBase,
-        }),
-        models: [],
-      };
-      groups.push(group);
-      if (sharedKey) {
-        groupByCredentials.set(sharedKey, group);
-      }
-    }
-
-    if (!slot.model.trim()) continue;
-    const entry: ModelProviderModel = {
-      id: createId("model"),
-      model: slot.model.trim(),
-      ...normalizeAdvancedModelConfig(slot),
-    };
-    group.models.push(entry);
-    legacyToEntryId[slot.key] = entry.id;
-  }
-
-  return { groups, legacyToEntryId };
-}
-
-function migrateLegacyModelProviderGroups(): ModelProviderGroup[] {
-  const legacySlots = (
-    ["primary", "secondary", "tertiary", "quaternary"] as LegacyModelSlotKey[]
-  )
-    .map((key) => resolveLegacyModelSlot(key))
-    .filter((slot): slot is LegacyModelSlot => Boolean(slot));
-  const migration = buildModelProviderGroupsFromLegacySlots(legacySlots);
-  storeModelProviderGroups(migration.groups);
-
-  const legacyLastUsedProfile = getStringPref(
-    LEGACY_LAST_MODEL_PROFILE_PREF_KEY,
-  )
-    .trim()
-    .toLowerCase();
-  if (
-    legacyLastUsedProfile &&
-    legacyLastUsedProfile in migration.legacyToEntryId &&
-    migration.legacyToEntryId[legacyLastUsedProfile as LegacyModelSlotKey]
-  ) {
-    setPref(
-      LAST_USED_MODEL_ENTRY_ID_PREF_KEY,
-      migration.legacyToEntryId[legacyLastUsedProfile as LegacyModelSlotKey],
-    );
-  }
-
-  return migration.groups;
-}
-
 function ensureModelProviderGroups(): ModelProviderGroup[] {
   const raw = getStringPref(MODEL_PROVIDER_GROUPS_PREF_KEY);
   if (raw.trim()) {
@@ -465,7 +312,8 @@ function ensureModelProviderGroups(): ModelProviderGroup[] {
   if (getMigrationVersion() >= MODEL_PROVIDER_GROUPS_MIGRATION_VERSION) {
     return [];
   }
-  return migrateLegacyModelProviderGroups();
+  storeModelProviderGroups([]);
+  return [];
 }
 
 export function getModelProviderGroups(): ModelProviderGroup[] {
@@ -588,8 +436,4 @@ export function getLastUsedModelEntryId(): string {
 
 export function setLastUsedModelEntryId(entryId: string): void {
   setPref(LAST_USED_MODEL_ENTRY_ID_PREF_KEY, entryId.trim());
-}
-
-export function getModelProviderGroupsPrefKey(): string {
-  return MODEL_PROVIDER_GROUPS_PREF_KEY;
 }

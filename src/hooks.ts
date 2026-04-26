@@ -1,31 +1,14 @@
 import { initLocale } from "./utils/locale";
 import { initI18n } from "./utils/i18n";
-import { registerPrefsScripts } from "./modules/preferenceScript";
 import { PREFERENCES_PANE_ID } from "./modules/contextPanel/constants";
 import {
   registerReaderContextPanel,
   registerLLMStyles,
-  registerNoteEditingSelectionTracking,
   registerReaderSelectionTracking,
-  openStandaloneChat,
 } from "./modules/contextPanel";
 import { invalidatePaperSearchCache } from "./modules/contextPanel/paperSearch";
 import { initChatStore } from "./utils/chatStore";
-import {
-  initAttachmentRefStore,
-  reconcileNoteAttachmentRefsFromNoteContent,
-  collectAndDeleteUnreferencedBlobs,
-  ATTACHMENT_GC_MIN_AGE_MS,
-} from "./utils/attachmentRefStore";
-import { runLegacyMigrations } from "./utils/migrations";
 import { createZToolkit } from "./utils/ztoolkit";
-import {
-  getAgentApi,
-  initAgentSubsystem,
-  shutdownAgentSubsystem,
-} from "./agent";
-import { pauseBatchProcessing } from "./modules/mineruBatchProcessor";
-import { startAutoWatch, stopAutoWatch } from "./modules/mineruAutoWatch";
 import { clearAllState, initFontScale } from "./modules/contextPanel/state";
 
 async function onStartup() {
@@ -34,12 +17,6 @@ async function onStartup() {
     Zotero.unlockPromise,
     Zotero.uiReadyPromise,
   ]);
-
-  try {
-    await runLegacyMigrations();
-  } catch (err) {
-    ztoolkit.log("LLM: Failed to run legacy migration", err);
-  }
 
   initLocale();
   initI18n();
@@ -50,51 +27,6 @@ async function onStartup() {
   } catch (err) {
     ztoolkit.log("LLM: Failed to initialize chat store", err);
   }
-  try {
-    await initAgentSubsystem();
-    addon.api.agent = getAgentApi();
-  } catch (err) {
-    ztoolkit.log("LLM: Failed to initialize agent subsystem", err);
-  }
-  try {
-    const { initUserSkills, loadUserSkills } = await import(
-      "./agent/skills/userSkills"
-    );
-    const { setUserSkills } = await import("./agent/skills");
-    await initUserSkills();
-    const userSkills = await loadUserSkills();
-    setUserSkills(userSkills);
-  } catch (err) {
-    ztoolkit.log("LLM: Failed to load user skills", err);
-  }
-  try {
-    await initAttachmentRefStore();
-  } catch (err) {
-    ztoolkit.log("LLM: Failed to initialize attachment reference store", err);
-  }
-
-  void (async () => {
-    try {
-      await reconcileNoteAttachmentRefsFromNoteContent();
-      await collectAndDeleteUnreferencedBlobs(ATTACHMENT_GC_MIN_AGE_MS);
-    } catch (err) {
-      ztoolkit.log("LLM: Attachment ref reconciliation/GC failed", err);
-    }
-  })();
-
-  // Register webchat relay endpoints on Zotero's embedded HTTP server
-  try {
-    const { registerWebChatRelay } = await import("./webchat/relayServer");
-    registerWebChatRelay();
-  } catch (err) {
-    ztoolkit.log("LLM: Failed to register webchat relay", err);
-  }
-
-  try {
-    startAutoWatch();
-  } catch (err) {
-    ztoolkit.log("LLM: Failed to start MinerU auto-watch", err);
-  }
 
   registerPrefsPane();
 
@@ -102,8 +34,6 @@ async function onStartup() {
     Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
   );
 
-  // Mark initialized as true to confirm plugin loading status
-  // outside of the plugin (e.g. scaffold testing process)
   addon.data.initialized = true;
 }
 
@@ -118,20 +48,6 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
   registerLLMStyles(win);
   registerReaderContextPanel();
   registerReaderSelectionTracking();
-  registerNoteEditingSelectionTracking(win);
-
-  // Keyboard shortcut: Ctrl/Cmd+Shift+L
-  const doc = win.document;
-  const keyset = doc.getElementById("mainKeyset");
-  if (keyset) {
-    const key = doc.createXULElement("key");
-    key.id = "llmforzotero-key-standalone";
-    key.setAttribute("modifiers", "accel,shift");
-    key.setAttribute("key", "L");
-    key.setAttribute("oncommand", "void(0)");
-    key.addEventListener("command", () => openStandaloneChat());
-    keyset.appendChild(key);
-  }
 }
 
 function registerPrefsPane() {
@@ -139,17 +55,14 @@ function registerPrefsPane() {
     pluginID: addon.data.config.addonID,
     id: PREFERENCES_PANE_ID,
     src: `chrome://${addon.data.config.addonRef}/content/preferences.xhtml`,
-    label: "llm-for-zotero",
+    label: "llm-for-zotero-lite",
     image: `chrome://${addon.data.config.addonRef}/content/icons/icon-20.png`,
   });
 }
 
-async function onMainWindowUnload(win: Window): Promise<void> {
+async function onMainWindowUnload(_win: Window): Promise<void> {
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
-  addon.data.standaloneWindow?.close();
-  win.document.getElementById("llmforzotero-open-standalone")?.remove();
-  win.document.getElementById("llmforzotero-key-standalone")?.remove();
 }
 
 function onShutdown(): void {
@@ -159,16 +72,12 @@ function onShutdown(): void {
   }
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
-  addon.data.standaloneWindow?.close();
   try {
     const { unregisterWebChatRelay } = require("./webchat/relayServer");
     unregisterWebChatRelay();
   } catch {
     /* ignore if module not loaded */
   }
-  pauseBatchProcessing();
-  stopAutoWatch();
-  shutdownAgentSubsystem();
   clearAllState();
   // Remove addon object
   addon.data.alive = false;
@@ -176,17 +85,13 @@ function onShutdown(): void {
   delete Zotero[addon.data.config.addonInstance];
 }
 
-/**
- * This function is just an example of dispatcher for Notify events.
- * Any operations should be placed in a function to keep this funcion clear.
- */
 let paperSearchInvalidateTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function onNotify(
   event: string,
   type: string,
-  ids: Array<string | number>,
-  extraData: { [key: string]: any },
+  _ids: Array<string | number>,
+  _extraData: { [key: string]: any },
 ) {
   const shouldInvalidatePaperSearch =
     (type === "item" || type === "file") &&
@@ -203,34 +108,21 @@ async function onNotify(
       invalidatePaperSearchCache();
     }, 500);
   }
-  // You can add your code to the corresponding notify type
-  ztoolkit.log("notify", event, type, ids, extraData);
   return;
 }
 
-/**
- * This function is just an example of dispatcher for Preference UI events.
- * Any operations should be placed in a function to keep this funcion clear.
- * @param type event type
- * @param data event data
- */
 async function onPrefsEvent(type: string, data: { [key: string]: any }) {
   switch (type) {
-    case "load":
+    case "load": {
+      const { registerPrefsScripts } =
+        await import("./modules/preferenceScript");
       registerPrefsScripts(data.window);
       break;
+    }
     default:
       return;
   }
 }
-
-function onDialogEvents(_type: string) {
-  return;
-}
-
-// Add your hooks here. For element click, etc.
-// Keep in mind hooks only do dispatch. Don't add code that does real jobs in hooks.
-// Otherwise the code would be hard to read and maintain.
 
 export default {
   onStartup,
@@ -239,5 +131,4 @@ export default {
   onMainWindowUnload,
   onNotify,
   onPrefsEvent,
-  onDialogEvents,
 };
