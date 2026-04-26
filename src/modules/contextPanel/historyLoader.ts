@@ -4,13 +4,13 @@ import {
 } from "../../utils/chatStore";
 import { normalizeHistoryTitle } from "./setupHandlers/controllers/conversationHistoryController";
 
-export type ConversationHistoryScopeParams = {
+type ConversationHistoryScopeParams = {
   libraryID: number;
   paperItemID?: number;
   limit: number;
 };
 
-export type ConversationHistoryScopeEntry = {
+type ConversationHistoryScopeEntry = {
   mode: "paper";
   conversationKey: number;
   title: string;
@@ -34,9 +34,10 @@ function normalizeTitle(raw: unknown, isDraft: boolean): string {
 export async function loadConversationHistoryScope(
   params: ConversationHistoryScopeParams,
 ): Promise<ConversationHistoryScopeEntry[]> {
-  const normalizedLibraryID = Number.isFinite(params.libraryID) && params.libraryID > 0
-    ? Math.floor(params.libraryID)
-    : 0;
+  const normalizedLibraryID =
+    Number.isFinite(params.libraryID) && params.libraryID > 0
+      ? Math.floor(params.libraryID)
+      : 0;
   if (normalizedLibraryID <= 0) return [];
 
   const normalizedLimit = normalizeScopeLimit(params.limit);
@@ -55,7 +56,9 @@ export async function loadConversationHistoryScope(
     true,
   );
   return summaries.map((summary) => {
-    const lastActivityAt = Number(summary.lastActivityAt || summary.createdAt || 0);
+    const lastActivityAt = Number(
+      summary.lastActivityAt || summary.createdAt || 0,
+    );
     const createdAt = Number(summary.createdAt || lastActivityAt || 0);
     const userTurnCount = Number(summary.userTurnCount || 0);
     const isDraft = userTurnCount <= 0;

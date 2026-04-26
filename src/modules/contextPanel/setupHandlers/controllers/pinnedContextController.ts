@@ -83,11 +83,11 @@ export function buildPinnedSelectedTextKey(
   return `${source}\u241f${paperKey}\u241f${contextItemId}\u241f${pageIndex}\u241f${textHash}`;
 }
 
-export function buildPinnedImageKey(imageUrl: string): string {
+function buildPinnedImageKey(imageUrl: string): string {
   return normalizeText(imageUrl);
 }
 
-export function buildPinnedFileKey(attachment: ChatAttachment): string {
+function buildPinnedFileKey(attachment: ChatAttachment): string {
   const id = typeof attachment.id === "string" ? attachment.id.trim() : "";
   if (id) return id;
   const name = normalizeText(attachment.name);
@@ -98,7 +98,7 @@ export function buildPinnedFileKey(attachment: ChatAttachment): string {
   return `${name}\u241f${mimeType}\u241f${size}`;
 }
 
-export function buildPinnedPaperKey(paperContext: PaperContextRef): string {
+function buildPinnedPaperKey(paperContext: PaperContextRef): string {
   return `${Math.floor(paperContext.itemId)}:${Math.floor(paperContext.contextItemId)}`;
 }
 
@@ -350,7 +350,6 @@ export function togglePinnedPaper(
   keys.add(key);
   return true;
 }
-
 
 export function retainPinnedPapers(
   pinnedKeysByOwner: Map<number, Set<string>>,

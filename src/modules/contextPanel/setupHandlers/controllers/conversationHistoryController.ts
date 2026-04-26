@@ -1,8 +1,8 @@
 import { sanitizeText } from "../../textUtils";
 
 export const PAPER_HISTORY_UNDO_WINDOW_MS = 6_000;
-export const PAPER_HISTORY_TITLE_MAX_LENGTH = 64;
-export const HISTORY_ROW_TITLE_MAX_LENGTH = 42;
+const PAPER_HISTORY_TITLE_MAX_LENGTH = 64;
+const HISTORY_ROW_TITLE_MAX_LENGTH = 42;
 
 export type ConversationHistoryEntry = {
   conversationKey: number;

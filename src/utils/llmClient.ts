@@ -31,11 +31,7 @@ import {
   resolveEndpoint,
   usesMaxCompletionTokens,
 } from "./apiHelpers";
-import {
-  getLocalParentPath,
-  joinLocalPath,
-  pathToFileUrl,
-} from "./localPath";
+import { getLocalParentPath, joinLocalPath, pathToFileUrl } from "./localPath";
 import {
   normalizeTemperature,
   normalizeMaxTokens,
@@ -74,7 +70,7 @@ import {
 // =============================================================================
 
 /** Image content for vision-capable models */
-export type ImageContent = {
+type ImageContent = {
   type: "image_url";
   image_url: {
     url: string;
@@ -83,13 +79,13 @@ export type ImageContent = {
 };
 
 /** Text content */
-export type TextContent = {
+type TextContent = {
   type: "text";
   text: string;
 };
 
 /** Message content can be string or array of content parts (for vision) */
-export type MessageContent = string | (TextContent | ImageContent)[];
+type MessageContent = string | (TextContent | ImageContent)[];
 
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
@@ -107,7 +103,7 @@ export type ChatFileAttachment = {
   contentHash?: string;
 };
 
-export type ChatParams = {
+type ChatParams = {
   prompt: string;
   context?: string;
   history?: ChatMessage[];
@@ -143,7 +139,7 @@ export type ReasoningEvent = {
   details?: string;
 };
 
-export type ContextBudgetPlan = {
+type ContextBudgetPlan = {
   modelLimitTokens: number;
   limitTokens: number;
   softLimitTokens: number;
@@ -159,7 +155,7 @@ export type UsageStats = {
   totalTokens: number;
 };
 
-export type PreparedChatRequest = {
+type PreparedChatRequest = {
   apiBase: string;
   apiKey: string;
   authMode: ModelProviderAuthMode;
@@ -204,7 +200,8 @@ interface EmbeddingResponse {
 
 const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
-const DEFAULT_CODEX_API_BASE = "https://chatgpt.com/backend-api/codex/responses";
+const DEFAULT_CODEX_API_BASE =
+  "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_REFRESH_TOKEN_URL = "https://auth.openai.com/oauth/token";
 const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 
@@ -230,16 +227,12 @@ function getApiConfig(overrides?: {
 }) {
   const defaultEntry = getDefaultModelEntry();
   const defaultProviderGroup = getDefaultProviderGroup();
-  const authMode = (
-    overrides?.authMode ||
+  const authMode = (overrides?.authMode ||
     defaultEntry?.authMode ||
     defaultProviderGroup?.authMode ||
-    "api_key"
-  ) as ModelProviderAuthMode;
+    "api_key") as ModelProviderAuthMode;
   const prefApiBase =
-    defaultEntry?.apiBase ||
-    defaultProviderGroup?.apiBase ||
-    "";
+    defaultEntry?.apiBase || defaultProviderGroup?.apiBase || "";
   const resolvedApiBase =
     overrides?.apiBase ||
     prefApiBase ||
@@ -262,7 +255,8 @@ function getApiConfig(overrides?: {
   const storedProviderProtocol =
     overrides?.apiBase || overrides?.authMode
       ? undefined
-      : defaultEntry?.providerProtocol || defaultProviderGroup?.providerProtocol;
+      : defaultEntry?.providerProtocol ||
+        defaultProviderGroup?.providerProtocol;
   const providerProtocol = normalizeProviderProtocolForAuthMode({
     protocol: overrides?.providerProtocol || storedProviderProtocol,
     authMode,
@@ -287,7 +281,7 @@ function getApiConfig(overrides?: {
   };
 }
 
-export type ResolvedEmbeddingConfig = {
+type ResolvedEmbeddingConfig = {
   apiBase: string;
   apiKey: string;
   model: string;
@@ -458,9 +452,11 @@ function getOS(): OSLike | undefined {
 function getNsIFile(): unknown {
   const ci = (globalThis as { Ci?: { nsIFile?: unknown } }).Ci;
   if (ci?.nsIFile) return ci.nsIFile;
-  const components = (globalThis as {
-    Components?: { interfaces?: { nsIFile?: unknown } };
-  }).Components;
+  const components = (
+    globalThis as {
+      Components?: { interfaces?: { nsIFile?: unknown } };
+    }
+  ).Components;
   return components?.interfaces?.nsIFile;
 }
 
@@ -522,8 +518,8 @@ function resolveHomeDir(): string {
   if (typeof osHome === "string" && osHome.trim()) {
     return osHome.trim();
   }
-  const servicesHome = getServices()?.dirsvc
-    ?.get?.("Home", getNsIFile())
+  const servicesHome = getServices()
+    ?.dirsvc?.get?.("Home", getNsIFile())
     ?.path?.trim();
   if (typeof servicesHome === "string" && servicesHome) {
     return servicesHome;
@@ -677,7 +673,10 @@ async function refreshCodexAccessToken(params: {
     tokens,
     last_refresh: new Date().toISOString(),
   };
-  await writeUtf8File(params.authPath, `${JSON.stringify(nextAuth, null, 2)}\n`);
+  await writeUtf8File(
+    params.authPath,
+    `${JSON.stringify(nextAuth, null, 2)}\n`,
+  );
   return nextAccess;
 }
 
@@ -852,9 +851,10 @@ async function fetchCopilotJwt(
   if (!token) {
     throw new Error("Copilot token exchange returned empty token");
   }
-  const expiresAt = typeof payload.expires_at === "number"
-    ? payload.expires_at * 1000
-    : Date.now() + 25 * 60 * 1000;
+  const expiresAt =
+    typeof payload.expires_at === "number"
+      ? payload.expires_at * 1000
+      : Date.now() + 25 * 60 * 1000;
   cachedCopilotJwt = { token, expiresAt };
   return { token, expiresAt };
 }
@@ -863,16 +863,12 @@ export async function resolveCopilotAccessToken(params: {
   githubToken: string;
   signal?: AbortSignal;
 }): Promise<string> {
-  if (
-    cachedCopilotJwt &&
-    cachedCopilotJwt.expiresAt > Date.now() + 60_000
-  ) {
+  if (cachedCopilotJwt && cachedCopilotJwt.expiresAt > Date.now() + 60_000) {
     return cachedCopilotJwt.token;
   }
   const result = await fetchCopilotJwt(params.githubToken, params.signal);
   return result.token;
 }
-
 
 type CopilotModelEntry = {
   id?: string;
@@ -906,7 +902,8 @@ function isCopilotModelUsable(m: CopilotModelEntry): boolean {
     return false;
   }
   // Exclude internal duplicate entries hidden from the model picker.
-  if (m.model_picker_enabled === false && !m.model_picker_category) return false;
+  if (m.model_picker_enabled === false && !m.model_picker_category)
+    return false;
   // Exclude Codex IDE-only models that are not usable via the general API.
   if (typeof m.id === "string" && /-codex($|-)/i.test(m.id)) return false;
   // Exclude VS Code internal models (oswe = fine-tuned for VS Code Copilot)
@@ -927,7 +924,7 @@ function resolveCopilotModelProtocol(
   return undefined; // chat-compatible or both → inherit group default
 }
 
-export type CopilotModelInfo = {
+type CopilotModelInfo = {
   id: string;
   name: string;
   protocol?: ProviderProtocol;
@@ -953,7 +950,9 @@ export async function fetchCopilotModelList(params: {
     data?: CopilotModelEntry[];
   };
   return (payload.data || [])
-    .filter((m) => typeof m.id === "string" && m.id.trim() && isCopilotModelUsable(m))
+    .filter(
+      (m) => typeof m.id === "string" && m.id.trim() && isCopilotModelUsable(m),
+    )
     .map((m) => ({
       id: m.id!.trim(),
       name: (m.name || m.id || "").trim(),
@@ -1253,7 +1252,7 @@ async function uploadAttachmentForResponses(params: {
   throw new Error(lastError);
 }
 
-export async function uploadFilesForResponses(params: {
+async function uploadFilesForResponses(params: {
   apiBase: string;
   apiKey: string;
   attachments: ChatFileAttachment[] | undefined;
@@ -1351,13 +1350,14 @@ function buildMessages(
 }
 
 export function prepareChatRequest(params: ChatParams): PreparedChatRequest {
-  const { apiBase, apiKey, authMode, model, systemPrompt, providerProtocol } = getApiConfig({
-    apiBase: params.apiBase,
-    apiKey: params.apiKey,
-    authMode: params.authMode,
-    model: params.model,
-    providerProtocol: params.providerProtocol,
-  });
+  const { apiBase, apiKey, authMode, model, systemPrompt, providerProtocol } =
+    getApiConfig({
+      apiBase: params.apiBase,
+      apiKey: params.apiKey,
+      authMode: params.authMode,
+      model: params.model,
+      providerProtocol: params.providerProtocol,
+    });
   const rawMessages = buildMessages(params, systemPrompt);
   const inputCap = applyModelInputTokenCap(
     rawMessages,
@@ -1874,7 +1874,7 @@ function emptyReasoningPayload() {
   return { extra: {}, omitTemperature: false } as const;
 }
 
-export function buildReasoningPayload(
+function buildReasoningPayload(
   reasoning: ReasoningConfig | undefined,
   useResponses: boolean,
   modelName?: string,
@@ -2027,7 +2027,11 @@ function buildAnthropicMessagesPayload(params: {
 }): Record<string, unknown> {
   const systemParts = params.messages
     .filter((m) => m.role === "system")
-    .map((m) => (typeof m.content === "string" ? m.content : m.content.map((c) => ("text" in c ? c.text : "")).join("")))
+    .map((m) =>
+      typeof m.content === "string"
+        ? m.content
+        : m.content.map((c) => ("text" in c ? c.text : "")).join(""),
+    )
     .filter(Boolean);
   const nonSystemMessages = params.messages
     .filter((m) => m.role !== "system")
@@ -2039,10 +2043,16 @@ function buildAnthropicMessagesPayload(params: {
           : m.content.map((c) =>
               c.type === "image_url"
                 ? (() => {
-                    const parsed = parseDataUrl((c as { image_url: { url: string } }).image_url.url);
+                    const parsed = parseDataUrl(
+                      (c as { image_url: { url: string } }).image_url.url,
+                    );
                     return {
                       type: "image",
-                      source: { type: "base64", media_type: parsed?.mimeType || "image/jpeg", data: parsed?.data || "" },
+                      source: {
+                        type: "base64",
+                        media_type: parsed?.mimeType || "image/jpeg",
+                        data: parsed?.data || "",
+                      },
                     };
                   })()
                 : { type: "text", text: (c as { text: string }).text },
@@ -2093,16 +2103,26 @@ async function parseAnthropicStreamResponse(
             type?: string;
             delta?: { type?: string; text?: string };
             usage?: { output_tokens?: number };
-            message?: { usage?: { input_tokens?: number; output_tokens?: number } };
+            message?: {
+              usage?: { input_tokens?: number; output_tokens?: number };
+            };
           };
-          if (parsed.type === "content_block_delta" && parsed.delta?.type === "text_delta" && parsed.delta.text) {
+          if (
+            parsed.type === "content_block_delta" &&
+            parsed.delta?.type === "text_delta" &&
+            parsed.delta.text
+          ) {
             fullText += parsed.delta.text;
             onDelta(parsed.delta.text);
           }
           if (parsed.type === "message_delta" && parsed.usage && onUsage) {
             const outputTokens = parsed.usage.output_tokens ?? 0;
             if (outputTokens > 0) {
-              onUsage({ promptTokens: 0, completionTokens: outputTokens, totalTokens: outputTokens });
+              onUsage({
+                promptTokens: 0,
+                completionTokens: outputTokens,
+                totalTokens: outputTokens,
+              });
             }
           }
         } catch (_err) {
@@ -2124,7 +2144,12 @@ function buildGeminiNativePayload(params: {
 }): Record<string, unknown> {
   const systemParts = params.messages
     .filter((m) => m.role === "system")
-    .map((m) => ({ text: typeof m.content === "string" ? m.content : m.content.map((c) => ("text" in c ? c.text : "")).join("") }))
+    .map((m) => ({
+      text:
+        typeof m.content === "string"
+          ? m.content
+          : m.content.map((c) => ("text" in c ? c.text : "")).join(""),
+    }))
     .filter((p) => p.text);
   const contents = params.messages
     .filter((m) => m.role !== "system")
@@ -2136,8 +2161,15 @@ function buildGeminiNativePayload(params: {
           : m.content.map((c) =>
               c.type === "image_url"
                 ? (() => {
-                    const parsed = parseDataUrl((c as { image_url: { url: string } }).image_url.url);
-                    return { inline_data: { mime_type: parsed?.mimeType || "image/jpeg", data: parsed?.data || "" } };
+                    const parsed = parseDataUrl(
+                      (c as { image_url: { url: string } }).image_url.url,
+                    );
+                    return {
+                      inline_data: {
+                        mime_type: parsed?.mimeType || "image/jpeg",
+                        data: parsed?.data || "",
+                      },
+                    };
                   })()
                 : { text: (c as { text: string }).text },
             ),
@@ -2181,10 +2213,19 @@ async function parseGeminiNativeStreamResponse(
         if (!data || data === "[DONE]") continue;
         try {
           const parsed = JSON.parse(data) as {
-            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-            usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
+            candidates?: Array<{
+              content?: { parts?: Array<{ text?: string }> };
+            }>;
+            usageMetadata?: {
+              promptTokenCount?: number;
+              candidatesTokenCount?: number;
+              totalTokenCount?: number;
+            };
           };
-          const text = parsed.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+          const text =
+            parsed.candidates?.[0]?.content?.parts
+              ?.map((p) => p.text || "")
+              .join("") || "";
           if (text) {
             fullText += text;
             onDelta(text);
@@ -2194,7 +2235,8 @@ async function parseGeminiNativeStreamResponse(
             if (total > 0) {
               onUsage({
                 promptTokens: parsed.usageMetadata.promptTokenCount ?? 0,
-                completionTokens: parsed.usageMetadata.candidatesTokenCount ?? 0,
+                completionTokens:
+                  parsed.usageMetadata.candidatesTokenCount ?? 0,
                 totalTokens: total,
               });
             }
@@ -2399,7 +2441,7 @@ function getTemperatureRecoveryPolicy(
   return null;
 }
 
-export type RequestAuthState = {
+type RequestAuthState = {
   mode: ModelProviderAuthMode;
   token: string;
   codex?: {
@@ -2434,7 +2476,8 @@ async function refreshCodexAuthState(
   if (state.mode !== "codex_auth") return state;
   const authPath = state.codex?.authPath || resolveCodexAuthPath();
   const refreshToken =
-    state.codex?.refreshToken || extractCodexRefreshToken(await loadCodexAuthJson(authPath));
+    state.codex?.refreshToken ||
+    extractCodexRefreshToken(await loadCodexAuthJson(authPath));
   if (!refreshToken) {
     throw new Error(
       "codex auth refresh token missing. Please run `codex login` to restore ~/.codex/auth.json.",
@@ -2506,7 +2549,10 @@ async function postWithTemperatureFallback(params: {
     if (authState.mode === "codex_auth" && authState.codex?.refreshToken) {
       authState = await refreshCodexAuthState(authState, params.signal);
       res = await send(requestPayload, authState);
-    } else if (authState.mode === "copilot_auth" && authState.copilot?.githubToken) {
+    } else if (
+      authState.mode === "copilot_auth" &&
+      authState.copilot?.githubToken
+    ) {
       authState = await refreshCopilotAuthState(authState, params.signal);
       res = await send(requestPayload, authState);
     }
@@ -2527,7 +2573,10 @@ async function postWithTemperatureFallback(params: {
       if (authState.mode === "codex_auth" && authState.codex?.refreshToken) {
         authState = await refreshCodexAuthState(authState, params.signal);
         res = await send(fallbackPayload, authState);
-      } else if (authState.mode === "copilot_auth" && authState.copilot?.githubToken) {
+      } else if (
+        authState.mode === "copilot_auth" &&
+        authState.copilot?.githubToken
+      ) {
         authState = await refreshCopilotAuthState(authState, params.signal);
         res = await send(fallbackPayload, authState);
       }
@@ -2537,10 +2586,14 @@ async function postWithTemperatureFallback(params: {
       return res;
     }
     const secondErr = await res.text();
-    throw new Error(`${res.status} ${res.statusText} (${params.url}) - ${secondErr}`);
+    throw new Error(
+      `${res.status} ${res.statusText} (${params.url}) - ${secondErr}`,
+    );
   }
 
-  throw new Error(`${res.status} ${res.statusText} (${params.url}) - ${firstErr}`);
+  throw new Error(
+    `${res.status} ${res.statusText} (${params.url}) - ${firstErr}`,
+  );
 }
 
 function parseStatusFromErrorMessage(message: string): number | null {
@@ -2584,7 +2637,7 @@ function getReasoningRecoverySelection(params: {
   return undefined;
 }
 
-export async function postWithReasoningFallback(params: {
+async function postWithReasoningFallback(params: {
   url: string;
   auth: RequestAuthState;
   modelName?: string;
@@ -2658,7 +2711,7 @@ function extractResponsesOutputText(data: {
   return firstText || JSON.stringify(data);
 }
 
-export async function resolveRequestAuthState(params: {
+async function resolveRequestAuthState(params: {
   authMode: ModelProviderAuthMode;
   apiKey: string;
   signal?: AbortSignal;
@@ -2713,7 +2766,18 @@ async function callNativeProtocol(params: {
   onDelta?: (delta: string) => void;
   onUsage?: (usage: UsageStats) => void;
 }): Promise<string> {
-  const { protocol, apiBase, apiKey, model, messages, effectiveMaxTokens, effectiveTemperature, signal, onDelta, onUsage } = params;
+  const {
+    protocol,
+    apiBase,
+    apiKey,
+    model,
+    messages,
+    effectiveMaxTokens,
+    effectiveTemperature,
+    signal,
+    onDelta,
+    onUsage,
+  } = params;
   const isStreaming = Boolean(onDelta);
   const url =
     protocol === "anthropic_messages"
@@ -2722,9 +2786,24 @@ async function callNativeProtocol(params: {
   const headers = buildProviderTransportHeaders({ protocol, apiKey });
   const body =
     protocol === "anthropic_messages"
-      ? buildAnthropicMessagesPayload({ model, messages, effectiveMaxTokens, effectiveTemperature, stream: isStreaming })
-      : buildGeminiNativePayload({ messages, effectiveMaxTokens, effectiveTemperature });
-  const res = await getFetch()(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+      ? buildAnthropicMessagesPayload({
+          model,
+          messages,
+          effectiveMaxTokens,
+          effectiveTemperature,
+          stream: isStreaming,
+        })
+      : buildGeminiNativePayload({
+          messages,
+          effectiveMaxTokens,
+          effectiveTemperature,
+        });
+  const res = await getFetch()(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
   if (!res.ok) {
     throw new Error(`${res.status} (${url}) - ${await res.text()}`);
   }
@@ -2735,11 +2814,21 @@ async function callNativeProtocol(params: {
       : parseGeminiNativeStreamResponse(res.body, onDelta!, onUsage);
   }
   if (protocol === "anthropic_messages") {
-    const data = (await res.json()) as { content?: Array<{ type?: string; text?: string }> };
-    return data?.content?.find((c) => c.type === "text")?.text ?? JSON.stringify(data);
+    const data = (await res.json()) as {
+      content?: Array<{ type?: string; text?: string }>;
+    };
+    return (
+      data?.content?.find((c) => c.type === "text")?.text ??
+      JSON.stringify(data)
+    );
   }
-  const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-  return data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") ?? JSON.stringify(data);
+  const data = (await res.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  return (
+    data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") ??
+    JSON.stringify(data)
+  );
 }
 
 /**
@@ -2747,11 +2836,18 @@ async function callNativeProtocol(params: {
  */
 export async function callLLM(params: ChatParams): Promise<string> {
   const prepared = prepareChatRequest(params);
-  const { apiBase, apiKey, authMode, model, messages, providerProtocol } = prepared;
-  if (providerProtocol === "anthropic_messages" || providerProtocol === "gemini_native") {
+  const { apiBase, apiKey, authMode, model, messages, providerProtocol } =
+    prepared;
+  if (
+    providerProtocol === "anthropic_messages" ||
+    providerProtocol === "gemini_native"
+  ) {
     return callNativeProtocol({
       protocol: providerProtocol,
-      apiBase, apiKey, model, messages,
+      apiBase,
+      apiKey,
+      model,
+      messages,
       effectiveMaxTokens: normalizeMaxTokens(params.maxTokens),
       effectiveTemperature: normalizeTemperature(params.temperature),
       signal: params.signal,
@@ -2774,10 +2870,13 @@ export async function callLLM(params: ChatParams): Promise<string> {
     apiKey,
     signal: params.signal,
   });
-  const useResponses = providerProtocol === "responses_api" || providerProtocol === "codex_responses";
+  const useResponses =
+    providerProtocol === "responses_api" ||
+    providerProtocol === "codex_responses";
   // Only upload files via /v1/files for providers that actually host that endpoint.
   // Third-party relays using responses_api get inline base64 instead (via buildResponsesInput).
-  const canUploadFiles = useResponses && providerSupportsResponsesEndpoint(apiBase);
+  const canUploadFiles =
+    useResponses && providerSupportsResponsesEndpoint(apiBase);
   const responseFileIds = canUploadFiles
     ? await uploadFilesForResponses({
         apiBase,
@@ -2789,8 +2888,18 @@ export async function callLLM(params: ChatParams): Promise<string> {
   const effectiveTemperature = normalizeTemperature(params.temperature);
   const effectiveMaxTokens = normalizeMaxTokens(params.maxTokens);
 
-  const url = resolveProviderTransportEndpoint({ protocol: providerProtocol, apiBase, model, stream: false, authMode });
-  const requestHeaders = buildProviderTransportHeaders({ protocol: providerProtocol, apiKey: auth.token, authMode });
+  const url = resolveProviderTransportEndpoint({
+    protocol: providerProtocol,
+    apiBase,
+    model,
+    stream: false,
+    authMode,
+  });
+  const requestHeaders = buildProviderTransportHeaders({
+    protocol: providerProtocol,
+    apiKey: auth.token,
+    authMode,
+  });
   const buildPayload = createChatPayloadBuilder({
     model,
     messages,
@@ -2836,11 +2945,18 @@ export async function callLLMStream(
   onUsage?: (usage: UsageStats) => void,
 ): Promise<string> {
   const prepared = prepareChatRequest(params);
-  const { apiBase, apiKey, authMode, model, messages, providerProtocol } = prepared;
-  if (providerProtocol === "anthropic_messages" || providerProtocol === "gemini_native") {
+  const { apiBase, apiKey, authMode, model, messages, providerProtocol } =
+    prepared;
+  if (
+    providerProtocol === "anthropic_messages" ||
+    providerProtocol === "gemini_native"
+  ) {
     return callNativeProtocol({
       protocol: providerProtocol,
-      apiBase, apiKey, model, messages,
+      apiBase,
+      apiKey,
+      model,
+      messages,
       effectiveMaxTokens: normalizeMaxTokens(params.maxTokens),
       effectiveTemperature: normalizeTemperature(params.temperature),
       signal: params.signal,
@@ -2853,15 +2969,22 @@ export async function callLLMStream(
     apiKey,
     signal: params.signal,
   });
-  if (authMode === "codex_auth" && Array.isArray(params.attachments) && params.attachments.length) {
+  if (
+    authMode === "codex_auth" &&
+    Array.isArray(params.attachments) &&
+    params.attachments.length
+  ) {
     throw new Error(
       "codex auth currently does not support file attachments in this plugin v1.",
     );
   }
-  const useResponses = providerProtocol === "responses_api" || providerProtocol === "codex_responses";
+  const useResponses =
+    providerProtocol === "responses_api" ||
+    providerProtocol === "codex_responses";
   // Only upload files via /v1/files for providers that actually host that endpoint.
   // Third-party relays using responses_api get inline base64 instead (via buildResponsesInput).
-  const canUploadFiles = useResponses && providerSupportsResponsesEndpoint(apiBase);
+  const canUploadFiles =
+    useResponses && providerSupportsResponsesEndpoint(apiBase);
   const responseFileIds = canUploadFiles
     ? await uploadFilesForResponses({
         apiBase,
@@ -2873,8 +2996,18 @@ export async function callLLMStream(
   const effectiveTemperature = normalizeTemperature(params.temperature);
   const effectiveMaxTokens = normalizeMaxTokens(params.maxTokens);
 
-  const url = resolveProviderTransportEndpoint({ protocol: providerProtocol, apiBase, model, stream: true, authMode });
-  const requestHeaders = buildProviderTransportHeaders({ protocol: providerProtocol, apiKey: auth.token, authMode });
+  const url = resolveProviderTransportEndpoint({
+    protocol: providerProtocol,
+    apiBase,
+    model,
+    stream: true,
+    authMode,
+  });
+  const requestHeaders = buildProviderTransportHeaders({
+    protocol: providerProtocol,
+    apiKey: auth.token,
+    authMode,
+  });
   const buildPayload = createChatPayloadBuilder({
     model,
     messages,
@@ -2930,50 +3063,15 @@ export function checkEmbeddingAvailability(): boolean {
   return Boolean(resolveSeparateEmbeddingApiKey(embeddingProvider));
 }
 
-/**
- * Diagnostic: returns a human-readable reason why embeddings are unavailable.
- * Used by the preference UI to show actionable guidance.
- */
-export function getEmbeddingUnavailableReason(): string | null {
-  const embeddingProvider = (getPref("embeddingProvider") || "").trim();
-  const embeddingApiBase = (getPref("embeddingApiBase") || "").trim();
-
-  if (!embeddingApiBase) {
-    return "No embedding provider configured. Select a provider in Settings → Customization → Semantic Search.";
-  }
-
-  // Custom/local providers may not need a key
-  if (embeddingProvider === "custom") return null;
-  if (resolveSeparateEmbeddingApiKey(embeddingProvider)) return null;
-  return `No API key found for your ${embeddingProvider} embedding provider. Add a key in Settings → Customization → Semantic Search.`;
-}
-
-/**
- * Error thrown when the configured provider does not support embeddings.
- * Callers can check `instanceof EmbeddingUnsupportedError` to distinguish
- * from network or API errors and show appropriate user guidance.
- */
-export class EmbeddingUnsupportedError extends Error {
-  providerLabel: string;
-  constructor(providerLabel: string) {
-    super(
-      `Provider "${providerLabel}" does not support embeddings. ` +
-        "Configure a separate embedding provider in Settings → Customization.",
-    );
-    this.name = "EmbeddingUnsupportedError";
-    this.providerLabel = providerLabel;
-  }
-}
-
-export async function callEmbeddings(
-  input: string[],
-): Promise<number[][]> {
+export async function callEmbeddings(input: string[]): Promise<number[][]> {
   const resolvedEmbedding = getResolvedEmbeddingConfig();
 
   const apiBase = resolvedEmbedding.apiBase;
   const apiKey = resolvedEmbedding.apiKey;
   const embeddingModel = resolvedEmbedding.model;
-  const embeddingProvider = (getPref("embeddingProvider") || "").toString().trim();
+  const embeddingProvider = (getPref("embeddingProvider") || "")
+    .toString()
+    .trim();
 
   // Custom providers (local/ollama) may not need an API key
   if (!apiKey && embeddingProvider !== "custom") {
@@ -3016,7 +3114,7 @@ export async function callEmbeddings(
 /**
  * Parse SSE stream response
  */
-export async function parseStreamResponse(
+async function parseStreamResponse(
   body: ReadableStream<Uint8Array>,
   onDelta: (delta: string) => void,
   onReasoning?: (event: ReasoningEvent) => void,
@@ -3056,7 +3154,8 @@ export async function parseStreamResponse(
           if (parsed.usage && onUsage) {
             const totalTokens =
               parsed.usage.total_tokens ??
-              (parsed.usage.prompt_tokens ?? 0) + (parsed.usage.completion_tokens ?? 0);
+              (parsed.usage.prompt_tokens ?? 0) +
+                (parsed.usage.completion_tokens ?? 0);
             if (totalTokens > 0) {
               onUsage({
                 promptTokens: parsed.usage.prompt_tokens ?? 0,
@@ -3545,7 +3644,9 @@ async function parseResponsesStream(
             );
             const u = parsed.response?.usage;
             if (u && onUsage) {
-              const total = u.total_tokens ?? (u.input_tokens ?? 0) + (u.output_tokens ?? 0);
+              const total =
+                u.total_tokens ??
+                (u.input_tokens ?? 0) + (u.output_tokens ?? 0);
               if (total > 0) {
                 onUsage({
                   promptTokens: u.input_tokens ?? 0,
@@ -3587,9 +3688,7 @@ async function parseResponsesStream(
 
   return fullText;
 }
-function parseDataUrl(
-  url: string,
-): { mimeType: string; data: string } | null {
+function parseDataUrl(url: string): { mimeType: string; data: string } | null {
   const match = /^data:([^;,]+);base64,(.+)$/i.exec(url.trim());
   if (!match) return null;
   return {

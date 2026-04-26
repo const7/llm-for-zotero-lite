@@ -42,8 +42,6 @@ export type StoredChatMessage = {
     | "timeout"
     | "error"
     | null;
-  webchatChatUrl?: string;
-  webchatChatId?: string;
   reasoningSummary?: string;
   reasoningDetails?: string;
 };
@@ -128,7 +126,9 @@ async function rebuildChatMessagesTableIfNeeded(): Promise<void> {
   if (!columnsToCopy.length) return;
 
   await Zotero.DB.queryAsync(`DROP INDEX IF EXISTS ${CHAT_MESSAGES_INDEX}`);
-  await Zotero.DB.queryAsync(`DROP TABLE IF EXISTS ${TEMP_CHAT_MESSAGES_TABLE}`);
+  await Zotero.DB.queryAsync(
+    `DROP TABLE IF EXISTS ${TEMP_CHAT_MESSAGES_TABLE}`,
+  );
   await Zotero.DB.queryAsync(
     `ALTER TABLE ${CHAT_MESSAGES_TABLE}
      RENAME TO ${TEMP_CHAT_MESSAGES_TABLE}`,
@@ -140,7 +140,9 @@ async function rebuildChatMessagesTableIfNeeded(): Promise<void> {
      SELECT ${columnsToCopy.join(", ")}
      FROM ${TEMP_CHAT_MESSAGES_TABLE}`,
   );
-  await Zotero.DB.queryAsync(`DROP TABLE IF EXISTS ${TEMP_CHAT_MESSAGES_TABLE}`);
+  await Zotero.DB.queryAsync(
+    `DROP TABLE IF EXISTS ${TEMP_CHAT_MESSAGES_TABLE}`,
+  );
 }
 
 function normalizeConversationKey(conversationKey: number): number | null {
@@ -265,12 +267,12 @@ export async function loadConversation(
   )) as
     | Array<{
         role: unknown;
-      text: unknown;
-      timestamp: unknown;
-      selectedTextsJson?: unknown;
-      selectedTextSourcesJson?: unknown;
-      selectedTextPaperContextsJson?: unknown;
-      paperContextsJson?: unknown;
+        text: unknown;
+        timestamp: unknown;
+        selectedTextsJson?: unknown;
+        selectedTextSourcesJson?: unknown;
+        selectedTextPaperContextsJson?: unknown;
+        paperContextsJson?: unknown;
         fullTextPaperContextsJson?: unknown;
         screenshotImages?: unknown;
         attachmentsJson?: unknown;
@@ -461,16 +463,6 @@ export async function loadConversation(
       } catch (_err) {
         attachments = undefined;
       }
-    }
-    if (!attachments?.length && screenshotImages?.length) {
-      attachments = screenshotImages.map((url, index) => ({
-        id: `screenshot-image-${index + 1}`,
-        name: `Image ${index + 1}.png`,
-        mimeType: "image/png",
-        sizeBytes: 0,
-        category: "image" as const,
-        imageDataUrl: url,
-      }));
     }
     messages.push({
       role,

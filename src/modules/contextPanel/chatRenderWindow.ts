@@ -1,7 +1,7 @@
 const PROGRESSIVE_CHAT_RENDER_THRESHOLD = 48;
 export const PROGRESSIVE_CHAT_RENDER_WINDOW_SIZE = 24;
 export const PROGRESSIVE_CHAT_RENDER_BATCH_SIZE = 24;
-export const OLDER_CHAT_BACKFILL_TOP_THRESHOLD_PX = 16;
+const OLDER_CHAT_BACKFILL_TOP_THRESHOLD_PX = 16;
 
 export function resolveChatRenderStartIndex(params: {
   historyLength: number;

@@ -47,7 +47,7 @@ describe("sendFlowController", function () {
       body: {} as Element,
       inputBox,
       getItem: () => item,
-      closeSlashMenu: () => undefined,
+      closeAddMenu: () => undefined,
       closePaperPicker: () => undefined,
       getSelectedTextContextEntries: () => selectedTextContexts,
       getSelectedPaperContexts: () => [selectedPaper],
@@ -237,6 +237,9 @@ describe("sendFlowController", function () {
     assert.equal(counts.resolvePdfPaperAttachmentsCalls, 0);
     assert.equal(counts.renderPdfPagesAsImagesCalls, 0);
     assert.equal(counts.uploadPdfForProviderCalls, 0);
-    assert.equal(lastSend.lastSentQuestion, "summarize the paper (with selected text) [files=0]");
+    assert.equal(
+      lastSend.lastSentQuestion,
+      "summarize the paper (with selected text) [files=0]",
+    );
   });
 });

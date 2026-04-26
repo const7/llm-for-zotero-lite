@@ -122,7 +122,6 @@ import {
   applySelectedTextPreview,
   formatSelectedTextContextPageLabel,
   getSelectedTextContextEntries,
-  getSelectedTextContexts,
   getSelectedTextExpandedIndex,
   resolveContextSourceItem,
   setSelectedTextContextEntries,
@@ -221,10 +220,10 @@ import {
 } from "./portalScope";
 import { getPanelDomRefs } from "./setupHandlers/domRefs";
 import {
+  ADD_MENU_OPEN_CLASS,
   MODEL_MENU_OPEN_CLASS,
   REASONING_MENU_OPEN_CLASS,
   RETRY_MODEL_MENU_OPEN_CLASS,
-  SLASH_MENU_OPEN_CLASS,
   isFloatingMenuOpen,
   positionFloatingMenu,
   setFloatingMenuOpen,
@@ -280,7 +279,7 @@ type ConversationHistoryRefreshMode = "selection" | "mutation" | "menu-open";
 /** Monotonic counter incremented every time setupHandlers rebuilds a panel. */
 let setupHandlersGeneration = 0;
 
-export type SetupHandlersHooks = {
+type SetupHandlersHooks = {
   onConversationHistoryChanged?: () => void;
   onWebChatModeChanged?: (isWebChat: boolean) => void;
   clearWebChatNewChatIntent?: () => void;
@@ -323,9 +322,9 @@ export function setupHandlers(
     historyUndoBtn,
     uploadBtn,
     uploadInput,
-    slashMenu,
-    slashUploadOption,
-    slashReferenceOption,
+    addMenu,
+    addUploadOption,
+    addReferenceOption,
     imagePreview,
     selectedContextList,
     previewStrip,
@@ -420,7 +419,6 @@ export function setupHandlers(
       ztoolkit.log("LLM: conversation history hook failed", err);
     }
   };
-  const isPaperMode = () => Boolean(item);
   const getCurrentLibraryID = (): number => {
     const fromItem =
       item && Number.isFinite(item.libraryID) && item.libraryID > 0
@@ -461,7 +459,9 @@ export function setupHandlers(
     const libraryID = getCurrentLibraryID();
     panelRoot.dataset.libraryId = libraryID > 0 ? `${libraryID}` : "";
     panelRoot.dataset.conversationKind = item ? "paper" : "";
-    const currentBasePaperItemID = Number(resolveCurrentPaperBaseItem()?.id || 0);
+    const currentBasePaperItemID = Number(
+      resolveCurrentPaperBaseItem()?.id || 0,
+    );
     panelRoot.dataset.basePaperItemId =
       Number.isFinite(currentBasePaperItemID) && currentBasePaperItemID > 0
         ? `${Math.floor(currentBasePaperItemID)}`
@@ -678,14 +678,14 @@ export function setupHandlers(
     historySearchDocumentTasks.clear();
     closeHistoryRowMenu();
   };
-  const closeSlashMenu = () => {
-    slashMenuActiveIndex = -1;
-    if (slashMenu) {
-      Array.from(slashMenu.querySelectorAll(".llm-action-picker-item")).forEach(
+  const closeAddMenu = () => {
+    addMenuActiveIndex = -1;
+    if (addMenu) {
+      Array.from(addMenu.querySelectorAll(".llm-action-picker-item")).forEach(
         (el) => (el as HTMLButtonElement).removeAttribute("aria-selected"),
       );
     }
-    setFloatingMenuOpen(slashMenu, SLASH_MENU_OPEN_CLASS, false);
+    setFloatingMenuOpen(addMenu, ADD_MENU_OPEN_CLASS, false);
     if (uploadBtn) {
       uploadBtn.setAttribute("aria-expanded", "false");
     }
@@ -1092,7 +1092,7 @@ export function setupHandlers(
       e.stopPropagation();
       try {
         closeRetryModelMenu();
-        closeSlashMenu();
+        closeAddMenu();
         closeResponseMenu();
         closePromptMenu();
         closeHistoryNewMenu();
@@ -1945,7 +1945,8 @@ export function setupHandlers(
     const ownerDoc = body.ownerDocument;
     if (!ownerDoc) return;
     const { currentModel } = getSelectedModelInfo();
-    const imageContextUnsupported = isImageContextUnsupportedModel(currentModel);
+    const imageContextUnsupported =
+      isImageContextUnsupportedModel(currentModel);
     let selectedImages = selectedImageCache.get(item.id) || [];
     if (imageContextUnsupported && selectedImages.length) {
       clearSelectedImageState(item.id);
@@ -2054,11 +2055,7 @@ export function setupHandlers(
           }
           updateImagePreviewPreservingScroll();
           if (status) {
-            setStatus(
-              status,
-              `Image removed (${nextImages.length})`,
-              "ready",
-            );
+            setStatus(status, `Image removed (${nextImages.length})`, "ready");
           }
         });
         thumbItem.append(thumbBtn, removeOneBtn);
@@ -3744,7 +3741,7 @@ export function setupHandlers(
       closeModelMenu();
       closeReasoningMenu();
       closeRetryModelMenu();
-      closeSlashMenu();
+      closeAddMenu();
       closeResponseMenu();
       closePromptMenu();
       closeHistoryMenu();
@@ -3805,7 +3802,7 @@ export function setupHandlers(
         closeModelMenu();
         closeReasoningMenu();
         closeRetryModelMenu();
-        closeSlashMenu();
+        closeAddMenu();
         closeResponseMenu();
         closePromptMenu();
         closeHistoryNewMenu();
@@ -3966,7 +3963,7 @@ export function setupHandlers(
       closeModelMenu();
       closeReasoningMenu();
       closeRetryModelMenu();
-      closeSlashMenu();
+      closeAddMenu();
       closeResponseMenu();
       closePromptMenu();
       const mouse = e as MouseEvent;
@@ -4023,8 +4020,7 @@ export function setupHandlers(
   const getSelectedModelInfo = () => {
     const { choices, groupedChoices } = getModelChoices();
     const selectedEntry = item ? getSelectedModelEntryForItem(item.id) : null;
-    const currentModel =
-      selectedEntry?.model || choices[0]?.model || "default";
+    const currentModel = selectedEntry?.model || choices[0]?.model || "default";
     const currentModelDisplay =
       selectedEntry?.displayModelLabel || currentModel;
     const currentModelHint = selectedEntry
@@ -4752,15 +4748,17 @@ export function setupHandlers(
             entry.apiBase,
           );
           const retryAdvanced = getAdvancedModelParams(entry.entryId);
-          await retryLatestAssistantResponse(
-            body,
-            item,
-            entry.model,
-            entry.apiBase,
-            entry.apiKey,
-            retryReasoning,
-            retryAdvanced,
-          );
+          await retryLatestAssistantResponse(body, item, {
+            model: entry.model,
+            apiBase: entry.apiBase,
+            apiKey: entry.apiKey,
+            authMode: entry.authMode,
+            providerProtocol: entry.providerProtocol,
+            modelEntryId: entry.entryId,
+            modelProviderLabel: entry.providerLabel,
+            reasoning: retryReasoning,
+            advanced: retryAdvanced,
+          });
         };
         option.addEventListener("click", (e: Event) => {
           void runRetry(e);
@@ -5537,7 +5535,7 @@ export function setupHandlers(
     // isWebChatMode may not be ready during initial render
   }
   restoreDraftInputForCurrentConversation();
-  if (isPaperMode()) {
+  if (item) {
     void switchPaperConversation().catch((err) => {
       ztoolkit.log("LLM: Failed to restore paper conversation session", err);
     });
@@ -5745,51 +5743,51 @@ export function setupHandlers(
     }
   };
   // ── Context action menu keyboard navigation ───────────────────────────────
-  let slashMenuActiveIndex = -1;
-  const getVisibleSlashItems = (): HTMLButtonElement[] => {
-    if (!slashMenu) return [];
+  let addMenuActiveIndex = -1;
+  const getVisibleAddItems = (): HTMLButtonElement[] => {
+    if (!addMenu) return [];
     const win = body.ownerDocument?.defaultView;
     return Array.from(
-      slashMenu.querySelectorAll(".llm-action-picker-item"),
+      addMenu.querySelectorAll(".llm-action-picker-item"),
     ).filter((el) => {
       const style = win?.getComputedStyle(el as Element);
       return style ? style.display !== "none" : true;
     }) as HTMLButtonElement[];
   };
-  const updateSlashMenuSelection = () => {
-    const items = getVisibleSlashItems();
+  const updateAddMenuSelection = () => {
+    const items = getVisibleAddItems();
     items.forEach((item, idx) => {
       item.setAttribute(
         "aria-selected",
-        idx === slashMenuActiveIndex ? "true" : "false",
+        idx === addMenuActiveIndex ? "true" : "false",
       );
     });
-    if (slashMenuActiveIndex >= 0 && items[slashMenuActiveIndex] && slashMenu) {
-      const activeItem = items[slashMenuActiveIndex];
+    if (addMenuActiveIndex >= 0 && items[addMenuActiveIndex] && addMenu) {
+      const activeItem = items[addMenuActiveIndex];
       // Walk offsetParent chain to get offset relative to the scroll container
       let offsetTop = 0;
       let el: HTMLElement | null = activeItem;
-      while (el && el !== slashMenu) {
+      while (el && el !== addMenu) {
         offsetTop += el.offsetTop;
         el = el.offsetParent as HTMLElement | null;
       }
       const itemBottom = offsetTop + activeItem.offsetHeight;
-      if (offsetTop < slashMenu.scrollTop) {
-        slashMenu.scrollTop = offsetTop;
-      } else if (itemBottom > slashMenu.scrollTop + slashMenu.clientHeight) {
-        slashMenu.scrollTop = itemBottom - slashMenu.clientHeight;
+      if (offsetTop < addMenu.scrollTop) {
+        addMenu.scrollTop = offsetTop;
+      } else if (itemBottom > addMenu.scrollTop + addMenu.clientHeight) {
+        addMenu.scrollTop = itemBottom - addMenu.clientHeight;
       }
     }
   };
-  const openSlashMenuWithSelection = () => {
-    slashMenuActiveIndex = 0;
-    setFloatingMenuOpen(slashMenu, SLASH_MENU_OPEN_CLASS, true);
-    updateSlashMenuSelection();
+  const openAddMenuWithSelection = () => {
+    addMenuActiveIndex = 0;
+    setFloatingMenuOpen(addMenu, ADD_MENU_OPEN_CLASS, true);
+    updateAddMenuSelection();
   };
-  const selectActiveSlashMenuItem = () => {
-    const items = getVisibleSlashItems();
-    if (slashMenuActiveIndex >= 0 && items[slashMenuActiveIndex]) {
-      items[slashMenuActiveIndex].click();
+  const selectActiveAddMenuItem = () => {
+    const items = getVisibleAddItems();
+    if (addMenuActiveIndex >= 0 && items[addMenuActiveIndex]) {
+      items[addMenuActiveIndex].click();
     }
   };
 
@@ -5813,16 +5811,12 @@ export function setupHandlers(
     if (contentType.startsWith("image/")) return "figure";
     return "other";
   }
-  function resolvePickerKindIcon(
-    kind: "pdf" | "figure" | "other",
-  ): string {
+  function resolvePickerKindIcon(kind: "pdf" | "figure" | "other"): string {
     if (kind === "pdf") return "📚";
     if (kind === "figure") return "🖼";
     return "📎";
   }
-  function resolvePickerKindLabel(
-    kind: "pdf" | "figure" | "other",
-  ): string {
+  function resolvePickerKindLabel(kind: "pdf" | "figure" | "other"): string {
     if (kind === "pdf") return "PDF";
     if (kind === "figure") return "Figure";
     return "File";
@@ -6599,12 +6593,14 @@ export function setupHandlers(
       typeof (attachment as { getFilePath?: () => string | undefined })
         .getFilePath === "function"
     ) {
-      const filePath = (attachment as { getFilePath: () => string | undefined })
-        .getFilePath();
+      const filePath = (
+        attachment as { getFilePath: () => string | undefined }
+      ).getFilePath();
       if (filePath) return filePath;
     }
-    const attachmentPath = (attachment as unknown as { attachmentPath?: string })
-      .attachmentPath;
+    const attachmentPath = (
+      attachment as unknown as { attachmentPath?: string }
+    ).attachmentPath;
     if (!attachmentPath) throw new Error("Could not locate PDF file");
     return attachmentPath;
   };
@@ -6658,7 +6654,11 @@ export function setupHandlers(
           }
         }
       } catch (err) {
-        ztoolkit.log("LLM: Failed to render PDF pages for", pc.contextItemId, err);
+        ztoolkit.log(
+          "LLM: Failed to render PDF pages for",
+          pc.contextItemId,
+          err,
+        );
       }
     }
     return dataUrls;
@@ -6679,7 +6679,7 @@ export function setupHandlers(
     body,
     inputBox,
     getItem: () => item,
-    closeSlashMenu,
+    closeAddMenu,
     closePaperPicker,
     getSelectedTextContextEntries,
     getSelectedPaperContexts: (itemId) =>
@@ -6690,7 +6690,7 @@ export function setupHandlers(
       getEffectivePdfModePaperContexts(currentItem, selectedPaperContexts),
     hasActivePdfFullTextPapers: (
       currentItem: Zotero.Item,
-      selectedPaperContexts?: any[],
+      selectedPaperContexts?: PaperContextRef[],
     ) => hasActivePdfFullTextPapers(currentItem, selectedPaperContexts),
     hasUploadedPdfInCurrentWebChatConversation,
     markWebChatPdfUploadedForCurrentConversation,
@@ -6915,6 +6915,10 @@ export function setupHandlers(
           model: selectedProfile?.model,
           apiBase: selectedProfile?.apiBase,
           apiKey: selectedProfile?.apiKey,
+          authMode: selectedProfile?.authMode,
+          providerProtocol: selectedProfile?.providerProtocol,
+          modelEntryId: selectedProfile?.entryId,
+          modelProviderLabel: selectedProfile?.providerLabel,
           reasoning: selectedReasoning,
           advanced: advancedParams,
         });
@@ -6939,38 +6943,38 @@ export function setupHandlers(
   // Enter key (Shift+Enter for newline)
   inputBox.addEventListener("keydown", (e: Event) => {
     const ke = e as KeyboardEvent;
-    if (isFloatingMenuOpen(slashMenu)) {
+    if (isFloatingMenuOpen(addMenu)) {
       if (ke.key === "ArrowDown") {
         e.preventDefault();
         e.stopPropagation();
-        const items = getVisibleSlashItems();
+        const items = getVisibleAddItems();
         if (items.length) {
-          slashMenuActiveIndex = (slashMenuActiveIndex + 1) % items.length;
-          updateSlashMenuSelection();
+          addMenuActiveIndex = (addMenuActiveIndex + 1) % items.length;
+          updateAddMenuSelection();
         }
         return;
       }
       if (ke.key === "ArrowUp") {
         e.preventDefault();
         e.stopPropagation();
-        const items = getVisibleSlashItems();
+        const items = getVisibleAddItems();
         if (items.length) {
-          slashMenuActiveIndex =
-            (slashMenuActiveIndex - 1 + items.length) % items.length;
-          updateSlashMenuSelection();
+          addMenuActiveIndex =
+            (addMenuActiveIndex - 1 + items.length) % items.length;
+          updateAddMenuSelection();
         }
         return;
       }
       if (ke.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        closeSlashMenu();
+        closeAddMenu();
         return;
       }
       if (ke.key === "Enter" || ke.key === "Tab") {
         e.preventDefault();
         e.stopPropagation();
-        selectActiveSlashMenuItem();
+        selectActiveAddMenuItem();
         return;
       }
     }
@@ -7188,11 +7192,7 @@ export function setupHandlers(
     inputBox.focus({ preventScroll: true });
     schedulePaperPickerSearch();
     if (status) {
-      setStatus(
-        status,
-        t("Type after @ to search papers."),
-        "ready",
-      );
+      setStatus(status, t("Type after @ to search papers."), "ready");
     }
   };
 
@@ -7204,14 +7204,18 @@ export function setupHandlers(
       body.ownerDocument?.defaultView?.top ||
       body.ownerDocument?.defaultView ||
       null;
-    const openDialog = (win as Window & {
-      openDialog?: (
-        url: string,
-        name: string,
-        features: string,
-        io: unknown,
-      ) => unknown;
-    } | null)?.openDialog;
+    const openDialog = (
+      win as
+        | (Window & {
+            openDialog?: (
+              url: string,
+              name: string,
+              features: string,
+              io: unknown,
+            ) => unknown;
+          })
+        | null
+    )?.openDialog;
     if (!win || typeof openDialog !== "function") {
       openReferenceAtSearchFromMenu();
       return;
@@ -7264,9 +7268,11 @@ export function setupHandlers(
       if (status) setStatus(status, t("Selection cancelled"), "ready");
       return;
     }
-    const getAsync = (Zotero.Items as unknown as {
-      getAsync?: (ids: number[]) => Promise<Zotero.Item[]>;
-    }).getAsync;
+    const getAsync = (
+      Zotero.Items as unknown as {
+        getAsync?: (ids: number[]) => Promise<Zotero.Item[]>;
+      }
+    ).getAsync;
     const selectedItems =
       typeof getAsync === "function"
         ? await getAsync.call(Zotero.Items, selectedIds)
@@ -7281,12 +7287,12 @@ export function setupHandlers(
       e.preventDefault();
       e.stopPropagation();
       if (!item) return;
-      if (!slashMenu) {
+      if (!addMenu) {
         uploadInput.click();
         return;
       }
-      if (isFloatingMenuOpen(slashMenu)) {
-        closeSlashMenu();
+      if (isFloatingMenuOpen(addMenu)) {
+        closeAddMenu();
         return;
       }
       closeRetryModelMenu();
@@ -7296,7 +7302,7 @@ export function setupHandlers(
       closeHistoryMenu();
       closeResponseMenu();
       closePromptMenu();
-      openSlashMenuWithSelection();
+      openAddMenuWithSelection();
       uploadBtn.setAttribute("aria-expanded", "true");
     });
     uploadInput.addEventListener("change", async () => {
@@ -7307,21 +7313,21 @@ export function setupHandlers(
     });
   }
 
-  if (slashUploadOption && uploadInput) {
-    slashUploadOption.addEventListener("click", (e: Event) => {
+  if (addUploadOption && uploadInput) {
+    addUploadOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
       if (!item) return;
-      closeSlashMenu();
+      closeAddMenu();
       uploadInput.click();
     });
   }
 
-  if (slashReferenceOption) {
-    slashReferenceOption.addEventListener("click", (e: Event) => {
+  if (addReferenceOption) {
+    addReferenceOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      closeSlashMenu();
+      closeAddMenu();
       void openNativeReferencePicker();
     });
   }
@@ -7329,7 +7335,7 @@ export function setupHandlers(
   const openModelMenu = () => {
     if (!modelMenu || !modelBtn) return;
     if ((modelBtn as HTMLButtonElement).disabled) return;
-    closeSlashMenu();
+    closeAddMenu();
     closeRetryModelMenu();
     closeReasoningMenu();
     closePromptMenu();
@@ -7351,7 +7357,7 @@ export function setupHandlers(
 
   const openReasoningMenu = () => {
     if (!reasoningMenu || !reasoningBtn) return;
-    closeSlashMenu();
+    closeAddMenu();
     closeRetryModelMenu();
     closeModelMenu();
     closePromptMenu();
@@ -7373,7 +7379,7 @@ export function setupHandlers(
 
   const openRetryModelMenu = (anchor: HTMLButtonElement) => {
     if (!item || !retryModelMenu) return;
-    closeSlashMenu();
+    closeAddMenu();
     closeResponseMenu();
     closePromptMenu();
     closeHistoryNewMenu();
@@ -7416,11 +7422,11 @@ export function setupHandlers(
     });
   }
 
-  if (slashMenu) {
-    slashMenu.addEventListener("pointerdown", (e: Event) => {
+  if (addMenu) {
+    addMenu.addEventListener("pointerdown", (e: Event) => {
       e.stopPropagation();
     });
-    slashMenu.addEventListener("mousedown", (e: Event) => {
+    addMenu.addEventListener("mousedown", (e: Event) => {
       e.stopPropagation();
     });
   }
@@ -7607,8 +7613,8 @@ export function setupHandlers(
       const promptMenus = Array.from(
         doc.querySelectorAll("#llm-prompt-menu"),
       ) as HTMLDivElement[];
-      const slashMenus = Array.from(
-        doc.querySelectorAll("#llm-slash-menu"),
+      const addMenus = Array.from(
+        doc.querySelectorAll("#llm-add-menu"),
       ) as HTMLDivElement[];
       const historyMenus = Array.from(
         doc.querySelectorAll("#llm-history-menu"),
@@ -7688,16 +7694,16 @@ export function setupHandlers(
           setPromptMenuTarget(null);
         }
 
-        for (const slashMenuEl of slashMenus) {
-          if (slashMenuEl.style.display === "none") continue;
-          if (target && slashMenuEl.contains(target)) continue;
-          const panelRoot = slashMenuEl.closest("#llm-main");
-          const slashButtonEl = panelRoot?.querySelector(
+        for (const addMenuEl of addMenus) {
+          if (addMenuEl.style.display === "none") continue;
+          if (target && addMenuEl.contains(target)) continue;
+          const panelRoot = addMenuEl.closest("#llm-main");
+          const addButtonEl = panelRoot?.querySelector(
             "#llm-upload-file",
           ) as HTMLButtonElement | null;
-          if (target && slashButtonEl?.contains(target)) continue;
-          slashMenuEl.style.display = "none";
-          slashButtonEl?.setAttribute("aria-expanded", "false");
+          if (target && addButtonEl?.contains(target)) continue;
+          addMenuEl.style.display = "none";
+          addButtonEl?.setAttribute("aria-expanded", "false");
         }
 
         for (const historyMenuEl of historyMenus) {
@@ -7880,9 +7886,7 @@ export function setupHandlers(
       if (status) {
         setStatus(
           status,
-          nextPinned
-            ? t("Image pinned for next sends")
-            : t("Image unpinned"),
+          nextPinned ? t("Image pinned for next sends") : t("Image unpinned"),
           "ready",
         );
       }
@@ -8548,20 +8552,14 @@ export function setupHandlers(
     const textPinned =
       getSelectedTextExpandedIndex(
         textContextKey,
-        getSelectedTextContexts(textContextKey).length,
+        getSelectedTextContextEntries(textContextKey).length,
       ) >= 0;
     const figurePinned =
       selectedImagePreviewExpandedCache.get(item.id) === true;
     const paperPinned =
       typeof selectedPaperPreviewExpandedCache.get(item.id) === "number";
     const filePinned = selectedFilePreviewExpandedCache.get(item.id) === true;
-    if (
-      !textPinned &&
-      !figurePinned &&
-      !paperPinned &&
-      !filePinned
-    )
-      return;
+    if (!textPinned && !figurePinned && !paperPinned && !filePinned) return;
 
     setSelectedTextExpandedIndex(textContextKey, null);
     selectedImagePreviewExpandedCache.set(item.id, false);

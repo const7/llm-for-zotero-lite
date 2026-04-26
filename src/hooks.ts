@@ -114,17 +114,14 @@ async function onNotify(
 async function onPrefsEvent(type: string, data: { [key: string]: any }) {
   switch (type) {
     case "load": {
-      const { registerPrefsScripts } = await import("./modules/preferenceScript");
+      const { registerPrefsScripts } =
+        await import("./modules/preferenceScript");
       registerPrefsScripts(data.window);
       break;
     }
     default:
       return;
   }
-}
-
-function onDialogEvents(_type: string) {
-  return;
 }
 
 export default {
@@ -134,5 +131,4 @@ export default {
   onMainWindowUnload,
   onNotify,
   onPrefsEvent,
-  onDialogEvents,
 };

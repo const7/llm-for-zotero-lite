@@ -17,7 +17,7 @@ function getFetch(): typeof fetch {
 
 // ── Provider detection ──────────────────────────────────────────────────────
 
-export type PdfUploadProvider = "qwen" | "kimi" | null;
+type PdfUploadProvider = "qwen" | "kimi" | null;
 
 export function detectPdfUploadProvider(apiBase: string): PdfUploadProvider {
   const normalized = (apiBase || "").toLowerCase();
@@ -43,7 +43,10 @@ export function detectPdfUploadProvider(apiBase: string): PdfUploadProvider {
  * may not work reliably with fetch for file uploads.
  */
 function buildMultipartBody(
-  fields: Array<{ name: string; value: string } | { name: string; filename: string; contentType: string; data: Uint8Array }>,
+  fields: Array<
+    | { name: string; value: string }
+    | { name: string; filename: string; contentType: string; data: Uint8Array }
+  >,
 ): { contentType: string; body: Uint8Array } {
   const boundary = `----FormBoundary${Date.now()}${Math.random().toString(36).slice(2)}`;
   const encoder = new TextEncoder();
@@ -54,7 +57,9 @@ function buildMultipartBody(
       // File field
       const safeName = (field.name || "").replace(/[\r\n"]/g, "_");
       const safeFilename = (field.filename || "").replace(/[\r\n"]/g, "_");
-      const safeContentType = (field.contentType || "application/octet-stream").replace(/[\r\n"]/g, "_");
+      const safeContentType = (
+        field.contentType || "application/octet-stream"
+      ).replace(/[\r\n"]/g, "_");
       const header = `--${boundary}\r\nContent-Disposition: form-data; name="${safeName}"; filename="${safeFilename}"\r\nContent-Type: ${safeContentType}\r\n\r\n`;
       parts.push(encoder.encode(header));
       parts.push(field.data);
@@ -100,9 +105,7 @@ function buildMultipartBody(
  */
 function normalizeQwenFileUploadBase(apiBase: string): string {
   const raw = apiBase.replace(/\/+$/, "");
-  const match = raw.match(
-    /^(https?:\/\/dashscope(?:-intl)?\.aliyuncs\.com)/i,
-  );
+  const match = raw.match(/^(https?:\/\/dashscope(?:-intl)?\.aliyuncs\.com)/i);
   if (match) return `${match[1]}/compatible-mode/v1`;
   return raw;
 }
@@ -117,7 +120,12 @@ async function uploadPdfToQwen(
   const base = normalizeQwenFileUploadBase(apiBase);
 
   const { contentType, body } = buildMultipartBody([
-    { name: "file", filename: fileName, contentType: "application/pdf", data: pdfBytes },
+    {
+      name: "file",
+      filename: fileName,
+      contentType: "application/pdf",
+      data: pdfBytes,
+    },
     { name: "purpose", value: "file-extract" },
   ]);
 
@@ -132,10 +140,15 @@ async function uploadPdfToQwen(
 
   if (!uploadResponse.ok) {
     const errorText = await uploadResponse.text().catch(() => "");
-    throw new Error(`Qwen file upload failed: ${uploadResponse.status} ${errorText.slice(0, 300)}`);
+    throw new Error(
+      `Qwen file upload failed: ${uploadResponse.status} ${errorText.slice(0, 300)}`,
+    );
   }
 
-  const uploadData = (await uploadResponse.json()) as { id?: string; status?: string };
+  const uploadData = (await uploadResponse.json()) as {
+    id?: string;
+    status?: string;
+  };
   const fileId = uploadData?.id;
   if (!fileId) {
     throw new Error("Qwen file upload returned no file ID");
@@ -159,7 +172,12 @@ async function uploadPdfToKimi(
   const base = apiBase.replace(/\/+$/, "");
 
   const { contentType, body } = buildMultipartBody([
-    { name: "file", filename: fileName, contentType: "application/pdf", data: pdfBytes },
+    {
+      name: "file",
+      filename: fileName,
+      contentType: "application/pdf",
+      data: pdfBytes,
+    },
     { name: "purpose", value: "file-extract" },
   ]);
 
@@ -174,10 +192,15 @@ async function uploadPdfToKimi(
 
   if (!uploadResponse.ok) {
     const errorText = await uploadResponse.text().catch(() => "");
-    throw new Error(`Kimi file upload failed: ${uploadResponse.status} ${errorText.slice(0, 300)}`);
+    throw new Error(
+      `Kimi file upload failed: ${uploadResponse.status} ${errorText.slice(0, 300)}`,
+    );
   }
 
-  const uploadData = (await uploadResponse.json()) as { id?: string; status?: string };
+  const uploadData = (await uploadResponse.json()) as {
+    id?: string;
+    status?: string;
+  };
   const fileId = uploadData?.id;
   if (!fileId) {
     throw new Error("Kimi file upload returned no file ID");
@@ -192,7 +215,9 @@ async function uploadPdfToKimi(
 
   if (!contentResponse.ok) {
     const errorText = await contentResponse.text().catch(() => "");
-    throw new Error(`Kimi file content extraction failed: ${contentResponse.status} ${errorText.slice(0, 300)}`);
+    throw new Error(
+      `Kimi file content extraction failed: ${contentResponse.status} ${errorText.slice(0, 300)}`,
+    );
   }
 
   const extractedText = await contentResponse.text();

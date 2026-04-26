@@ -1,4 +1,4 @@
-export type LatestOnlyTaskContext = {
+type LatestOnlyTaskContext = {
   isCurrent: () => boolean;
 };
 

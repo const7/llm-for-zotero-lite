@@ -11,8 +11,7 @@ import {
 } from "./paperAttribution";
 export { normalizeSelectedTextSource } from "./normalizers";
 
-export const DEFAULT_SELECTED_TEXT_PROMPT =
-  "Please explain this selected text.";
+const DEFAULT_SELECTED_TEXT_PROMPT = "Please explain this selected text.";
 const DEFAULT_FILE_ANALYSIS_PROMPT = "Please analyze attached files.";
 
 export function getSelectedTextSourceIcon(source: SelectedTextSource): string {
@@ -167,7 +166,8 @@ export function buildQuestionWithSelectedTextContexts(
   }
   const contextBlocks = normalizedTexts.map((text, index) => {
     const source = normalizedSources[index];
-    const sourceLabel = source === "model" ? "model_response 🧠" : "pdf_reader 📋";
+    const sourceLabel =
+      source === "model" ? "model_response 🧠" : "pdf_reader 📋";
     const paperLabel =
       includePaperAttribution && source === "pdf"
         ? formatPaperCitationLabel(selectedTextPaperContexts[index])
@@ -183,7 +183,8 @@ export function buildQuestionWithSelectedTextContexts(
     return `Text Context ${index + 1} [source=${sourceLabel}]${paperPart}${citationPart}:\n"""\n${text}\n"""`;
   });
   const guidance =
-    includePaperAttribution && selectedTextPaperContexts.some((entry) => !!entry)
+    includePaperAttribution &&
+    selectedTextPaperContexts.some((entry) => !!entry)
       ? `${buildPaperQuoteCitationGuidance().join("\n")}\n\n`
       : "";
   return `Selected text contexts with explicit sources:\n${guidance}${contextBlocks.join(
@@ -220,7 +221,12 @@ export function buildModelPromptWithFileContext(
   const metaBlocks: string[] = [];
   for (const attachment of fileAttachments) {
     // PDF-paper attachments are sent as binary file_ref — skip text metadata
-    if (typeof attachment.id === "string" && (attachment.id.startsWith("pdf-paper-") || attachment.id.startsWith("pdf-page-"))) continue;
+    if (
+      typeof attachment.id === "string" &&
+      (attachment.id.startsWith("pdf-paper-") ||
+        attachment.id.startsWith("pdf-page-"))
+    )
+      continue;
     metaBlocks.push(
       `- ${attachment.name} (${attachment.mimeType || "application/octet-stream"}, ${(attachment.sizeBytes / 1024 / 1024).toFixed(2)} MB)`,
     );
@@ -297,7 +303,8 @@ export function setStatus(
 function formatTokenCount(tokens: number): string {
   if (tokens < 0) return "0";
   if (tokens < 1000) return `${tokens}`;
-  if (tokens < 10000) return `${(tokens / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  if (tokens < 10000)
+    return `${(tokens / 1000).toFixed(1).replace(/\.0$/, "")}k`;
   return `${Math.round(tokens / 1000)}k`;
 }
 

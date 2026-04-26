@@ -84,13 +84,6 @@
   gap: 4px;
 }
 
-.llm-header-icon {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
 .llm-title {
   font-size: var(--llm-fs-14);
   font-weight: 600;
@@ -270,8 +263,14 @@
   vertical-align: middle;
   flex-shrink: 0;
 }
-.llm-webchat-dot-connected { background: #4ade80; box-shadow: 0 0 3px #4ade8066; }
-.llm-webchat-dot-disconnected { background: #f87171; box-shadow: 0 0 3px #f8717166; }
+.llm-webchat-dot-connected {
+  background: #4ade80;
+  box-shadow: 0 0 3px #4ade8066;
+}
+.llm-webchat-dot-disconnected {
+  background: #f87171;
+  box-shadow: 0 0 3px #f8717166;
+}
 
 /* ---- Webchat preload overlay ---- */
 
@@ -374,11 +373,17 @@
   background: var(--fill-quinary, #f0f0f0);
 }
 @keyframes llm-preload-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 @keyframes llm-preload-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* ---- Webchat status row (below timestamp) ---- */
@@ -412,7 +417,7 @@
   flex: 0 0 18px;
 }
 .llm-message-webchat-refresh:hover {
-  background: var(--fill-quinary, rgba(255,255,255,0.08));
+  background: var(--fill-quinary, rgba(255, 255, 255, 0.08));
   color: var(--fill-primary);
 }
 .llm-message-webchat-refresh:disabled {
@@ -532,7 +537,9 @@
 }
 
 .llm-start-page-transitioning .llm-chat-shell {
-  transition: flex 0.4s ease, height 0.4s ease;
+  transition:
+    flex 0.4s ease,
+    height 0.4s ease;
 }
 
 .llm-start-page-transitioning .llm-header {
@@ -2365,7 +2372,9 @@
   cursor: pointer;
   vertical-align: middle;
   flex-shrink: 0;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .llm-citation-icon::before {
@@ -3381,7 +3390,7 @@
   -webkit-mask-image: none;
 }
 
-.llm-slash-menu {
+.llm-add-menu {
   position: absolute;
   left: 0;
   right: 0;

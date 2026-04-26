@@ -7,10 +7,7 @@ import {
   formatFileCountLabel,
 } from "./constants";
 import type { ActionDropdownSpec } from "./types";
-import {
-  getPaperPortalBaseItemID,
-  isPaperPortalItem,
-} from "./portalScope";
+import { getPaperPortalBaseItemID, isPaperPortalItem } from "./portalScope";
 
 function createActionDropdown(doc: Document, spec: ActionDropdownSpec) {
   const slot = createElement(
@@ -34,14 +31,9 @@ function createActionDropdown(doc: Document, spec: ActionDropdownSpec) {
 
 function buildUI(body: Element, item?: Zotero.Item | null) {
   // Clear this section body before rebuilding.
-  if (typeof (body as any).replaceChildren === "function") {
-    (body as any).replaceChildren();
-  } else {
-    body.textContent = "";
-  }
+  body.replaceChildren();
   const doc = body.ownerDocument!;
   const hasItem = Boolean(item);
-  const isPaperMode = hasItem;
   const conversationItemId =
     hasItem && item
       ? item.isAttachment() && item.parentID
@@ -54,9 +46,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
         ? getPaperPortalBaseItemID(item) || 0
         : item.isAttachment() && item.parentID
           ? item.parentID
-          : isPaperMode
-            ? item.id
-            : 0
+          : item.id
       : 0;
   // Disable CSS scroll anchoring on the Zotero-provided panel body so that
   // Gecko doesn't fight with our programmatic scroll management.
@@ -85,13 +75,6 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   const header = createElement(doc, "div", "llm-header");
   const headerTop = createElement(doc, "div", "llm-header-top");
   const headerInfo = createElement(doc, "div", "llm-header-info");
-  // const headerIcon = createElement(doc, "img", "llm-header-icon", {
-  //   alt: "LLM",
-  //   src: iconUrl,
-  // });
-  // const title = createElement(doc, "div", "llm-title", {
-  //   textContent: "LLM Assistant",
-  // });
   const title = createElement(doc, "div", "llm-title", {
     id: "llm-title-static",
     textContent: t("LLM-for-Zotero Lite"),
@@ -127,11 +110,16 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   headerTop.appendChild(headerInfo);
 
   const headerActions = createElement(doc, "div", "llm-header-actions");
-  const settingsBtn = createElement(doc, "button", "llm-btn-icon llm-settings-btn", {
-    id: "llm-settings",
-    type: "button",
-    title: t("Settings"),
-  });
+  const settingsBtn = createElement(
+    doc,
+    "button",
+    "llm-btn-icon llm-settings-btn",
+    {
+      id: "llm-settings",
+      type: "button",
+      title: t("Settings"),
+    },
+  );
   settingsBtn.setAttribute("aria-label", t("Open plugin settings"));
   settingsBtn.dataset.preferencesPaneId = PREFERENCES_PANE_ID;
   const clearBtn = createElement(doc, "button", "llm-btn-icon", {
@@ -193,14 +181,9 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   const chatBox = createElement(doc, "div", "llm-messages", {
     id: "llm-chat-box",
   });
-  const questionTimeline = createElement(
-    doc,
-    "nav",
-    "llm-question-timeline",
-    {
-      id: "llm-question-timeline",
-    },
-  );
+  const questionTimeline = createElement(doc, "nav", "llm-question-timeline", {
+    id: "llm-question-timeline",
+  });
   questionTimeline.setAttribute("aria-label", t("Question timeline"));
   questionTimeline.style.display = "none";
   const questionTimelinePeek = createElement(
@@ -262,10 +245,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       title: t("Delete this prompt and response"),
     },
   );
-  responseMenu.append(
-    responseMenuCopyBtn,
-    responseMenuDeleteBtn,
-  );
+  responseMenu.append(responseMenuCopyBtn, responseMenuDeleteBtn);
   container.appendChild(responseMenu);
 
   // Prompt context menu
@@ -287,42 +267,37 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   promptMenu.append(promptMenuDeleteBtn);
   container.appendChild(promptMenu);
 
-  const slashMenu = createElement(
-    doc,
-    "div",
-    "llm-response-menu llm-slash-menu",
-    {
-      id: "llm-slash-menu",
-    },
-  );
-  slashMenu.style.display = "none";
-  const slashList = createElement(doc, "div", "llm-action-picker-list", {});
-  const makeSlashItem = (id: string, title: string, desc: string) => {
+  const addMenu = createElement(doc, "div", "llm-response-menu llm-add-menu", {
+    id: "llm-add-menu",
+  });
+  addMenu.style.display = "none";
+  const addList = createElement(doc, "div", "llm-action-picker-list", {});
+  const makeAddItem = (id: string, title: string, desc: string) => {
     const btn = createElement(doc, "button", "llm-action-picker-item", {
       id,
       type: "button",
       title: desc,
     });
-    btn.setAttribute("data-slash-base-item", "true");
+    btn.setAttribute("data-add-base-item", "true");
     const titleEl = createElement(doc, "span", "llm-action-picker-title", {
       textContent: title,
     });
     btn.append(titleEl);
     return btn;
   };
-  const slashUploadBtn = makeSlashItem(
-    "llm-slash-upload-option",
+  const addUploadBtn = makeAddItem(
+    "llm-add-upload-option",
     t("Upload files"),
     t("Add documents or images"),
   );
-  const slashReferenceBtn = makeSlashItem(
-    "llm-slash-reference-option",
+  const addReferenceBtn = makeAddItem(
+    "llm-add-reference-option",
     t("Select references"),
     t("Add papers from your library"),
   );
-  slashList.append(slashUploadBtn, slashReferenceBtn);
-  slashMenu.append(slashList);
-  // slashMenu is appended to composeArea below (after composeArea is created)
+  addList.append(addUploadBtn, addReferenceBtn);
+  addMenu.append(addList);
+  // addMenu is appended to composeArea below (after composeArea is created)
 
   // Retry model menu (opened from latest assistant retry action)
   const retryModelMenu = createElement(doc, "div", "llm-model-menu", {
@@ -492,7 +467,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   paperPickerList.setAttribute("role", "listbox");
   paperPicker.appendChild(paperPickerList);
   composeArea.appendChild(paperPicker);
-  composeArea.appendChild(slashMenu);
+  composeArea.appendChild(addMenu);
 
   const shortcuts = createElement(doc, "div", "llm-shortcuts", {
     id: "llm-shortcuts",
@@ -568,7 +543,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   const uploadBtn = createElement(
     doc,
     "button",
-    "llm-shortcut-btn llm-action-btn llm-action-btn-secondary llm-upload-file-btn llm-slash-menu-btn",
+    "llm-shortcut-btn llm-action-btn llm-action-btn-secondary llm-upload-file-btn llm-add-menu-btn",
     {
       id: "llm-upload-file",
       type: "button",
@@ -640,9 +615,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   const statusBar = createElement(doc, "div", "llm-status-bar");
   const statusLine = createElement(doc, "div", "llm-status", {
     id: "llm-status",
-    textContent: hasItem
-      ? t("Ready")
-      : t("Select an item or open a PDF"),
+    textContent: hasItem ? t("Ready") : t("Select an item or open a PDF"),
   });
   const tokenUsage = createElement(doc, "span", "llm-token-usage", {
     id: "llm-token-usage",

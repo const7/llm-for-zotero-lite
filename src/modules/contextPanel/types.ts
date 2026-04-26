@@ -1,4 +1,6 @@
 import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/llmClient";
+import type { ModelProviderAuthMode } from "../../utils/modelProviders";
+import type { ProviderProtocol } from "../../utils/providerProtocol";
 import type {
   SelectedTextSource,
   ChatAttachment,
@@ -29,7 +31,6 @@ export interface Message {
   role: "user" | "assistant";
   text: string;
   timestamp: number;
-  selectedTextExpanded?: boolean;
   selectedTexts?: string[];
   selectedTextSources?: SelectedTextSource[];
   selectedTextPaperContexts?: (PaperContextRef | undefined)[];
@@ -37,11 +38,9 @@ export interface Message {
   screenshotImages?: string[];
   paperContexts?: PaperContextRef[];
   fullTextPaperContexts?: PaperContextRef[];
-  pinnedPaperContexts?: PaperContextRef[];
   paperContextsExpanded?: boolean;
   attachments?: ChatAttachment[];
   attachmentsExpanded?: boolean;
-  attachmentActiveIndex?: number;
   screenshotExpanded?: boolean;
   screenshotActiveIndex?: number;
   modelName?: string;
@@ -52,14 +51,16 @@ export interface Message {
   reasoningDetails?: string;
   reasoningOpen?: boolean;
   webchatRunState?: "done" | "incomplete" | "error";
-  webchatCompletionReason?: "settled" | "forced_cancel" | "timeout" | "error" | null;
+  webchatCompletionReason?:
+    | "settled"
+    | "forced_cancel"
+    | "timeout"
+    | "error"
+    | null;
   webchatChatUrl?: string;
   webchatChatId?: string;
 }
-export type PaperContextSendMode =
-  | "retrieval"
-  | "full-next"
-  | "full-sticky";
+export type PaperContextSendMode = "retrieval" | "full-next" | "full-sticky";
 
 export type PaperContentSourceMode = "text" | "mineru" | "pdf";
 
@@ -204,6 +205,10 @@ export type SendQuestionOptions = {
   model?: string;
   apiBase?: string;
   apiKey?: string;
+  authMode?: ModelProviderAuthMode;
+  providerProtocol?: ProviderProtocol;
+  modelEntryId?: string;
+  modelProviderLabel?: string;
   reasoning?: LLMReasoningConfig;
   advanced?: AdvancedModelParams;
   displayQuestion?: string;

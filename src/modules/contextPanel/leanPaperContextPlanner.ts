@@ -16,7 +16,7 @@ import type {
 
 type StatusKind = "ready" | "sending" | "warning" | "error";
 
-export type LeanPaperContextPlanParams = {
+type LeanPaperContextPlanParams = {
   item: Zotero.Item;
   question: string;
   paperContexts: PaperContextRef[];
@@ -34,7 +34,7 @@ export type LeanPaperContextPlanParams = {
   setStatusSafely: (text: string, kind: StatusKind) => void;
 };
 
-export type LeanPaperContextPlanDeps = {
+type LeanPaperContextPlanDeps = {
   resolveContextSourceItem: (item: Zotero.Item) => {
     contextItem: Zotero.Item | null;
   };
@@ -70,7 +70,7 @@ export type LeanPaperContextPlanDeps = {
   }) => Promise<string[]>;
 };
 
-export type LeanPaperContextPlan = {
+type LeanPaperContextPlan = {
   combinedContext: string;
   strategy: ContextAssemblyStrategy;
   assistantInstruction?: string;

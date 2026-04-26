@@ -1,6 +1,6 @@
 import type { ProviderProtocol } from "./providerProtocol";
 
-export type SupportedProviderPresetId =
+type SupportedProviderPresetId =
   | "openai"
   | "gemini"
   | "anthropic"
@@ -14,7 +14,7 @@ export type SupportedProviderPresetId =
 
 export type ProviderPresetId = SupportedProviderPresetId | "customized";
 
-export type ProviderPreset = {
+type ProviderPreset = {
   id: SupportedProviderPresetId;
   label: string;
   defaultApiBase: string;
@@ -226,7 +226,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultApiBase: "https://api.moonshot.cn/v1",
     defaultProtocol: "openai_chat_compat",
     supportedProtocols: ["openai_chat_compat"],
-    helperText: "Preset uses Moonshot's China API. The international api.moonshot.ai host is also detected.",
+    helperText:
+      "Preset uses Moonshot's China API. The international api.moonshot.ai host is also detected.",
     matches: makeHostAndPathMatcher(
       ["api.moonshot.cn", "api.moonshot.ai"],
       KIMI_PATHS,
@@ -241,10 +242,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     supportedProtocols: ["openai_chat_compat", "responses_api"],
     helperText:
       "Uses GitHub Copilot via device login. Requires an active Copilot subscription.",
-    matches: makeHostAndPathMatcher(
-      ["api.githubcopilot.com"],
-      COPILOT_PATHS,
-    ),
+    matches: makeHostAndPathMatcher(["api.githubcopilot.com"], COPILOT_PATHS),
     supportsEmbeddings: false,
   },
 ];

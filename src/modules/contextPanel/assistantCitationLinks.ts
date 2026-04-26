@@ -36,7 +36,7 @@ type CitationParagraphJumpNavigation = {
   paragraphJump: ExactQuoteJumpResult;
 };
 
-export type AssistantCitationPaperCandidate = {
+type AssistantCitationPaperCandidate = {
   paperContext: PaperContextRef;
   contextItemId: number;
   sourceLabel: string;
@@ -682,9 +682,7 @@ function parseGroupedInlineCitationMatch(
           partStart = cursor + 1;
           continue;
         }
-        const extractedCitation = extractPaperSourceLabel(
-          `(${strippedPart})`,
-        );
+        const extractedCitation = extractPaperSourceLabel(`(${strippedPart})`);
         if (
           extractedCitation &&
           !isYearOnlyCitationLabel(extractedCitation.citationLabel)
@@ -838,8 +836,7 @@ export function extractInlineCitationMentions(
     ).trim();
     if (!rawMatchText || !authorText || !yearText) continue;
     const syntheticCitation = `(${authorText}, ${yearText})`;
-    const extractedCitation =
-      extractPaperSourceLabel(syntheticCitation);
+    const extractedCitation = extractPaperSourceLabel(syntheticCitation);
     if (!extractedCitation) continue;
     const start = Number(narrativeMatch.index || 0);
     const end = start + rawMatchText.length;
@@ -862,8 +859,7 @@ export function extractInlineCitationMentions(
     ).trim();
     if (!rawMatchText || !authorText || !yearText) continue;
     const syntheticCitation = `(${authorText}, ${yearText})`;
-    const extractedCitation =
-      extractPaperSourceLabel(syntheticCitation);
+    const extractedCitation = extractPaperSourceLabel(syntheticCitation);
     if (!extractedCitation) continue;
     const start = Number(narrativeCommaMatch.index || 0);
     const end = start + rawMatchText.length;
@@ -1717,9 +1713,7 @@ async function resolveAndNavigateAssistantCitation(params: {
 
   try {
     const normalizedQuoteText = sanitizeText(params.quoteText || "").trim();
-    const extractedCitation = extractPaperSourceLabel(
-      params.baseSourceLabel,
-    );
+    const extractedCitation = extractPaperSourceLabel(params.baseSourceLabel);
     // Build effective candidates from all available sources, then rank by
     // citation-label relevance before falling back to the active PDF.
     const staticCandidates = params.candidates.length ? params.candidates : [];

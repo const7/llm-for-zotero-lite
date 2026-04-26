@@ -1,4 +1,4 @@
-export type PanelDomRefs = {
+type PanelDomRefs = {
   inputBox: HTMLTextAreaElement | null;
   inputSection: HTMLDivElement | null;
   sendBtn: HTMLButtonElement | null;
@@ -26,9 +26,9 @@ export type PanelDomRefs = {
   historyUndoBtn: HTMLButtonElement | null;
   uploadBtn: HTMLButtonElement | null;
   uploadInput: HTMLInputElement | null;
-  slashMenu: HTMLDivElement | null;
-  slashUploadOption: HTMLButtonElement | null;
-  slashReferenceOption: HTMLButtonElement | null;
+  addMenu: HTMLDivElement | null;
+  addUploadOption: HTMLButtonElement | null;
+  addReferenceOption: HTMLButtonElement | null;
   imagePreview: HTMLDivElement | null;
   selectedContextList: HTMLDivElement | null;
   previewStrip: HTMLDivElement | null;
@@ -89,7 +89,9 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     actionsRight: body.querySelector(
       ".llm-actions-right",
     ) as HTMLDivElement | null,
-    settingsBtn: body.querySelector("#llm-settings") as HTMLButtonElement | null,
+    settingsBtn: body.querySelector(
+      "#llm-settings",
+    ) as HTMLButtonElement | null,
     clearBtn: body.querySelector("#llm-clear") as HTMLButtonElement | null,
     titleStatic: body.querySelector(
       "#llm-title-static",
@@ -125,12 +127,12 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     uploadInput: body.querySelector(
       "#llm-upload-input",
     ) as HTMLInputElement | null,
-    slashMenu: body.querySelector("#llm-slash-menu") as HTMLDivElement | null,
-    slashUploadOption: body.querySelector(
-      "#llm-slash-upload-option",
+    addMenu: body.querySelector("#llm-add-menu") as HTMLDivElement | null,
+    addUploadOption: body.querySelector(
+      "#llm-add-upload-option",
     ) as HTMLButtonElement | null,
-    slashReferenceOption: body.querySelector(
-      "#llm-slash-reference-option",
+    addReferenceOption: body.querySelector(
+      "#llm-add-reference-option",
     ) as HTMLButtonElement | null,
     imagePreview: body.querySelector(
       "#llm-image-preview",

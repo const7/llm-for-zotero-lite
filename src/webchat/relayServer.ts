@@ -53,7 +53,7 @@ interface PendingCommand {
   target?: string;
 }
 
-export interface ScrapedChatMessage {
+interface ScrapedChatMessage {
   messageKey?: string;
   role: string;
   text: string;
@@ -70,7 +70,7 @@ export interface ScrapedTranscriptSnapshot {
   source: "network" | "dom" | null;
 }
 
-export type RelayQueryPhase =
+type RelayQueryPhase =
   | "pending"
   | "claimed"
   | "prompt_applied"
@@ -104,7 +104,7 @@ export type RelayTurnStatus =
   | "incomplete"
   | "error";
 
-export interface RelayState {
+interface RelayState {
   status: "idle" | "pending" | "running" | "done" | "error";
   remote_chat_url: string | null;
   remote_chat_id: string | null;
@@ -172,13 +172,9 @@ interface ExtensionStatus {
   ts: number;
 }
 
-export type RelayHistorySyncStatus =
-  | "ok"
-  | "empty"
-  | "invalid_source"
-  | "timeout";
+type RelayHistorySyncStatus = "ok" | "empty" | "invalid_source" | "timeout";
 
-export type RelayHistorySyncSource = "network" | "dom" | null;
+type RelayHistorySyncSource = "network" | "dom" | null;
 
 export type RelayHistorySiteSyncEntry = {
   lastUpdatedAt: number;
@@ -1565,7 +1561,7 @@ export function relayUpdateTurnState(opts: {
 }
 
 /** Get mirrored chat history directly (no HTTP). */
-export function relayGetChatHistory(): Array<{
+function relayGetChatHistory(): Array<{
   id: string;
   title: string;
   chatUrl: string | null;
@@ -1636,7 +1632,7 @@ function isWebChatRelayRegistered(): boolean {
   );
 }
 
-export function ensureWebChatRelayRegistered(): void {
+function ensureWebChatRelayRegistered(): void {
   if (isWebChatRelayRegistered()) return;
   registerWebChatRelay();
 }

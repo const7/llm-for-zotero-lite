@@ -24,6 +24,7 @@ import {
   UsageStats,
 } from "../../utils/llmClient";
 import { estimateConversationTokens } from "../../utils/modelInputCap";
+import type { ModelProviderAuthMode } from "../../utils/modelProviders";
 import type { ProviderProtocol } from "../../utils/providerProtocol";
 import {
   PERSISTED_HISTORY_LIMIT,
@@ -131,14 +132,11 @@ import {
   getNextBackfillStartIndex,
   resolveChatRenderStartIndex,
 } from "./chatRenderWindow";
-import { toFileUrl } from "../../utils/pathFileUrl";
+import { toFileUrl } from "../../utils/localPath";
 import { replaceConversationAttachmentRefs } from "../../utils/attachmentRefStore";
 import { decorateAssistantCitationLinks } from "./assistantCitationLinks";
 import { compressLongHistory } from "./historyCompression";
-import {
-  hideQuestionTimeline,
-  syncQuestionTimeline,
-} from "./questionTimeline";
+import { hideQuestionTimeline, syncQuestionTimeline } from "./questionTimeline";
 
 /** Get AbortController constructor from global scope */
 function getAbortControllerCtor(): new () => AbortController {
@@ -313,7 +311,6 @@ function getMessageSelectedTextExpandedIndex(
     const normalized = Math.floor(rawIndex);
     if (normalized >= 0 && normalized < count) return normalized;
   }
-  if (message.selectedTextExpanded === true) return 0;
   return -1;
 }
 
@@ -602,10 +599,7 @@ async function persistConversationMessage(
     );
     const attachmentHashes =
       collectAttachmentHashesFromStoredMessages(storedMessages);
-    await replaceConversationAttachmentRefs(
-      conversationKey,
-      attachmentHashes,
-    );
+    await replaceConversationAttachmentRefs(conversationKey, attachmentHashes);
   } catch (err) {
     ztoolkit.log("LLM: Failed to persist chat message", err);
   }
@@ -643,7 +637,6 @@ function toPanelMessage(message: StoredChatMessage): Message {
     role: message.role,
     text: message.text,
     timestamp: message.timestamp,
-    selectedTextExpanded: false,
     selectedTexts: selectedTexts.length ? selectedTexts : undefined,
     selectedTextSources: selectedTextSources.length
       ? selectedTextSources
@@ -771,10 +764,7 @@ export function getReasoningOptions(
   }));
 }
 
-export async function copyTextToClipboard(
-  body: Element,
-  text: string,
-): Promise<void> {
+async function copyTextToClipboard(body: Element, text: string): Promise<void> {
   const safeText = sanitizeText(text).trim();
   if (!safeText) return;
 
@@ -880,7 +870,7 @@ export function getSelectedReasoningForItem(
   return { provider, level: selectedLevel as LLMReasoningLevel };
 }
 
-export type PanelRequestUI = {
+type PanelRequestUI = {
   inputBox: HTMLTextAreaElement | null;
   chatBox: HTMLDivElement | null;
   sendBtn: HTMLButtonElement | null;
@@ -994,11 +984,11 @@ function createPanelUpdateHelpers(
   };
 }
 
-export type EffectiveRequestConfig = {
+type EffectiveRequestConfig = {
   model: string;
   apiBase: string;
   apiKey: string;
-  authMode: "api_key" | "codex_auth" | "webchat"; // [webchat]
+  authMode: ModelProviderAuthMode;
   providerProtocol?: ProviderProtocol;
   modelEntryId?: string;
   modelProviderLabel?: string;
@@ -1006,18 +996,24 @@ export type EffectiveRequestConfig = {
   advanced: AdvancedModelParams | undefined;
 };
 
-function resolveEffectiveRequestConfig(params: {
-  item: Zotero.Item;
+type RequestConfigOverrides = {
   model?: string;
   apiBase?: string;
   apiKey?: string;
-  authMode?: "api_key" | "codex_auth" | "webchat"; // [webchat]
+  authMode?: ModelProviderAuthMode;
   providerProtocol?: ProviderProtocol;
   modelEntryId?: string;
   modelProviderLabel?: string;
   reasoning?: LLMReasoningConfig;
   advanced?: AdvancedModelParams;
-}): EffectiveRequestConfig {
+  pdfUploadSystemMessages?: string[];
+};
+
+function resolveEffectiveRequestConfig(
+  params: RequestConfigOverrides & {
+    item: Zotero.Item;
+  },
+): EffectiveRequestConfig {
   const fallbackEntry = getSelectedModelEntryForItem(params.item.id);
   const explicitEntry =
     params.model || params.apiBase || params.apiKey
@@ -1028,20 +1024,14 @@ function resolveEffectiveRequestConfig(params: {
             entry.apiKey === (params.apiKey || "").trim(),
         ) || null
       : null;
-  const model = (
-    params.model ||
-    fallbackEntry?.model ||
-    "gpt-4o-mini"
-  ).trim();
+  const model = (params.model || fallbackEntry?.model || "gpt-4o-mini").trim();
   const apiBase = (params.apiBase || fallbackEntry?.apiBase || "").trim();
   const apiKey = (params.apiKey || fallbackEntry?.apiKey || "").trim();
   const authMode =
     params.authMode ||
-    (fallbackEntry?.authMode === "webchat"
-      ? "webchat"
-      : fallbackEntry?.authMode === "codex_auth"
-        ? "codex_auth"
-        : "api_key");
+    explicitEntry?.authMode ||
+    fallbackEntry?.authMode ||
+    "api_key";
   const reasoning =
     params.reasoning ||
     getSelectedReasoningForItem(params.item.id, model, apiBase);
@@ -1200,7 +1190,7 @@ function waitForUiStep(): Promise<void> {
   });
 }
 
-export type LatestRetryPair = {
+type LatestRetryPair = {
   userIndex: number;
   userMessage: Message;
   assistantMessage: Message;
@@ -1430,7 +1420,7 @@ function reconstructRetryPayload(userMessage: Message): {
     : [];
   const paperContexts = normalizePaperContexts(userMessage.paperContexts);
   const fullTextPaperContexts = normalizePaperContexts(
-    userMessage.fullTextPaperContexts || userMessage.pinnedPaperContexts,
+    userMessage.fullTextPaperContexts,
   );
   const fileAttachmentsForModel: ChatFileAttachment[] = [];
   for (const attachment of fileAttachments) {
@@ -1671,7 +1661,7 @@ function syncComposeContextForInlineEdit(
 
   const paperContexts = normalizePaperContexts(userMessage.paperContexts);
   const fullTextPaperContexts = normalizePaperContexts(
-    userMessage.fullTextPaperContexts || userMessage.pinnedPaperContexts,
+    userMessage.fullTextPaperContexts,
   );
   const autoLoadedPaperContext = resolveAutoLoadedPaperContextForItem(item);
   const selectedPaperContexts = autoLoadedPaperContext
@@ -1706,12 +1696,7 @@ function syncComposeContextForInlineEdit(
 export async function retryLatestAssistantResponse(
   body: Element,
   item: Zotero.Item,
-  model?: string,
-  apiBase?: string,
-  apiKey?: string,
-  reasoning?: LLMReasoningConfig,
-  advanced?: AdvancedModelParams,
-  pdfUploadSystemMessages?: string[],
+  overrides: RequestConfigOverrides = {},
 ) {
   const ui = getPanelRequestUI(body);
 
@@ -1757,11 +1742,7 @@ export async function retryLatestAssistantResponse(
 
   const effectiveRequestConfig = resolveEffectiveRequestConfig({
     item,
-    model,
-    apiBase,
-    apiKey,
-    reasoning,
-    advanced,
+    ...overrides,
   });
   // Update model name before first refresh so streaming UI shows the correct model immediately
   assistantMessage.modelName = effectiveRequestConfig.model;
@@ -1819,7 +1800,7 @@ export async function retryLatestAssistantResponse(
       history: llmHistory,
       effectiveRequestConfig,
       pdfModePaperKeys: retryPdfKeys.size > 0 ? retryPdfKeys : undefined,
-      pdfUploadSystemMessages,
+      pdfUploadSystemMessages: overrides.pdfUploadSystemMessages,
       signal: getAbortController(conversationKey)?.signal,
       setStatusSafely,
     });
@@ -2010,6 +1991,10 @@ export async function editUserTurnAndRetry(opts: {
   model?: string;
   apiBase?: string;
   apiKey?: string;
+  authMode?: ModelProviderAuthMode;
+  providerProtocol?: ProviderProtocol;
+  modelEntryId?: string;
+  modelProviderLabel?: string;
   reasoning?: LLMReasoningConfig;
   advanced?: AdvancedModelParams;
 }): Promise<void> {
@@ -2029,6 +2014,10 @@ export async function editUserTurnAndRetry(opts: {
     model,
     apiBase,
     apiKey,
+    authMode,
+    providerProtocol,
+    modelEntryId,
+    modelProviderLabel,
     reasoning,
     advanced,
   } = opts;
@@ -2116,7 +2105,6 @@ export async function editUserTurnAndRetry(opts: {
     pdfExcludeKeysEdit.size > 0 ? pdfExcludeKeysEdit : undefined,
   );
   const attachmentsForMessage = normalizeEditableAttachments(attachments);
-  userMsg.selectedTextExpanded = false;
   userMsg.selectedTexts = selectedTextsForMessage.length
     ? selectedTextsForMessage
     : undefined;
@@ -2147,7 +2135,6 @@ export async function editUserTurnAndRetry(opts: {
     ? attachmentsForMessage
     : undefined;
   userMsg.attachmentsExpanded = false;
-  userMsg.attachmentActiveIndex = undefined;
 
   // Persist the updated user message
   try {
@@ -2177,16 +2164,18 @@ export async function editUserTurnAndRetry(opts: {
   const resolvedAdvanced =
     advanced || getAdvancedModelParamsForEntry(profile?.entryId);
 
-  await retryLatestAssistantResponse(
-    body,
-    item,
-    resolvedModel,
-    resolvedApiBase,
-    resolvedApiKey,
-    resolvedReasoning,
-    resolvedAdvanced,
+  await retryLatestAssistantResponse(body, item, {
+    model: resolvedModel,
+    apiBase: resolvedApiBase,
+    apiKey: resolvedApiKey,
+    authMode: authMode ?? profile?.authMode,
+    providerProtocol: providerProtocol ?? profile?.providerProtocol,
+    modelEntryId: modelEntryId ?? profile?.entryId,
+    modelProviderLabel: modelProviderLabel ?? profile?.providerLabel,
+    reasoning: resolvedReasoning,
+    advanced: resolvedAdvanced,
     pdfUploadSystemMessages,
-  );
+  });
 }
 
 export async function sendQuestion(
@@ -2200,6 +2189,10 @@ export async function sendQuestion(
     model,
     apiBase,
     apiKey,
+    authMode,
+    providerProtocol,
+    modelEntryId,
+    modelProviderLabel,
     reasoning,
     advanced,
     displayQuestion,
@@ -2236,6 +2229,10 @@ export async function sendQuestion(
     model,
     apiBase,
     apiKey,
+    authMode,
+    providerProtocol,
+    modelEntryId,
+    modelProviderLabel,
     reasoning,
     advanced,
   });
@@ -2278,7 +2275,6 @@ export async function sendQuestion(
     role: "user",
     text: userMessageText,
     timestamp: Date.now(),
-    selectedTextExpanded: false,
     selectedTexts: selectedTextsForMessage.length
       ? selectedTextsForMessage
       : undefined,
@@ -2359,8 +2355,6 @@ export async function sendQuestion(
       reasoningDetails: assistantMessage.reasoningDetails,
       webchatRunState: assistantMessage.webchatRunState,
       webchatCompletionReason: assistantMessage.webchatCompletionReason,
-      webchatChatUrl: assistantMessage.webchatChatUrl,
-      webchatChatId: assistantMessage.webchatChatId,
     });
   };
   const markCancelled = async () => {
@@ -2639,7 +2633,6 @@ export async function sendQuestion(
     setStatusSafely("Ready", "ready");
     await waitForUiStep();
     void persistAssistantOnce();
-
   } catch (err) {
     const isCancelled =
       getCancelledRequestId(conversationKey) >= thisRequestId ||
@@ -3451,7 +3444,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         );
         const syncSelectedTextExpandedState = () => {
           msg.selectedTextExpandedIndex = selectedTextExpandedIndex;
-          msg.selectedTextExpanded = selectedTextExpandedIndex === 0;
         };
         syncSelectedTextExpandedState();
         const applySelectedTextStates: Array<() => void> = [];
@@ -3590,9 +3582,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           const responseMenu = body.querySelector(
             "#llm-response-menu",
           ) as HTMLDivElement | null;
-          const exportMenu = body.querySelector(
-            "#llm-export-menu",
-          ) as HTMLDivElement | null;
           const retryModelMenu = body.querySelector(
             "#llm-retry-model-menu",
           ) as HTMLDivElement | null;
@@ -3605,7 +3594,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           }
           if (!canDeletePromptTurn) return;
           if (responseMenu) responseMenu.style.display = "none";
-          if (exportMenu) exportMenu.style.display = "none";
           if (retryModelMenu) {
             retryModelMenu.classList.remove("llm-model-menu-open");
             retryModelMenu.style.display = "none";
@@ -3668,9 +3656,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           const responseMenu = body.querySelector(
             "#llm-response-menu",
           ) as HTMLDivElement | null;
-          const exportMenu = body.querySelector(
-            "#llm-export-menu",
-          ) as HTMLDivElement | null;
           const promptMenu = body.querySelector(
             "#llm-prompt-menu",
           ) as HTMLDivElement | null;
@@ -3688,7 +3673,6 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           if (responseMenuDeleteBtn) {
             responseMenuDeleteBtn.disabled = !canDeleteResponseTurn;
           }
-          if (exportMenu) exportMenu.style.display = "none";
           if (promptMenu) promptMenu.style.display = "none";
           if (retryModelMenu) {
             retryModelMenu.classList.remove("llm-model-menu-open");

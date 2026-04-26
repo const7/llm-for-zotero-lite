@@ -29,7 +29,7 @@ type PromptShortcut = {
   file?: string;
 };
 
-export async function loadShortcutText(file: string): Promise<string> {
+async function loadShortcutText(file: string): Promise<string> {
   if (shortcutTextCache.has(file)) {
     return shortcutTextCache.get(file)!;
   }
@@ -87,7 +87,9 @@ function getPromptShortcuts(): PromptShortcut[] {
     .slice(0, MAX_EDITABLE_SHORTCUTS);
 }
 
-async function resolveShortcutPrompt(shortcut: PromptShortcut): Promise<string> {
+async function resolveShortcutPrompt(
+  shortcut: PromptShortcut,
+): Promise<string> {
   if (shortcut.prompt) return shortcut.prompt;
   if (!shortcut.file) return "";
   try {
@@ -315,7 +317,8 @@ export async function renderShortcuts(
       const nextPrompt = updated.prompt.trim();
       if (!nextPrompt) {
         const status = body.querySelector("#llm-status") as HTMLElement | null;
-        if (status) setStatus(status, "Shortcut prompt cannot be empty", "error");
+        if (status)
+          setStatus(status, "Shortcut prompt cannot be empty", "error");
         return;
       }
       const nextLabel = updated.label.trim() || shortcut.label;
@@ -398,7 +401,7 @@ export async function renderShortcuts(
   }
 }
 
-export async function openShortcutEditDialog(
+async function openShortcutEditDialog(
   initialLabel: string,
   initialPrompt: string,
   dialogTitle = "Edit Shortcut",
@@ -485,7 +488,7 @@ export async function openShortcutEditDialog(
   };
 }
 
-export async function openResetShortcutsDialog(): Promise<boolean> {
+async function openResetShortcutsDialog(): Promise<boolean> {
   const dialogData: { [key: string]: any } = {
     loadCallback: () => {
       return;

@@ -25,7 +25,7 @@ type SendFlowControllerDeps = {
   body: Element;
   inputBox: HTMLTextAreaElement;
   getItem: () => Zotero.Item | null;
-  closeSlashMenu: () => void;
+  closeAddMenu: () => void;
   closePaperPicker: () => void;
   getSelectedTextContextEntries: (itemId: number) => SelectedTextContext[];
   getSelectedPaperContexts: (itemId: number) => PaperContextRef[];
@@ -43,7 +43,12 @@ type SendFlowControllerDeps = {
   renderPdfPagesAsImages: (
     paperContexts: PaperContextRef[],
   ) => Promise<string[]>;
-  getModelPdfSupport: (modelName: string, providerProtocol?: string, authMode?: string, apiBase?: string) => "native" | "upload" | "image_url" | "vision" | "none";
+  getModelPdfSupport: (
+    modelName: string,
+    providerProtocol?: string,
+    authMode?: string,
+    apiBase?: string,
+  ) => "native" | "upload" | "image_url" | "vision" | "none";
   uploadPdfForProvider: (params: {
     apiBase: string;
     apiKey: string;
@@ -102,7 +107,10 @@ type SendFlowControllerDeps = {
   persistDraftInput: () => void;
   setStatusMessage?: (message: string, level: StatusLevel) => void;
   // [webchat]
-  hasActivePdfFullTextPapers?: (item: Zotero.Item, paperContexts?: any[]) => boolean;
+  hasActivePdfFullTextPapers?: (
+    item: Zotero.Item,
+    paperContexts?: PaperContextRef[],
+  ) => boolean;
   hasUploadedPdfInCurrentWebChatConversation?: () => boolean;
   markWebChatPdfUploadedForCurrentConversation?: () => void;
   consumeWebChatForceNewChatIntent?: () => boolean;
@@ -115,7 +123,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     const item = deps.getItem();
     if (!item) return;
 
-    deps.closeSlashMenu();
+    deps.closeAddMenu();
     deps.closePaperPicker();
 
     const textContextConversationKey = deps.getConversationKey(item);
@@ -171,7 +179,9 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         selectedProfile?.apiBase &&
         selectedProfile.apiKey
       ) {
-        const isQwen = selectedProfile.apiBase.toLowerCase().includes("dashscope");
+        const isQwen = selectedProfile.apiBase
+          .toLowerCase()
+          .includes("dashscope");
         const isQwenLong = /^qwen-long(?:[.-]|$)/i.test(activeModelName);
         if (isQwen && !isQwenLong) {
           deps.setStatusMessage?.(
@@ -180,7 +190,10 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
           );
         } else {
           deps.inputBox.disabled = true;
-          deps.setStatusMessage?.(`Uploading PDF to ${activeModelName}...`, "ready");
+          deps.setStatusMessage?.(
+            `Uploading PDF to ${activeModelName}...`,
+            "ready",
+          );
           for (const pc of pdfModePaperContexts) {
             try {
               const result = await deps.uploadPdfForProvider({
@@ -198,7 +211,10 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
               }
             } catch (err) {
               ztoolkit.log("LLM: PDF upload failed for", pc.contextItemId, err);
-              deps.setStatusMessage?.("PDF upload failed. Falling back to text mode.", "error");
+              deps.setStatusMessage?.(
+                "PDF upload failed. Falling back to text mode.",
+                "error",
+              );
             }
           }
         }
@@ -214,12 +230,19 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
             const base64 = deps.encodeBytesBase64(pdfBytes);
             pdfPageImageDataUrls.push(`data:application/pdf;base64,${base64}`);
           } catch (err) {
-            ztoolkit.log("LLM: PDF base64 encoding failed for", pc.contextItemId, err);
+            ztoolkit.log(
+              "LLM: PDF base64 encoding failed for",
+              pc.contextItemId,
+              err,
+            );
             const fallback = await deps.renderPdfPagesAsImages([pc]);
             pdfPageImageDataUrls.push(...fallback);
           }
         }
-        deps.setStatusMessage?.(`Sending ${pdfPageImageDataUrls.length} PDF(s)...`, "ready");
+        deps.setStatusMessage?.(
+          `Sending ${pdfPageImageDataUrls.length} PDF(s)...`,
+          "ready",
+        );
       } else if (pdfSupport === "vision") {
         if (deps.isImageContextUnsupportedModel(activeModelName)) {
           deps.setStatusMessage?.(
@@ -228,13 +251,24 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
           );
         } else {
           deps.inputBox.disabled = true;
-          deps.setStatusMessage?.(`PDF will be sent as page images (vision mode) for ${activeModelName}...`, "ready");
-          pdfPageImageDataUrls = await deps.renderPdfPagesAsImages(pdfModePaperContexts);
-          deps.setStatusMessage?.(`Sending ${pdfPageImageDataUrls.length} page image(s)...`, "ready");
+          deps.setStatusMessage?.(
+            `PDF will be sent as page images (vision mode) for ${activeModelName}...`,
+            "ready",
+          );
+          pdfPageImageDataUrls =
+            await deps.renderPdfPagesAsImages(pdfModePaperContexts);
+          deps.setStatusMessage?.(
+            `Sending ${pdfPageImageDataUrls.length} page image(s)...`,
+            "ready",
+          );
         }
       } else {
-        deps.setStatusMessage?.(`Sending native PDF to ${activeModelName}...`, "ready");
-        pdfFileAttachments = await deps.resolvePdfPaperAttachments(pdfModePaperContexts);
+        deps.setStatusMessage?.(
+          `Sending native PDF to ${activeModelName}...`,
+          "ready",
+        );
+        pdfFileAttachments =
+          await deps.resolvePdfPaperAttachments(pdfModePaperContexts);
       }
       deps.inputBox.disabled = false;
     }
@@ -294,8 +328,8 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       void deps
         .touchPaperConversationTitle(deps.getConversationKey(item), titleSeed)
         .catch((err) => {
-        ztoolkit.log("LLM: Failed to touch paper conversation title", err);
-      });
+          ztoolkit.log("LLM: Failed to touch paper conversation title", err);
+        });
     }
 
     const selectedImages = deps
@@ -308,7 +342,9 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       ...pdfPageImageDataUrls,
     ].slice(0, MAX_SELECTED_IMAGES);
     const selectedReasoning = deps.getSelectedReasoning();
-    const advancedParams = deps.getAdvancedModelParams(selectedProfile?.entryId);
+    const advancedParams = deps.getAdvancedModelParams(
+      selectedProfile?.entryId,
+    );
     const clearDraftAndRetainContext = (): void => {
       deps.inputBox.value = "";
       deps.persistDraftInput();
@@ -333,10 +369,10 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       ? (deps.consumeWebChatForceNewChatIntent?.() ?? false)
       : false;
     const webchatSendPdf = isWebChat
-      ? (
-        (deps.hasActivePdfFullTextPapers?.(item, allSelectedPaperContexts) ?? false) &&
-        (webchatForceNewChat || !(deps.hasUploadedPdfInCurrentWebChatConversation?.() ?? false))
-      )
+      ? (deps.hasActivePdfFullTextPapers?.(item, allSelectedPaperContexts) ??
+          false) &&
+        (webchatForceNewChat ||
+          !(deps.hasUploadedPdfInCurrentWebChatConversation?.() ?? false))
       : false;
 
     const sendTask = deps.sendQuestion({
@@ -347,17 +383,27 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       model: selectedProfile?.model,
       apiBase: selectedProfile?.apiBase,
       apiKey: selectedProfile?.apiKey,
+      authMode: selectedProfile?.authMode,
+      providerProtocol: selectedProfile?.providerProtocol,
+      modelEntryId: selectedProfile?.entryId,
+      modelProviderLabel: selectedProfile?.providerLabel,
       reasoning: selectedReasoning,
       advanced: advancedParams,
       displayQuestion,
       selectedTexts: selectedTexts.length ? selectedTexts : undefined,
-      selectedTextSources: selectedTexts.length ? selectedTextSources : undefined,
-      selectedTextPaperContexts: selectedTexts.length ? selectedTextPaperContexts : undefined,
+      selectedTextSources: selectedTexts.length
+        ? selectedTextSources
+        : undefined,
+      selectedTextPaperContexts: selectedTexts.length
+        ? selectedTextPaperContexts
+        : undefined,
       paperContexts: selectedPaperContexts,
       fullTextPaperContexts,
       attachments: selectedFiles.length ? selectedFiles : undefined,
       pdfModePaperKeys: pdfModeKeySet.size > 0 ? pdfModeKeySet : undefined,
-      pdfUploadSystemMessages: pdfUploadSystemMessages.length ? pdfUploadSystemMessages : undefined,
+      pdfUploadSystemMessages: pdfUploadSystemMessages.length
+        ? pdfUploadSystemMessages
+        : undefined,
       webchatSendPdf,
       webchatForceNewChat,
     });

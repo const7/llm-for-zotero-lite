@@ -347,7 +347,8 @@ function normalizeSelectedTextContexts(value: unknown): SelectedTextContext[] {
       const normalizedPaperContext = normalizePaperContextRefs([
         typed.paperContext,
       ])[0];
-      const contextItemId = normalizePositiveInt(typed.contextItemId) || undefined;
+      const contextItemId =
+        normalizePositiveInt(typed.contextItemId) || undefined;
       const rawPageIndex = Number(typed.pageIndex);
       const pageIndex =
         Number.isFinite(rawPageIndex) && rawPageIndex >= 0
@@ -377,10 +378,6 @@ function normalizeSelectedTextContexts(value: unknown): SelectedTextContext[] {
   return [];
 }
 
-export function getSelectedTextContexts(itemId: number): string[] {
-  return getSelectedTextContextEntries(itemId).map((entry) => entry.text);
-}
-
 export function getSelectedTextContextEntries(
   itemId: number,
 ): SelectedTextContext[] {
@@ -392,7 +389,8 @@ function normalizeSelectedTextPageLocation(
   location?: SelectedTextPageLocation | null,
 ): SelectedTextPageLocation | undefined {
   if (!location || typeof location !== "object") return undefined;
-  const contextItemId = normalizePositiveInt(location.contextItemId) || undefined;
+  const contextItemId =
+    normalizePositiveInt(location.contextItemId) || undefined;
   const rawPageIndex = Number(location.pageIndex);
   const pageIndex =
     Number.isFinite(rawPageIndex) && rawPageIndex >= 0
@@ -439,7 +437,10 @@ function buildSelectedTextContext(
 export function formatSelectedTextContextPageLabel(
   context: SelectedTextContext,
 ): string | null {
-  if (!Number.isFinite(context.pageIndex) || (context.pageIndex as number) < 0) {
+  if (
+    !Number.isFinite(context.pageIndex) ||
+    (context.pageIndex as number) < 0
+  ) {
     return null;
   }
   const label =
@@ -505,12 +506,11 @@ export function getSelectedTextExpandedIndex(
   itemId: number,
   count: number,
 ): number {
-  const raw = selectedTextPreviewExpandedCache.get(itemId) as unknown;
+  const raw = selectedTextPreviewExpandedCache.get(itemId);
   const normalized = (() => {
     if (typeof raw === "number" && Number.isFinite(raw)) {
       return Math.floor(raw);
     }
-    if (raw === true) return 0;
     return -1;
   })();
   if (normalized < 0 || normalized >= count) {
@@ -613,16 +613,15 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
       itemId,
       selectedContext,
     );
-    const contextLabel =
-      (() => {
-        const pageLabel = formatSelectedTextContextPageLabel(selectedContext);
-        if (selectedSource === "pdf" && pageLabel) {
-          return pageLabel;
-        }
-        return selectedContexts.length > 1 && index > 0
-          ? `Text Context (${index + 1})`
-          : "Text Context";
-      })();
+    const contextLabel = (() => {
+      const pageLabel = formatSelectedTextContextPageLabel(selectedContext);
+      if (selectedSource === "pdf" && pageLabel) {
+        return pageLabel;
+      }
+      return selectedContexts.length > 1 && index > 0
+        ? `Text Context (${index + 1})`
+        : "Text Context";
+    })();
 
     const previewBox = ownerDoc.createElement("div");
     previewBox.className = "llm-selected-context";
@@ -680,15 +679,17 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
       "aria-expanded",
       isJumpablePdfContext ? "false" : isExpanded ? "true" : "false",
     );
-    previewMeta.dataset.contextPageIndex =
-      Number.isFinite(selectedContext.pageIndex)
-        ? `${Math.floor(selectedContext.pageIndex as number)}`
-        : "";
+    previewMeta.dataset.contextPageIndex = Number.isFinite(
+      selectedContext.pageIndex,
+    )
+      ? `${Math.floor(selectedContext.pageIndex as number)}`
+      : "";
     previewMeta.dataset.contextPageLabel = selectedContext.pageLabel || "";
-    previewMeta.dataset.contextItemId =
-      Number.isFinite(selectedContext.contextItemId)
-        ? `${Math.floor(selectedContext.contextItemId as number)}`
-        : "";
+    previewMeta.dataset.contextItemId = Number.isFinite(
+      selectedContext.contextItemId,
+    )
+      ? `${Math.floor(selectedContext.contextItemId as number)}`
+      : "";
 
     previewHeader.appendChild(previewMeta);
     const previewClear = ownerDoc.createElement("button");
@@ -712,12 +713,12 @@ export function applySelectedTextPreview(body: Element, itemId: number) {
 
     const previewWarning = ownerDoc.createElement("div");
     previewWarning.className = "llm-selected-context-warning";
-    previewWarning.textContent = "Use PDF page or image context for corrupted text";
+    previewWarning.textContent =
+      "Use PDF page or image context for corrupted text";
     previewWarning.style.display = isCorrupted ? "block" : "none";
 
     previewExpanded.append(previewText, previewWarning);
     previewBox.append(previewHeader, previewExpanded);
     previewList.appendChild(previewBox);
   }
-
 }

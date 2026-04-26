@@ -13,7 +13,7 @@ import {
 import { detectProviderPreset, getProviderPreset } from "./providerPresets";
 import type { ProviderPresetId } from "./providerPresets";
 
-export type AdvancedModelConfig = {
+type AdvancedModelConfig = {
   temperature: number;
   maxTokens: number;
   inputTokenCap?: number;
@@ -26,7 +26,11 @@ export type ModelProviderModel = AdvancedModelConfig & {
   providerProtocol?: ProviderProtocol;
 };
 
-export type ModelProviderAuthMode = "api_key" | "codex_auth" | "copilot_auth" | "webchat"; // [webchat]
+export type ModelProviderAuthMode =
+  | "api_key"
+  | "codex_auth"
+  | "copilot_auth"
+  | "webchat"; // [webchat]
 
 export type ModelProviderGroup = {
   id: string;
@@ -272,9 +276,7 @@ function normalizeGroupModel(model: unknown): ModelProviderModel | null {
   };
 }
 
-export function normalizeModelProviderGroups(
-  raw: unknown,
-): ModelProviderGroup[] {
+function normalizeModelProviderGroups(raw: unknown): ModelProviderGroup[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((group) => normalizeGroup(group))

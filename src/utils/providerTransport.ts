@@ -50,7 +50,7 @@ function rewriteApiBasePath(parsed: ParsedApiBase, pathname: string): string {
   return `${parsed.origin}${pathname}`;
 }
 
-export function normalizeOpenAICompatibleBase(apiBase: string): string {
+function normalizeOpenAICompatibleBase(apiBase: string): string {
   const cleaned = trimTrailingSlash(apiBase);
   const parsed = parseApiBase(cleaned);
   if (!parsed) return cleaned;
@@ -110,7 +110,7 @@ function normalizeAnthropicCompatibleBase(apiBase: string): string {
   return cleaned;
 }
 
-export function normalizeAnthropicMessagesBase(apiBase: string): string {
+function normalizeAnthropicMessagesBase(apiBase: string): string {
   const cleaned = normalizeAnthropicCompatibleBase(apiBase);
   if (!cleaned) return "";
   return cleaned.replace(/\/messages$/i, "");
@@ -125,7 +125,7 @@ export function resolveAnthropicMessagesEndpoint(apiBase: string): string {
   return `${cleaned}/v1/messages`;
 }
 
-export function normalizeGeminiNativeBase(apiBase: string): string {
+function normalizeGeminiNativeBase(apiBase: string): string {
   const cleaned = trimTrailingSlash(apiBase);
   if (!cleaned) return "";
   let normalized = cleaned;

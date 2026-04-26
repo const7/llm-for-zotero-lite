@@ -48,7 +48,7 @@ function normalizeWebChatAnswerText(text: string | null | undefined): string {
     .trim();
 }
 
-export function hasMeaningfulWebChatAnswerText(
+function hasMeaningfulWebChatAnswerText(
   text: string | null | undefined,
 ): boolean {
   const normalized = normalizeWebChatAnswerText(text).toLowerCase();
@@ -73,13 +73,22 @@ export function hasMeaningfulWebChatAnswerText(
   }
   // Chinese equivalents (DeepSeek Chinese UI)
   const raw = normalizeWebChatAnswerText(text);
-  if (raw === "思考中" || raw === "思考中..." || raw === "深度思考" || raw === "停止思考") {
+  if (
+    raw === "思考中" ||
+    raw === "思考中..." ||
+    raw === "深度思考" ||
+    raw === "停止思考"
+  ) {
     return false;
   }
   if (
-    /^已深度思考/.test(raw) || /^已思考/.test(raw) || /^思考了/.test(raw) ||
-    /^正在阅读/.test(raw) || /^正在搜索/.test(raw) ||
-    /^正在分析/.test(raw) || /^正在浏览/.test(raw)
+    /^已深度思考/.test(raw) ||
+    /^已思考/.test(raw) ||
+    /^思考了/.test(raw) ||
+    /^正在阅读/.test(raw) ||
+    /^正在搜索/.test(raw) ||
+    /^正在分析/.test(raw) ||
+    /^正在浏览/.test(raw)
   ) {
     return false;
   }
@@ -109,9 +118,9 @@ export function bytesToBase64(bytes: Uint8Array): string {
 // Submit query (direct state access)
 // ---------------------------------------------------------------------------
 
-export type SubmitQueryResult = { seq: number; sessionId?: string };
+type SubmitQueryResult = { seq: number; sessionId?: string };
 
-export type WebChatTurnMetadata = {
+type WebChatTurnMetadata = {
   remoteChatUrl: string | null;
   remoteChatId: string | null;
   userTurnKey: string | null;
@@ -221,7 +230,7 @@ export type WebChatPollResult = WebChatTurnMetadata & {
   completionReason: RelayCompletionReason | null;
 };
 
-export type WebChatRemoteState = WebChatTurnMetadata;
+type WebChatRemoteState = WebChatTurnMetadata;
 
 function normalizeChatUrl(url: string | null | undefined): string {
   return String(url || "")
@@ -251,7 +260,7 @@ function withRemoteState<T extends Partial<WebChatRemoteState>>(
   };
 }
 
-export async function waitForRemoteReady(
+async function waitForRemoteReady(
   _host: string,
   timeoutMs = REMOTE_READY_TIMEOUT_MS,
   signal?: AbortSignal,
@@ -322,7 +331,9 @@ export async function pollForResponse(
     const finalText =
       hasMeaningfulWebChatAnswerText(match.text) ||
       !hasMeaningfulWebChatAnswerText(lastAnswerText)
-        ? (typeof match.text === "string" ? match.text : lastAnswerText)
+        ? typeof match.text === "string"
+          ? match.text
+          : lastAnswerText
         : lastAnswerText;
     const finalThinking =
       typeof match.thinking === "string" && match.thinking.length > 0
@@ -330,7 +341,8 @@ export async function pollForResponse(
         : lastThinkingText;
     const requestedRunState = match.run_state || "done";
     const finalAnswerRevision =
-      Number.isFinite(match.answer_revision) && Number(match.answer_revision) >= 0
+      Number.isFinite(match.answer_revision) &&
+      Number(match.answer_revision) >= 0
         ? Number(match.answer_revision)
         : lastAnswerRevision;
     const finalThinkingRevision =
@@ -350,8 +362,8 @@ export async function pollForResponse(
         : requestedRunState;
     const completionReason =
       runState === "incomplete"
-        ? (match.completion_reason || "error")
-        : (match.completion_reason || null);
+        ? match.completion_reason || "error"
+        : match.completion_reason || null;
     const result = withRemoteState({
       text: finalText || "",
       thinking: finalThinking || "",
@@ -366,9 +378,7 @@ export async function pollForResponse(
       assistantTurnKey:
         match.assistant_turn_key || data.assistant_turn_key || null,
       baselineTranscriptCount:
-        match.baseline_transcript_count ??
-        data.baseline_transcript_count ??
-        0,
+        match.baseline_transcript_count ?? data.baseline_transcript_count ?? 0,
       baselineTranscriptHash:
         match.baseline_transcript_hash || data.baseline_transcript_hash || null,
       turnStatus:
@@ -465,36 +475,42 @@ export async function pollForResponse(
         typeof data.partial_text === "string" ||
         (data.answer_revision || 0) > lastAnswerRevision
       ) {
-        emitAnswerSnapshot(data.partial_text, withRemoteState({
-          answerAnchorId: data.answer_anchor_id || null,
-          answerRevision: data.answer_revision || 0,
-          runState: data.run_state,
-          completionReason: data.completion_reason,
-          remoteChatUrl: data.remote_chat_url || null,
-          remoteChatId: data.remote_chat_id || null,
-          userTurnKey: data.user_turn_key || null,
-          assistantTurnKey: data.assistant_turn_key || null,
-          baselineTranscriptCount: data.baseline_transcript_count || 0,
-          baselineTranscriptHash: data.baseline_transcript_hash || null,
-          turnStatus: data.turn_status || null,
-        }));
+        emitAnswerSnapshot(
+          data.partial_text,
+          withRemoteState({
+            answerAnchorId: data.answer_anchor_id || null,
+            answerRevision: data.answer_revision || 0,
+            runState: data.run_state,
+            completionReason: data.completion_reason,
+            remoteChatUrl: data.remote_chat_url || null,
+            remoteChatId: data.remote_chat_id || null,
+            userTurnKey: data.user_turn_key || null,
+            assistantTurnKey: data.assistant_turn_key || null,
+            baselineTranscriptCount: data.baseline_transcript_count || 0,
+            baselineTranscriptHash: data.baseline_transcript_hash || null,
+            turnStatus: data.turn_status || null,
+          }),
+        );
       }
       if (
         typeof data.partial_thinking === "string" ||
         (data.thinking_revision || 0) > lastThinkingRevision
       ) {
-        emitThinkingSnapshot(data.partial_thinking, withRemoteState({
-          thinkingRevision: data.thinking_revision || 0,
-          runState: data.run_state,
-          completionReason: data.completion_reason,
-          remoteChatUrl: data.remote_chat_url || null,
-          remoteChatId: data.remote_chat_id || null,
-          userTurnKey: data.user_turn_key || null,
-          assistantTurnKey: data.assistant_turn_key || null,
-          baselineTranscriptCount: data.baseline_transcript_count || 0,
-          baselineTranscriptHash: data.baseline_transcript_hash || null,
-          turnStatus: data.turn_status || null,
-        }));
+        emitThinkingSnapshot(
+          data.partial_thinking,
+          withRemoteState({
+            thinkingRevision: data.thinking_revision || 0,
+            runState: data.run_state,
+            completionReason: data.completion_reason,
+            remoteChatUrl: data.remote_chat_url || null,
+            remoteChatId: data.remote_chat_id || null,
+            userTurnKey: data.user_turn_key || null,
+            assistantTurnKey: data.assistant_turn_key || null,
+            baselineTranscriptCount: data.baseline_transcript_count || 0,
+            baselineTranscriptHash: data.baseline_transcript_hash || null,
+            turnStatus: data.turn_status || null,
+          }),
+        );
       }
     }
 
@@ -537,18 +553,18 @@ export async function sendNewChat(_host: string): Promise<void> {
 // Chat history (direct state access)
 // ---------------------------------------------------------------------------
 
-export type WebChatHistorySession = {
+type WebChatHistorySession = {
   id: string;
   title: string;
   chatUrl: string | null;
 };
 
-export type WebChatHistorySnapshot = {
+type WebChatHistorySnapshot = {
   sessions: WebChatHistorySession[];
   siteSync: Record<string, RelayHistorySiteSyncEntry>;
 };
 
-export type WebChatScrapedTranscriptSnapshot = ScrapedTranscriptSnapshot;
+type WebChatScrapedTranscriptSnapshot = ScrapedTranscriptSnapshot;
 
 export async function fetchChatHistorySnapshot(
   _host: string,
@@ -566,9 +582,11 @@ export function getWebChatHistorySiteSyncEntry(
 ): RelayHistorySiteSyncEntry | null {
   const normalizedHostname = normalizeHistoryHostname(siteHostname);
   if (!normalizedHostname) return null;
-  return Object.entries(snapshot.siteSync).find(
-    ([hostname]) => normalizeHistoryHostname(hostname) === normalizedHostname,
-  )?.[1] || null;
+  return (
+    Object.entries(snapshot.siteSync).find(
+      ([hostname]) => normalizeHistoryHostname(hostname) === normalizedHostname,
+    )?.[1] || null
+  );
 }
 
 export function getWebChatHistorySiteStatus(
@@ -584,7 +602,7 @@ export function isWebChatHistorySiteFailure(
   return entry?.status === "invalid_source" || entry?.status === "timeout";
 }
 
-export async function fetchScrapedTranscriptSnapshot(
+async function fetchScrapedTranscriptSnapshot(
   _host: string,
 ): Promise<WebChatScrapedTranscriptSnapshot | null> {
   return relayGetScrapedTranscriptSnapshot();
@@ -599,7 +617,10 @@ export function filterWebChatHistorySessionsForHostname(
 
   return sessions.filter((session) => {
     try {
-      return normalizeHistoryHostname(new URL(session.chatUrl || "").hostname) === normalizedHostname;
+      return (
+        normalizeHistoryHostname(new URL(session.chatUrl || "").hostname) ===
+        normalizedHostname
+      );
     } catch {
       return false;
     }
@@ -732,14 +753,15 @@ async function waitForFreshScrapedMessagesForChat(
 ): Promise<RefreshResult> {
   const siteHostname = options.expectedChatUrl
     ? (() => {
-      try {
-        return new URL(options.expectedChatUrl).hostname;
-      } catch {
-        return null;
-      }
-    })()
+        try {
+          return new URL(options.expectedChatUrl).hostname;
+        } catch {
+          return null;
+        }
+      })()
     : null;
-  const isDeepSeekChat = normalizeHistoryHostname(siteHostname) === "chat.deepseek.com";
+  const isDeepSeekChat =
+    normalizeHistoryHostname(siteHostname) === "chat.deepseek.com";
   const snapshot = await waitForFreshScrapedTranscriptSnapshot(host, {
     expectedChatUrl: options.expectedChatUrl,
     expectedChatId: options.expectedChatId,
@@ -767,7 +789,9 @@ async function waitForFreshScrapedMessagesForChat(
     if (fallback?.messages.length) {
       return fallback.messages.map(mapScrapedMessage);
     }
-    throw new Error("Selected chat loaded, but no transcript messages were captured.");
+    throw new Error(
+      "Selected chat loaded, but no transcript messages were captured.",
+    );
   }
   return matchedSnapshot.messages.map(mapScrapedMessage);
 }
@@ -788,7 +812,10 @@ export async function waitForFreshChatHistorySnapshot(
   }
 
   while (true) {
-    const siteSyncEntry = getWebChatHistorySiteSyncEntry(latest, normalizedHostname);
+    const siteSyncEntry = getWebChatHistorySiteSyncEntry(
+      latest,
+      normalizedHostname,
+    );
     if ((siteSyncEntry?.lastUpdatedAt || 0) >= minLastUpdatedAt) {
       return latest;
     }
@@ -866,7 +893,13 @@ export async function refreshCurrentConversation(
 
   // Strategy 1: explicit URL from message metadata
   if (chatUrl) {
-    const scraped = await navigateAndScrape(_host, chatUrl, chatId || undefined, relaySetCommand, relayUpdateTurnState);
+    const scraped = await navigateAndScrape(
+      _host,
+      chatUrl,
+      chatId || undefined,
+      relaySetCommand,
+      relayUpdateTurnState,
+    );
     if (scraped.length > 0) return scraped;
   }
 
@@ -877,10 +910,13 @@ export async function refreshCurrentConversation(
     try {
       return await waitForFreshScrapedMessagesForChat(_host, {
         expectedChatUrl: result.chatUrl || null,
-        expectedChatId: chatId || relayGetStateSnapshot().remote_chat_id || null,
+        expectedChatId:
+          chatId || relayGetStateSnapshot().remote_chat_id || null,
         minCapturedAt: refreshStartedAt,
       });
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
   }
 
   // Strategy 3: mirrored history lookup
@@ -895,7 +931,9 @@ export async function refreshCurrentConversation(
           expectedChatId: fallbackId || null,
           minCapturedAt: fallbackStartedAt,
         });
-      } catch { /* exhausted */ }
+      } catch {
+        /* exhausted */
+      }
     }
   }
 
@@ -918,11 +956,17 @@ async function navigateAndScrape(
       expectedChatId: chatId || null,
       minCapturedAt: startedAt,
     });
-  } catch { /* navigation failed */ }
+  } catch {
+    /* navigation failed */
+  }
   return [];
 }
 
-function mapScrapedMessage(m: { role: string; text: string; thinking?: string }) {
+function mapScrapedMessage(m: {
+  role: string;
+  text: string;
+  thinking?: string;
+}) {
   return {
     speaker: m.role === "user" ? "user" : "assistant",
     text: m.text || "",
