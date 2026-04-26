@@ -1,120 +1,64 @@
 # llm-for-zotero-lite
 
-Personal lean fork of `llm-for-zotero`, focused on one primary workflow:
-chat with the current paper inside the Zotero side panel, with lower UI and
-startup overhead than the upstream full-featured plugin.
+A personal lean fork of `llm-for-zotero`, based on
+commit [`a705f69`](https://github.com/const7/llm-for-zotero-lite/commit/a705f69c2569a329d3837e8abae5345de56b0aae).
 
-## What This Fork Optimizes For
-
-- fast startup
-- responsive paper selection and panel hydration
-- smooth send / stream / response completion flow
-- paper-scoped chat as the default and primary path
-
-This branch intentionally trims or de-emphasizes product surface that is not
-needed for that path.
+This fork is intentionally focused on one workflow: chatting with the current
+paper in Zotero's side panel.
 
 ## Current Scope
 
-Core workflow kept:
+The main supported path is paper chat with:
 
-- open a paper in Zotero
-- ask questions in the reader side panel
-- stream answers
-- keep paper conversation history
-- use current-paper context, reference picker, retrieval, prompt presets, and
-  file/image attachments
+- current paper context, selected text, reference context, and prompt presets
+- API / Codex Auth / GitHub Copilot providers
+- WebChat provider path
+- MinerU cache/manual parsing when useful for paper chat
 
-Provider paths kept:
+Agent workflows, standalone windows, note/export workflows, and unrelated
+background jobs have been removed from the product surface.
 
-- API / Codex Auth / GitHub Copilot
-- webchat
+## Main Changes
 
-Paper parsing kept:
+- Slimmed startup so only paper-chat essentials initialize by default.
+- Reworked the side panel around a single paper-chat path.
+- Optimized long-history rendering, conversation switching, and response-end
+  updates to reduce Zotero UI stalls.
+- Added lightweight prompt presets and a hover timeline for jumping between
+  questions.
+- Kept WebChat and MinerU off the hot path unless explicitly used.
+- Simplified preferences, docs, tests, and release flow for this lite fork.
 
-- MinerU cache as a paper-chat text source
+## Install
 
-Anything outside this scope is intentionally not part of the product surface.
+Download the `.xpi` from GitHub Releases, then install it in Zotero via
+`Tools -> Add-ons -> Install Add-on From File...`.
 
-## Installation
+This fork uses its own addon identity:
 
-1. Download the latest `.xpi` from your releases page.
-2. In Zotero, open `Tools -> Add-ons`.
-3. Choose `Install Add-on From File...`.
-4. Restart Zotero.
+- name: `llm-for-zotero-lite`
+- id: `zotero-llm-lite@github.com.const7`
+- prefs: `extensions.zotero.llmforzoterolite`
 
-The addon identity in this fork is isolated from upstream:
+## Configure
 
-- addon name: `llm-for-zotero-lite`
-- addon id: `zotero-llm-lite@github.com.const7`
-- prefs prefix: `extensions.zotero.llmforzoterolite`
-
-## Configuration
-
-Open `Preferences -> llm-for-zotero-lite`.
-
-Set only the essentials:
-
-- provider
-- API base URL
-- API key / secret
-- model
-
-Then click `Test Connection`.
-
-## Daily Use
-
-1. Open a PDF in Zotero.
-2. Open the side panel.
-3. Ask a question about the current paper.
-
-The intended behavior is:
-
-- first turn can use full paper context
-- follow-up turns stay paper-scoped
-- long histories should not block normal Zotero interactions
+Open `Preferences -> llm-for-zotero-lite`, configure a provider/model, then use
+`Test Connection`.
 
 ## Development
-
-### Requirements
-
-- Node.js
-- Zotero
-
-### Common commands
 
 ```bash
 npm install
 npm start
-npm run typecheck
-npm run test:unit
+npm run test
+npm run lint:check
 npm run build
 ```
+
+`npm run test:zotero` is kept for explicit Zotero-runner integration checks.
 
 ## Release
 
-This repo is already set up for automated GitHub releases.
-
-- CI: `.github/workflows/ci.yml`
-- release workflow: `.github/workflows/release.yml`
-- release command: `npm run release`
-
-The release workflow runs when you push a tag matching `v*`.
-
-Typical flow:
-
-```bash
-npm run build
-git tag v1.0.0
-git push origin main --tags
-```
-
-If the repository metadata in `package.json` points to your fork, generated
-update metadata and release links will also point to your fork.
-
-## Fork Policy
-
-- README and docs are intentionally short and aligned to the lite scope.
-- If a feature is not documented here, it should not be treated as part of the
-  product surface.
-- This fork is not trying to maintain upstream feature parity.
+GitHub Actions can build releases automatically. Push a tag matching `v*` to
+trigger `.github/workflows/release.yml`, which builds the plugin and uploads the
+release artifact.
