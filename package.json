@@ -1,7 +1,7 @@
 {
   "name": "llm-for-zotero-lite",
   "type": "module",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Lite AI research assistant rooted in your Zotero library",
   "config": {
     "addonName": "llm-for-zotero-lite",
