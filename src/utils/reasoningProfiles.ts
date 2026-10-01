@@ -12,7 +12,9 @@ export type ReasoningLevel =
   | "low"
   | "medium"
   | "high"
-  | "xhigh";
+  | "xhigh"
+  | "max"
+  | "ultra";
 export type OpenAIReasoningEffort =
   | "default"
   | "none"
@@ -20,7 +22,9 @@ export type OpenAIReasoningEffort =
   | "low"
   | "medium"
   | "high"
-  | "xhigh";
+  | "xhigh"
+  | "max"
+  | "ultra";
 export type GeminiThinkingParam = "thinking_level" | "thinking_budget";
 export type GeminiThinkingValue = "low" | "medium" | "high" | number;
 export type GeminiReasoningOption = {
@@ -565,6 +569,8 @@ const OPENAI_EFFORT_ORDER: OpenAIReasoningEffort[] = [
   "medium",
   "high",
   "xhigh",
+  "max",
+  "ultra",
 ];
 
 function normalizeModelName(modelName?: string): string {

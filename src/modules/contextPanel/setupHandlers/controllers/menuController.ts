@@ -26,6 +26,7 @@ export function positionFloatingMenu(
   owner: Element,
   menu: HTMLDivElement,
   anchor: HTMLButtonElement,
+  placement: "above" | "below" = "below",
 ): void {
   const win = owner.ownerDocument?.defaultView;
   if (!win) return;
@@ -56,6 +57,8 @@ export function positionFloatingMenu(
   const availableHeight = Math.max(120, boundaryBottom - boundaryTop);
 
   menu.style.position = "fixed";
+  menu.style.right = "auto";
+  menu.style.bottom = "auto";
   menu.style.display = "grid";
   menu.style.visibility = "hidden";
   menu.style.maxWidth = `${availableWidth}px`;
@@ -65,23 +68,23 @@ export function positionFloatingMenu(
   menu.style.overflowX = "hidden";
 
   const anchorRect = anchor.getBoundingClientRect();
+  const spaceAbove = Math.max(0, anchorRect.top - gap - boundaryTop);
+  const spaceBelow = Math.max(0, boundaryBottom - anchorRect.bottom - gap);
+  const naturalHeight = menu.getBoundingClientRect().height;
+  const openAbove =
+    placement === "above"
+      ? spaceAbove >= naturalHeight || spaceAbove >= spaceBelow
+      : spaceBelow < naturalHeight && spaceAbove > spaceBelow;
+  menu.style.maxHeight = `${openAbove ? spaceAbove : spaceBelow}px`;
   const menuRect = menu.getBoundingClientRect();
 
   let left = anchorRect.left;
   const maxLeft = Math.max(boundaryLeft, boundaryRight - menuRect.width);
   left = Math.min(Math.max(boundaryLeft, left), maxLeft);
 
-  const belowTop = anchorRect.bottom + gap;
-  const aboveTop = anchorRect.top - gap - menuRect.height;
-  let top = belowTop;
-
-  if (belowTop + menuRect.height > boundaryBottom) {
-    if (aboveTop >= boundaryTop) {
-      top = aboveTop;
-    } else {
-      top = Math.max(boundaryTop, boundaryBottom - menuRect.height);
-    }
-  }
+  const top = openAbove
+    ? anchorRect.top - gap - menuRect.height
+    : anchorRect.bottom + gap;
 
   menu.style.left = `${Math.round(left)}px`;
   menu.style.top = `${Math.round(Math.max(boundaryTop, top))}px`;

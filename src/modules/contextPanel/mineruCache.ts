@@ -1,6 +1,6 @@
 import { joinLocalPath } from "../../utils/localPath";
 
-const MINERU_CACHE_DIR_NAME = "llm-for-zotero-lite-mineru";
+import { getPluginDataDir } from "../../utils/pluginDataDir";
 
 type IOUtilsLike = {
   exists?: (path: string) => Promise<boolean>;
@@ -22,25 +22,8 @@ function getOSFile(): OSFileLike | undefined {
   return (globalThis as { OS?: { File?: OSFileLike } }).OS?.File;
 }
 
-function getBaseDir(): string {
-  const zotero = Zotero as unknown as {
-    DataDirectory?: { dir?: string };
-    Profile?: { dir?: string };
-  };
-  const dataDir = zotero.DataDirectory?.dir;
-  if (typeof dataDir === "string" && dataDir.trim()) return dataDir.trim();
-  const profileDir = zotero.Profile?.dir;
-  if (typeof profileDir === "string" && profileDir.trim())
-    return profileDir.trim();
-  throw new Error("Cannot resolve data directory for MinerU cache");
-}
-
-function getMineruCacheDir(): string {
-  return joinLocalPath(getBaseDir(), MINERU_CACHE_DIR_NAME);
-}
-
 function getMineruItemDir(id: number): string {
-  return joinLocalPath(getMineruCacheDir(), String(id));
+  return getPluginDataDir("cache", "mineru", String(id));
 }
 
 // The md content is stored at a well-known path for quick access
@@ -461,7 +444,7 @@ async function buildAndWriteManifest(
   const itemDir = getMineruItemDir(id);
   if (!(await pathExists(itemDir))) return null;
 
-  const mdBytes = await readFileBytes(getMineruMdPath(id));
+  const mdBytes = await readFileBytes(joinLocalPath(itemDir, "full.md"));
   if (!mdBytes) return null;
   const mdContent = new TextDecoder("utf-8").decode(mdBytes);
 
@@ -481,7 +464,7 @@ async function buildAndWriteManifest(
   const manifest = buildManifest(mdContent, contentList);
 
   // Write manifest.json
-  const manifestPath = getManifestPath(id);
+  const manifestPath = joinLocalPath(itemDir, "manifest.json");
   await writeFileBytes(
     manifestPath,
     new TextEncoder().encode(JSON.stringify(manifest)),

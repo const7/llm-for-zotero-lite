@@ -1,3 +1,4 @@
+import { getCodexReasoningOptions } from "../../codex/models";
 import { renderMarkdown } from "../../utils/markdown";
 import {
   getWebChatWelcomeHtml,
@@ -135,7 +136,6 @@ import {
 import { toFileUrl } from "../../utils/localPath";
 import { replaceConversationAttachmentRefs } from "../../utils/attachmentRefStore";
 import { decorateAssistantCitationLinks } from "./assistantCitationLinks";
-import { compressLongHistory } from "./historyCompression";
 import { hideQuestionTimeline, syncQuestionTimeline } from "./questionTimeline";
 
 /** Get AbortController constructor from global scope */
@@ -712,7 +712,9 @@ export async function ensureConversationLoaded(
 
 export function detectReasoningProvider(
   modelName: string,
+  authMode?: ModelProviderAuthMode,
 ): ReasoningProviderKind {
+  if (authMode === "codex_app_server") return "openai";
   const name = modelName.trim().toLowerCase();
   if (!name) return "unsupported";
   if (name.startsWith("deepseek")) {
@@ -731,7 +733,7 @@ export function detectReasoningProvider(
     return "anthropic";
   }
   if (name.includes("gemini")) return "gemini";
-  if (/^(gpt-5|o\d)(\b|[.-])/.test(name)) return "openai";
+  if (/^(gpt-[56]|o\d)(\b|[.-])/.test(name)) return "openai";
   return "unsupported";
 }
 
@@ -742,7 +744,7 @@ function formatDisplayModelName(
   const normalizedModel = (modelName || "").trim();
   if (!normalizedModel) return "";
   const provider = (modelProviderLabel || "").trim().toLowerCase();
-  if (provider.includes("(codex auth)")) {
+  if (provider.includes("(codex auth)") || provider === "codex app server") {
     return `codex/${normalizedModel}`;
   }
   if (provider.includes("(copilot auth)")) {
@@ -755,13 +757,24 @@ export function getReasoningOptions(
   provider: ReasoningProviderKind,
   modelName: string,
   _apiBase?: string,
+  authMode?: ModelProviderAuthMode,
 ): ReasoningOption[] {
+  if (authMode === "codex_app_server")
+    return getCodexReasoningOptions(modelName);
   if (provider === "unsupported") return [];
-  return getRuntimeReasoningOptions(provider, modelName).map((option) => ({
-    level: option.level as LLMReasoningLevel,
-    enabled: option.enabled,
-    label: option.label,
-  }));
+  return getRuntimeReasoningOptions(provider, modelName)
+    .filter(
+      (option) =>
+        provider !== "openai" ||
+        option.level === "low" ||
+        option.level === "medium" ||
+        option.level === "high",
+    )
+    .map((option) => ({
+      level: option.level as LLMReasoningLevel,
+      enabled: option.enabled,
+      label: option.label,
+    }));
 }
 
 async function copyTextToClipboard(body: Element, text: string): Promise<void> {
@@ -849,10 +862,16 @@ export function getSelectedReasoningForItem(
   itemId: number,
   modelName: string,
   apiBase?: string,
+  authMode?: ModelProviderAuthMode,
 ): LLMReasoningConfig | undefined {
-  const provider = detectReasoningProvider(modelName);
+  const provider = detectReasoningProvider(modelName, authMode);
   if (provider === "unsupported") return undefined;
-  const enabledLevels = getReasoningOptions(provider, modelName, apiBase)
+  const enabledLevels = getReasoningOptions(
+    provider,
+    modelName,
+    apiBase,
+    authMode,
+  )
     .filter((option) => option.enabled)
     .map((option) => option.level);
   if (!enabledLevels.length) return undefined;
@@ -1034,7 +1053,7 @@ function resolveEffectiveRequestConfig(
     "api_key";
   const reasoning =
     params.reasoning ||
-    getSelectedReasoningForItem(params.item.id, model, apiBase);
+    getSelectedReasoningForItem(params.item.id, model, apiBase, authMode);
   const advanced =
     params.advanced ||
     getAdvancedModelParamsForEntry(fallbackEntry?.entryId) ||
@@ -2160,7 +2179,12 @@ export async function editUserTurnAndRetry(opts: {
   const resolvedApiKey = apiKey ?? profile?.apiKey;
   const resolvedReasoning =
     reasoning ||
-    getSelectedReasoningForItem(item.id, resolvedModel || "", resolvedApiBase);
+    getSelectedReasoningForItem(
+      item.id,
+      resolvedModel || "",
+      resolvedApiBase,
+      authMode ?? profile?.authMode,
+    );
   const resolvedAdvanced =
     advanced || getAdvancedModelParamsForEntry(profile?.entryId);
 
@@ -2489,8 +2513,7 @@ export async function sendQuestion(
   }
 
   try {
-    const rawLLMHistory = buildLLMHistoryMessages(historyForLLM);
-    const llmHistory = compressLongHistory(rawLLMHistory);
+    const llmHistory = buildLLMHistoryMessages(historyForLLM);
     const recentPaperContexts = collectRecentPaperContexts(historyForLLM);
 
     // Create AbortController early so the signal is available during context

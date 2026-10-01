@@ -13,6 +13,14 @@
 // ── Chinese (Simplified) translation map ────────────────────────────────────
 
 const zhCN: Record<string, string> = {
+  "Loading models…": "正在获取模型…",
+  "Refresh models": "刷新模型",
+  "Could not load Codex models:": "无法获取 Codex 模型：",
+  "Default model": "默认模型",
+  "Choose a model below; select low, medium or high in the chat panel.":
+    "在下方选择模型；在聊天面板中选择 low、medium 或 high 推理级别。",
+  "not in available list": "不在可用列表中",
+  "Select a model": "选择模型",
   // ── Shortcut actions ────────────────────────────────────────────────────
   Summarize: "摘要",
   "Key Points": "要点",
@@ -103,6 +111,9 @@ const zhCN: Record<string, string> = {
   "Collapse files panel": "收起文件面板",
   "Expand figures panel": "展开图片面板",
   "Collapse figures panel": "收起图片面板",
+  "Text only (no paper images)": "仅文字（不含论文图片）",
+  "Text only: paper figures are not included. Add a screenshot to analyze a figure.":
+    "当前论文仅提供文字，不包含论文图片。分析图表请添加截图。",
   "Text context pinned for next sends": "文本上下文已固定于后续发送",
   "Text context unpinned": "文本上下文已取消固定",
   "Image pinned for next sends": "图片已固定于后续发送",
@@ -153,8 +164,6 @@ const zhCN: Record<string, string> = {
     "每个服务商有一个认证模式、API URL 和一个或多个模型变体。",
   "Choose a preset above, or switch to Customized to enter a full base URL or endpoint manually.":
     '选择上方的预设，或切换到"自定义"以手动输入完整的基础 URL 或端点。',
-  "codex auth usually uses https://chatgpt.com/backend-api/codex/responses":
-    "codex 认证通常使用 https://chatgpt.com/backend-api/codex/responses",
   "Switch Provider to Customized to edit this URL manually.":
     '将服务商切换到"自定义"以手动编辑此 URL。',
   "Switch to Customized to edit the URL manually.":
@@ -165,7 +174,11 @@ const zhCN: Record<string, string> = {
   "API URL": "API URL",
   "API Key": "API 密钥",
   "codex auth": "codex 认证",
-  "Codex Auth": "Codex 认证",
+  "Codex App Server": "Codex App Server",
+  "Codex executable path": "Codex 可执行文件路径",
+  "Auto-detect Codex executable": "自动查找 Codex 可执行文件",
+  "Codex CLI must be installed and signed in with `codex login`. Conversations are saved only in Zotero.":
+    "请安装 Codex CLI 并运行 codex login 登录。对话仅保存在 Zotero 中。",
   "Auth Mode": "认证模式",
   "Model names": "模型名称",
   "Add model": "添加模型",
@@ -184,12 +197,8 @@ const zhCN: Record<string, string> = {
   "+ Add Provider": "+ 添加服务商",
   "API URL is required": "API URL 为必填项",
   "API Key is required": "API 密钥为必填项",
-  "codex token missing. Run `codex login` first.":
-    "codex 令牌缺失。请先运行 `codex login`。",
   "Provider capability: ": "服务商能力: ",
   "✓ Success — model says: ": "✓ 成功 — 模型回复: ",
-  "codex auth reuses local `codex login` credentials from ~/.codex/auth.json":
-    "codex 认证复用本地 `codex login` 凭据（~/.codex/auth.json）",
   "GitHub Copilot": "GitHub Copilot",
   "Login with GitHub Copilot": "使用 GitHub Copilot 登录",
   "Re-login": "重新登录",

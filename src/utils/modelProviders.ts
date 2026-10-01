@@ -1,3 +1,4 @@
+import { getCachedCodexModels } from "../codex/models";
 import { config } from "../../package.json";
 import { DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE } from "./llmDefaults";
 import {
@@ -28,7 +29,7 @@ export type ModelProviderModel = AdvancedModelConfig & {
 
 export type ModelProviderAuthMode =
   | "api_key"
-  | "codex_auth"
+  | "codex_app_server"
   | "copilot_auth"
   | "webchat"; // [webchat]
 
@@ -116,7 +117,8 @@ function normalizeApiBase(apiBase: string): string {
 }
 
 function normalizeProviderAuthMode(value: unknown): ModelProviderAuthMode {
-  if (value === "codex_auth") return "codex_auth";
+  if (value === "codex_auth" || value === "codex_app_server")
+    return "codex_app_server";
   if (value === "copilot_auth") return "copilot_auth";
   if (value === "webchat") return "webchat"; // [webchat]
   return "api_key";
@@ -227,8 +229,9 @@ function normalizeGroup(group: unknown): ModelProviderGroup | null {
       typeof rawGroup.id === "string" && rawGroup.id.trim()
         ? rawGroup.id.trim()
         : createId("provider"),
-    apiBase,
-    apiKey: normalizeString(rawGroup.apiKey),
+    apiBase: authMode === "codex_app_server" ? "" : apiBase,
+    apiKey:
+      authMode === "codex_app_server" ? "" : normalizeString(rawGroup.apiKey),
     authMode,
     providerProtocol: normalizeProviderProtocolForAuthMode({
       protocol: rawGroup.providerProtocol,
@@ -362,13 +365,27 @@ export function getRuntimeModelEntries(): RuntimeModelEntry[] {
     const providerLabel =
       authMode === "webchat"
         ? `${baseProviderLabel} (web)`
-        : authMode === "codex_auth"
-          ? `${baseProviderLabel} (codex auth)`
+        : authMode === "codex_app_server"
+          ? "Codex App Server"
           : authMode === "copilot_auth"
             ? `${baseProviderLabel} (copilot auth)`
             : baseProviderLabel;
     const normalizedCounts = new Map<string, number>();
-    for (const modelEntry of group.models) {
+    const models = [...group.models];
+    if (authMode === "codex_app_server") {
+      const configured = new Set(models.map((entry) => entry.model.trim()));
+      for (const model of getCachedCodexModels()) {
+        if (!configured.has(model.model)) {
+          models.push({
+            id: `${group.id}:codex:${model.model}`,
+            model: model.model,
+            temperature: DEFAULT_TEMPERATURE,
+            maxTokens: DEFAULT_MAX_TOKENS,
+          });
+        }
+      }
+    }
+    for (const modelEntry of models) {
       const modelName = modelEntry.model.trim();
       if (!modelName) continue;
       const normalizedModel = modelName.toLowerCase();
@@ -378,7 +395,7 @@ export function getRuntimeModelEntries(): RuntimeModelEntry[] {
       const baseModelLabel =
         authMode === "webchat"
           ? `web/${modelName}`
-          : authMode === "codex_auth"
+          : authMode === "codex_app_server"
             ? `codex/${modelName}`
             : authMode === "copilot_auth"
               ? `copilot/${modelName}`

@@ -48,6 +48,8 @@ const REASONING_LEVEL_SELECTIONS = new Set<ReasoningLevelSelection>([
   "medium",
   "high",
   "xhigh",
+  "max",
+  "ultra",
 ]);
 
 export function buildPaperStateKey(

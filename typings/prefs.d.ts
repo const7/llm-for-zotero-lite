@@ -23,6 +23,7 @@ declare namespace _ZoteroTypes {
       "embeddingModel": string;
       "mineruEnabled": boolean;
       "locale": string;
+      "codexBinaryPath": string;
     };
   }
 }

@@ -1,7 +1,7 @@
 /**
  * Persistent disk cache for paper chunk embeddings.
  *
- * Stores one JSON file per paper in `{dataDir}/llm-for-zotero-lite-embeddings/`.
+ * Stores one JSON file per paper in `{dataDir}/llm-for-zotero-lite/cache/embeddings/`.
  * Uses the same Gecko I/O pattern as mineruCache.ts (IOUtils → OS.File fallback).
  *
  * Cache invalidation is implicit: the stored chunk hash, model, and provider
@@ -10,7 +10,7 @@
 
 import { joinLocalPath } from "../../utils/localPath";
 
-const EMBEDDING_CACHE_DIR = "llm-for-zotero-lite-embeddings";
+import { getPluginDataDir, getZoteroDataDir } from "../../utils/pluginDataDir";
 const CACHE_VERSION = 2; // v2: added provider field for cross-provider cache isolation
 
 // ── Gecko I/O helpers (mirrors mineruCache.ts) ──────────────────────────────
@@ -43,21 +43,8 @@ function getOSFile(): OSFileLike | undefined {
   return (globalThis as { OS?: { File?: OSFileLike } }).OS?.File;
 }
 
-function getBaseDir(): string {
-  const zotero = Zotero as unknown as {
-    DataDirectory?: { dir?: string };
-    Profile?: { dir?: string };
-  };
-  const dataDir = zotero.DataDirectory?.dir;
-  if (typeof dataDir === "string" && dataDir.trim()) return dataDir.trim();
-  const profileDir = zotero.Profile?.dir;
-  if (typeof profileDir === "string" && profileDir.trim())
-    return profileDir.trim();
-  throw new Error("Cannot resolve data directory for embedding cache");
-}
-
 function getCacheDir(): string {
-  return joinLocalPath(getBaseDir(), EMBEDDING_CACHE_DIR);
+  return getPluginDataDir("cache", "embeddings");
 }
 
 function getCachePath(itemId: number): string {
@@ -75,7 +62,10 @@ async function ensureDir(path: string): Promise<void> {
   }
   const osFile = getOSFile();
   if (osFile?.makeDir) {
-    await osFile.makeDir(path, { ignoreExisting: true });
+    await osFile.makeDir(path, {
+      from: getZoteroDataDir(),
+      ignoreExisting: true,
+    });
   }
 }
 

@@ -1,3 +1,5 @@
+import { stopCodexModelRefresh } from "./codex/models";
+import { stopCodexRequests } from "./codex/client";
 import { initLocale } from "./utils/locale";
 import { initI18n } from "./utils/i18n";
 import { PREFERENCES_PANE_ID } from "./modules/contextPanel/constants";
@@ -66,6 +68,8 @@ async function onMainWindowUnload(_win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
+  stopCodexRequests();
+  stopCodexModelRefresh();
   if (paperSearchInvalidateTimer !== null) {
     clearTimeout(paperSearchInvalidateTimer);
     paperSearchInvalidateTimer = null;
@@ -116,7 +120,7 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
     case "load": {
       const { registerPrefsScripts } =
         await import("./modules/preferenceScript");
-      registerPrefsScripts(data.window);
+      await registerPrefsScripts(data.window);
       break;
     }
     default:

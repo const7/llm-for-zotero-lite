@@ -17,3 +17,5 @@ pref("embeddingApiKey", "");
 pref("embeddingModel", "gemini-embedding-001");
 pref("mineruEnabled", false);
 pref("locale", "auto");
+
+pref("codexBinaryPath", "");

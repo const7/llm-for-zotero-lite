@@ -224,7 +224,7 @@ describe("sendFlowController", function () {
         apiBase: "https://chatgpt.com/backend-api/codex/responses",
         apiKey: "test-key",
         providerLabel: "OpenAI (codex auth)",
-        authMode: "codex_auth",
+        authMode: "codex_app_server",
         providerProtocol: "responses",
       }),
       resolvePromptText: () => "summarize the paper",

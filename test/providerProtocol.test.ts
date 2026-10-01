@@ -6,14 +6,14 @@ import {
 } from "../src/utils/providerProtocol";
 
 describe("providerProtocol", function () {
-  it("forces codex auth onto codex_responses", function () {
+  it("forces codex auth onto codex_app_server", function () {
     assert.equal(
       normalizeProviderProtocolForAuthMode({
         protocol: "gemini_native",
-        authMode: "codex_auth",
+        authMode: "codex_app_server",
         apiBase: "https://chatgpt.com/backend-api/codex/responses",
       }),
-      "codex_responses",
+      "codex_app_server",
     );
   });
 

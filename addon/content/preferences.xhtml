@@ -210,7 +210,7 @@
 
         <html:div style="display: flex; flex-direction: column; gap: 4px">
           <html:label
-            for="__addonRef__-locale-select"
+            id="__addonRef__-locale-label"
             style="
               display: block;
               font-weight: 600;
@@ -221,22 +221,18 @@
           >
             Language
           </html:label>
-          <html:select
+          <menulist
             id="__addonRef__-locale-select"
-            style="
-              width: 220px;
-              padding: 4px 8px;
-              font-size: 12px;
-              border: 1px solid var(--stroke-secondary, #c8c8c8);
-              border-radius: 6px;
-              background: Field;
-              color: FieldText;
-            "
+            native="true"
+            aria-labelledby="__addonRef__-locale-label"
+            style="width: 220px; margin: 0"
           >
-            <html:option value="auto">Auto (follow Zotero)</html:option>
-            <html:option value="en-US">English</html:option>
-            <html:option value="zh-CN">中文 (简体)</html:option>
-          </html:select>
+            <menupopup>
+              <menuitem value="auto" label="Auto (follow Zotero)" />
+              <menuitem value="en-US" label="English" />
+              <menuitem value="zh-CN" label="中文 (简体)" />
+            </menupopup>
+          </menulist>
           <html:span
             id="__addonRef__-locale-restart-hint"
             style="

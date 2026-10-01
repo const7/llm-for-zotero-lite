@@ -169,10 +169,10 @@ export function resolveProviderTransportEndpoint(params: {
   stream?: boolean;
   authMode?: ModelProviderAuthMode;
 }): string {
-  if (
-    params.protocol === "codex_responses" ||
-    params.protocol === "responses_api"
-  ) {
+  if (params.protocol === "codex_app_server") {
+    throw new Error("Codex App Server does not use an HTTP endpoint.");
+  }
+  if (params.protocol === "responses_api") {
     // Copilot uses /responses (no /v1 prefix)
     if (params.authMode === "copilot_auth" || isCopilotHost(params.apiBase)) {
       const base = trimTrailingSlash(params.apiBase);
@@ -206,7 +206,6 @@ export function buildProviderTransportHeaders(params: {
   authMode?: ModelProviderAuthMode;
 }): Record<string, string> {
   if (
-    params.protocol === "codex_responses" ||
     params.protocol === "responses_api" ||
     params.protocol === "openai_chat_compat"
   ) {

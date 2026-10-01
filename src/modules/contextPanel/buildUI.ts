@@ -297,7 +297,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   );
   addList.append(addUploadBtn, addReferenceBtn);
   addMenu.append(addList);
-  // addMenu is appended to composeArea below (after composeArea is created)
+  // Keep the context menu with its action button, like the other selectors.
 
   // Retry model menu (opened from latest assistant retry action)
   const retryModelMenu = createElement(doc, "div", "llm-model-menu", {
@@ -467,7 +467,6 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   paperPickerList.setAttribute("role", "listbox");
   paperPicker.appendChild(paperPickerList);
   composeArea.appendChild(paperPicker);
-  composeArea.appendChild(addMenu);
 
   const shortcuts = createElement(doc, "div", "llm-shortcuts", {
     id: "llm-shortcuts",
@@ -562,7 +561,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   uploadInput.multiple = true;
   uploadInput.style.display = "none";
   const uploadSlot = createElement(doc, "div", "llm-action-slot");
-  uploadSlot.append(uploadBtn, uploadInput);
+  uploadSlot.append(uploadBtn, uploadInput, addMenu);
 
   const { slot: modelDropdown } = createActionDropdown(doc, {
     slotId: "llm-model-dropdown",

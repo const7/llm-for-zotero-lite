@@ -1,3 +1,4 @@
+import { getCachedCodexModels, refreshCodexModels } from "../codex/models";
 import { config } from "../../package.json";
 import { t } from "../utils/i18n";
 import { WEBCHAT_TARGETS } from "../webchat/types";
@@ -43,7 +44,6 @@ import {
   callEmbeddings,
 } from "../utils/llmClient";
 import { resetEmbeddingFailedFlags } from "./contextPanel/pdfContext";
-import { joinLocalPath } from "../utils/localPath";
 import { isMineruEnabled, setMineruEnabled } from "../utils/mineruConfig";
 
 type PrefKey = "systemPrompt";
@@ -60,15 +60,11 @@ const setPref = (key: PrefKey, value: string) =>
 
 const CUSTOMIZED_API_HELPER_TEXT =
   "Choose a preset above, or switch to Customized to enter a full base URL or endpoint manually.";
-const CODEX_API_HELPER_TEXT =
-  "codex auth usually uses https://chatgpt.com/backend-api/codex/responses";
 const COPILOT_API_HELPER_TEXT =
   "GitHub Copilot uses device-based login. Click Login to authenticate via GitHub.";
 const DEFAULT_COPILOT_API_BASE = "https://api.githubcopilot.com";
 const MAX_PROVIDER_COUNT = 10;
 const INITIAL_PROVIDER_COUNT = 4;
-const DEFAULT_CODEX_API_BASE =
-  "https://chatgpt.com/backend-api/codex/responses";
 
 type ProviderProfile = {
   label: string;
@@ -124,16 +120,16 @@ function getProtocolOptions(
   presetId: ProviderPresetId,
 ): ProviderProtocol[] {
   if (authMode === "webchat") return ["web_sync"]; // [webchat]
-  if (authMode === "codex_auth") return ["codex_responses"];
+  if (authMode === "codex_app_server") return ["codex_app_server"];
   if (authMode === "copilot_auth")
     return ["openai_chat_compat", "responses_api"];
   if (presetId !== "customized") {
     return getProviderPreset(presetId).supportedProtocols.filter(
-      (protocol) => protocol !== "codex_responses",
+      (protocol) => protocol !== "codex_app_server",
     );
   }
   return PROVIDER_PROTOCOL_SPECS.map((entry) => entry.id).filter(
-    (protocol) => protocol !== "codex_responses",
+    (protocol) => protocol !== "codex_app_server",
   );
 }
 
@@ -142,8 +138,8 @@ function resolveSelectedProtocol(
   presetId: ProviderPresetId,
 ): ProviderProtocol {
   const fallback =
-    group.authMode === "codex_auth"
-      ? "codex_responses"
+    group.authMode === "codex_app_server"
+      ? "codex_app_server"
       : presetId === "customized"
         ? "openai_chat_compat"
         : getProviderPreset(presetId).defaultProtocol;
@@ -169,6 +165,29 @@ function el<K extends keyof HTMLElementTagNameMap>(
   if (style) node.setAttribute("style", style);
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+// HTML select popups fail in Zotero's chrome preferences window. Use the
+// same native menulist control as Zotero's built-in preference panes.
+function nativeSelect(
+  doc: Document,
+  options: { value: string; label: string }[],
+  value: string,
+  style = "width: 100%; margin: 0;",
+) {
+  const menu = doc.createXULElement("menulist") as XUL.MenuList;
+  menu.setAttribute("native", "true");
+  menu.setAttribute("style", style);
+  const popup = doc.createXULElement("menupopup");
+  for (const option of options) {
+    const item = doc.createXULElement("menuitem");
+    item.setAttribute("value", option.value);
+    item.setAttribute("label", option.label);
+    popup.appendChild(item);
+  }
+  menu.appendChild(popup);
+  menu.setAttribute("value", value);
+  return menu;
 }
 
 function iconBtn(
@@ -223,101 +242,9 @@ function hasEmptyModel(group: ModelProviderGroup): boolean {
 
 function normalizeAuthMode(value: unknown): ModelProviderAuthMode {
   if (value === "webchat") return "webchat"; // [webchat]
-  if (value === "codex_auth") return "codex_auth";
+  if (value === "codex_app_server") return "codex_app_server";
   if (value === "copilot_auth") return "copilot_auth";
   return "api_key";
-}
-
-type ProcessLike = { env?: Record<string, string | undefined> };
-type PathUtilsLike = {
-  homeDir?: string;
-  join?: (...parts: string[]) => string;
-};
-type ServicesLike = {
-  dirsvc?: {
-    get?: (key: string, iface?: unknown) => { path?: string } | undefined;
-  };
-};
-type OSLike = {
-  Constants?: {
-    Path?: {
-      homeDir?: string;
-    };
-  };
-};
-
-function getProcess(): ProcessLike | undefined {
-  const fromGlobal = (globalThis as { process?: ProcessLike }).process;
-  if (fromGlobal?.env) return fromGlobal;
-  const fromToolkit = ztoolkit.getGlobal("process") as ProcessLike | undefined;
-  return fromToolkit?.env ? fromToolkit : undefined;
-}
-
-function getPathUtils(): PathUtilsLike | undefined {
-  const fromGlobal = (globalThis as { PathUtils?: PathUtilsLike }).PathUtils;
-  if (fromGlobal?.homeDir || fromGlobal?.join) return fromGlobal;
-  return ztoolkit.getGlobal("PathUtils") as PathUtilsLike | undefined;
-}
-
-function getServices(): ServicesLike | undefined {
-  const fromGlobal = (globalThis as { Services?: ServicesLike }).Services;
-  if (fromGlobal?.dirsvc?.get) return fromGlobal;
-  return ztoolkit.getGlobal("Services") as ServicesLike | undefined;
-}
-
-function getOS(): OSLike | undefined {
-  const fromGlobal = (globalThis as { OS?: OSLike }).OS;
-  if (fromGlobal?.Constants?.Path?.homeDir) return fromGlobal;
-  return ztoolkit.getGlobal("OS") as OSLike | undefined;
-}
-
-function getNsIFile(): unknown {
-  const ci = (globalThis as { Ci?: { nsIFile?: unknown } }).Ci;
-  if (ci?.nsIFile) return ci.nsIFile;
-  const components = (
-    globalThis as {
-      Components?: { interfaces?: { nsIFile?: unknown } };
-    }
-  ).Components;
-  return components?.interfaces?.nsIFile;
-}
-
-function resolveCodexAuthPath(): string {
-  const env = getProcess()?.env;
-  const codexHome = env?.CODEX_HOME?.trim();
-  if (codexHome) return joinLocalPath(codexHome, "auth.json");
-  const home =
-    env?.HOME?.trim() ||
-    env?.USERPROFILE?.trim() ||
-    getPathUtils()?.homeDir?.trim() ||
-    getOS()?.Constants?.Path?.homeDir?.trim() ||
-    getServices()?.dirsvc?.get?.("Home", getNsIFile())?.path?.trim() ||
-    (Zotero as unknown as { Profile?: { dir?: string } }).Profile?.dir?.trim();
-  if (!home) throw new Error("Unable to resolve home directory for codex auth");
-  return joinLocalPath(home, ".codex", "auth.json");
-}
-
-async function readCodexAccessToken(): Promise<string> {
-  const authPath = resolveCodexAuthPath();
-  const io = ztoolkit.getGlobal("IOUtils") as
-    | { read?: (path: string) => Promise<Uint8Array | ArrayBuffer> }
-    | undefined;
-  if (!io?.read) {
-    throw new Error("IOUtils is unavailable; cannot read Codex auth file");
-  }
-  const data = await io.read(authPath);
-  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-  const raw = new TextDecoder("utf-8").decode(bytes);
-  const parsed = JSON.parse(raw) as {
-    tokens?: { access_token?: string };
-  };
-  const token = parsed?.tokens?.access_token?.trim() || "";
-  if (!token) {
-    throw new Error(
-      "No access token found in ~/.codex/auth.json. Run `codex login` first.",
-    );
-  }
-  return token;
 }
 
 // ── Style tokens ───────────────────────────────────────────────────
@@ -356,9 +283,6 @@ const OUTLINE_BTN_STYLE =
   " background: transparent; color: var(--color-accent, #2563eb);" +
   " border: 1px solid var(--color-accent, #2563eb); border-radius: 5px; cursor: pointer;";
 
-// Keep provider cards visually rounded, but do not clip descendant native
-// select popups. Gecko/XUL can render the popup inside the ancestor box,
-// so `overflow: hidden` makes auth/provider/protocol dropdowns appear stuck.
 const CARD_STYLE =
   "border: 1px solid var(--stroke-secondary, #c8c8c8); border-radius: 8px;";
 
@@ -384,7 +308,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   }
 
   const doc = _window.document;
-  await new Promise((resolve) => setTimeout(resolve, 100));
 
   // ── Translate static XHTML text ────────────────────────────────
   // Tab buttons
@@ -464,12 +387,10 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   // Translate language dropdown options
   const localeSelectEl = doc.querySelector(
     `#${config.addonRef}-locale-select`,
-  ) as HTMLSelectElement | null;
+  ) as XUL.MenuList | null;
   if (localeSelectEl) {
-    const autoOption = localeSelectEl.querySelector(
-      'option[value="auto"]',
-    ) as HTMLOptionElement | null;
-    if (autoOption) autoOption.textContent = t("Auto (follow Zotero)");
+    const autoOption = localeSelectEl.querySelector('menuitem[value="auto"]');
+    if (autoOption) autoOption.setAttribute("label", t("Auto (follow Zotero)"));
   }
   // Translate restart hint
   const restartHint = doc.querySelector(
@@ -551,6 +472,25 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   // "Add Provider" button state without triggering a full rerender.
   let syncAddProviderBtn: () => void = () => undefined;
 
+  let codexModelsLoading = false;
+  let codexModelsAttempted = false;
+  let codexModelsError = "";
+  const loadCodexModels = async () => {
+    if (codexModelsLoading) return;
+    codexModelsLoading = true;
+    codexModelsAttempted = true;
+    codexModelsError = "";
+    rerender();
+    try {
+      await refreshCodexModels();
+    } catch (error) {
+      codexModelsError = String(error);
+    } finally {
+      codexModelsLoading = false;
+      if (modelSections.isConnected) rerender();
+    }
+  };
+
   // ── Render ────────────────────────────────────────────────────────
 
   const rerender = () => {
@@ -604,7 +544,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       removeProvBtn.addEventListener("click", () => {
         groups.splice(groupIndex, 1);
         persistGroups(groups);
-        rerender();
+        setTimeout(() => rerender(), 0);
       });
       cardHeader.appendChild(removeProvBtn);
 
@@ -618,34 +558,23 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         "display: flex; flex-direction: column;",
       );
       const authModeLabel = el(doc, "label", LABEL_STYLE, t("Auth Mode"));
-      const authModeSelect = el(
+      const authModeSelect = nativeSelect(
         doc,
-        "select",
-        INPUT_STYLE,
-      ) as HTMLSelectElement;
-      authModeSelect.id = `${config.addonRef}-auth-mode-${group.id}`;
-      authModeLabel.setAttribute("for", authModeSelect.id);
-      const apiKeyOption = el(doc, "option") as HTMLOptionElement;
-      apiKeyOption.value = "api_key";
-      apiKeyOption.textContent = t("API Key");
-      const codexOption = el(doc, "option") as HTMLOptionElement;
-      codexOption.value = "codex_auth";
-      codexOption.textContent = t("Codex Auth");
-      const copilotOption = el(doc, "option") as HTMLOptionElement;
-      copilotOption.value = "copilot_auth";
-      copilotOption.textContent = t("GitHub Copilot");
-      // [webchat] Add webchat option
-      const webchatOption = el(doc, "option") as HTMLOptionElement;
-      webchatOption.value = "webchat";
-      webchatOption.textContent = t("WebChat");
-      authModeSelect.append(
-        apiKeyOption,
-        codexOption,
-        copilotOption,
-        webchatOption,
+        [
+          { value: "api_key", label: t("API Key") },
+          { value: "codex_app_server", label: t("Codex App Server") },
+          { value: "copilot_auth", label: t("GitHub Copilot") },
+          { value: "webchat", label: t("WebChat") },
+        ],
+        group.authMode,
       );
-      authModeSelect.value = group.authMode;
-      authModeSelect.addEventListener("change", () => {
+      authModeSelect.id = `${config.addonRef}-auth-mode-${group.id}`;
+      authModeSelect.setAttribute(
+        "aria-labelledby",
+        `${authModeSelect.id}-label`,
+      );
+      authModeLabel.id = `${authModeSelect.id}-label`;
+      authModeSelect.addEventListener("command", () => {
         const nextAuthMode = normalizeAuthMode(authModeSelect.value);
         group.authMode = nextAuthMode;
         if (nextAuthMode === "webchat") {
@@ -660,19 +589,20 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           ) {
             group.models = [{ ...group.models[0], model: "chatgpt.com" }];
           }
-        } else if (nextAuthMode === "codex_auth") {
-          group.providerProtocol = "codex_responses";
+        } else if (nextAuthMode === "codex_app_server") {
+          group.providerProtocol = "codex_app_server";
         } else if (nextAuthMode === "copilot_auth") {
           group.providerProtocol = "openai_chat_compat";
         } else if (
-          group.providerProtocol === "codex_responses" ||
+          group.providerProtocol === "codex_app_server" ||
           group.providerProtocol === "web_sync"
         ) {
           group.providerProtocol =
             selectedPreset?.defaultProtocol || "openai_chat_compat";
         }
-        if (nextAuthMode === "codex_auth" && !group.apiBase.trim()) {
-          group.apiBase = DEFAULT_CODEX_API_BASE;
+        if (nextAuthMode === "codex_app_server") {
+          group.apiBase = "";
+          group.apiKey = "";
         }
         if (nextAuthMode === "copilot_auth" && !group.apiBase.trim()) {
           group.apiBase = DEFAULT_COPILOT_API_BASE;
@@ -690,9 +620,9 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
             )
           : group.authMode === "copilot_auth"
             ? t(COPILOT_API_HELPER_TEXT)
-            : group.authMode === "codex_auth"
+            : group.authMode === "codex_app_server"
               ? t(
-                  "codex auth reuses local `codex login` credentials from ~/.codex/auth.json",
+                  "Codex CLI must be installed and signed in with `codex login`. Conversations are saved only in Zotero.",
                 )
               : "";
       authModeWrap.append(
@@ -702,7 +632,8 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       );
 
       const selectedPresetId: ProviderPresetId =
-        group.authMode === "codex_auth" || group.authMode === "copilot_auth"
+        group.authMode === "codex_app_server" ||
+        group.authMode === "copilot_auth"
           ? "customized"
           : (group.presetIdOverride ?? detectProviderPreset(group.apiBase));
       const selectedPreset =
@@ -710,7 +641,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           ? null
           : getProviderPreset(selectedPresetId);
       const isCustomizedPreset =
-        group.authMode !== "codex_auth" &&
+        group.authMode !== "codex_app_server" &&
         group.authMode !== "copilot_auth" &&
         selectedPresetId === "customized";
       group.providerProtocol = resolveSelectedProtocol(group, selectedPresetId);
@@ -722,7 +653,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         "display: flex; flex-direction: column;",
       );
       if (
-        group.authMode !== "codex_auth" &&
+        group.authMode !== "codex_app_server" &&
         group.authMode !== "copilot_auth"
       ) {
         const providerPresetLabel = el(
@@ -731,29 +662,24 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           LABEL_STYLE,
           t("Provider"),
         );
-        const providerPresetSelect = el(
+        const providerPresetSelect = nativeSelect(
           doc,
-          "select",
-          INPUT_STYLE,
-        ) as HTMLSelectElement;
+          [
+            // Copilot requires copilot_auth, not usable with API Key
+            ...PROVIDER_PRESETS.filter((preset) => preset.id !== "copilot").map(
+              (preset) => ({ value: preset.id, label: preset.label }),
+            ),
+            { value: "customized", label: t("Customized") },
+          ],
+          selectedPresetId,
+        );
         providerPresetSelect.id = `${config.addonRef}-provider-preset-${group.id}`;
-        providerPresetLabel.setAttribute("for", providerPresetSelect.id);
-
-        for (const preset of PROVIDER_PRESETS) {
-          // Copilot requires copilot_auth, not usable with API Key
-          if (preset.id === "copilot") continue;
-          const option = el(doc, "option") as HTMLOptionElement;
-          option.value = preset.id;
-          option.textContent = preset.label;
-          providerPresetSelect.appendChild(option);
-        }
-        const customizedOption = el(doc, "option") as HTMLOptionElement;
-        customizedOption.value = "customized";
-        customizedOption.textContent = t("Customized");
-        providerPresetSelect.appendChild(customizedOption);
-
-        providerPresetSelect.value = selectedPresetId;
-        providerPresetSelect.addEventListener("change", () => {
+        providerPresetSelect.setAttribute(
+          "aria-labelledby",
+          `${providerPresetSelect.id}-label`,
+        );
+        providerPresetLabel.id = `${providerPresetSelect.id}-label`;
+        providerPresetSelect.addEventListener("command", () => {
           const nextPresetId = normalizeProviderPresetId(
             providerPresetSelect.value,
           );
@@ -767,8 +693,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
               getProviderPreset(nextPresetId).defaultProtocol;
           }
           persistGroups(groups);
-          // Defer rerender so the browser can close the dropdown before we replace the DOM
-          // (avoids "this.element is null" in Firefox's SelectChild.sys.mjs)
+          // Let the native popup close before replacing its owner.
           setTimeout(() => rerender(), 0);
         });
 
@@ -782,26 +707,26 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         "display: flex; flex-direction: column;",
       );
       const protocolLabel = el(doc, "label", LABEL_STYLE, t("Protocol"));
-      const protocolSelect = el(
-        doc,
-        "select",
-        INPUT_STYLE,
-      ) as HTMLSelectElement;
-      protocolSelect.id = `${config.addonRef}-provider-protocol-${group.id}`;
-      protocolLabel.setAttribute("for", protocolSelect.id);
       const protocolOptions = getProtocolOptions(
         group.authMode,
         selectedPresetId,
       );
-      for (const protocol of protocolOptions) {
-        const option = el(doc, "option") as HTMLOptionElement;
-        option.value = protocol;
-        option.textContent = getProviderProtocolSpec(protocol).label;
-        protocolSelect.appendChild(option);
-      }
-      protocolSelect.value = group.providerProtocol;
+      const protocolSelect = nativeSelect(
+        doc,
+        protocolOptions.map((protocol) => ({
+          value: protocol,
+          label: getProviderProtocolSpec(protocol).label,
+        })),
+        group.providerProtocol,
+      );
+      protocolSelect.id = `${config.addonRef}-provider-protocol-${group.id}`;
+      protocolSelect.setAttribute(
+        "aria-labelledby",
+        `${protocolSelect.id}-label`,
+      );
+      protocolLabel.id = `${protocolSelect.id}-label`;
       protocolSelect.disabled = protocolOptions.length <= 1;
-      protocolSelect.addEventListener("change", () => {
+      protocolSelect.addEventListener("command", () => {
         group.providerProtocol = resolveSelectedProtocol(
           {
             ...group,
@@ -835,14 +760,12 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       apiUrlLabel.setAttribute("for", apiUrlInput.id);
       apiUrlInput.type = "text";
       apiUrlInput.placeholder =
-        group.authMode === "codex_auth"
-          ? DEFAULT_CODEX_API_BASE
-          : group.authMode === "copilot_auth"
-            ? DEFAULT_COPILOT_API_BASE
-            : selectedPreset?.defaultApiBase || "https://api.openai.com/v1";
+        group.authMode === "copilot_auth"
+          ? DEFAULT_COPILOT_API_BASE
+          : selectedPreset?.defaultApiBase || "https://api.openai.com/v1";
       apiUrlInput.value = group.apiBase;
       apiUrlInput.readOnly =
-        group.authMode !== "codex_auth" &&
+        group.authMode !== "codex_app_server" &&
         group.authMode !== "copilot_auth" &&
         !isCustomizedPreset;
       apiUrlInput.style.opacity = apiUrlInput.readOnly ? "0.85" : "1";
@@ -860,11 +783,9 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         doc,
         "span",
         HELPER_STYLE,
-        group.authMode === "codex_auth"
-          ? t(CODEX_API_HELPER_TEXT)
-          : group.authMode === "copilot_auth"
-            ? t(COPILOT_API_HELPER_TEXT)
-            : getPresetSelectHelperText(selectedPresetId),
+        group.authMode === "copilot_auth"
+          ? t(COPILOT_API_HELPER_TEXT)
+          : getPresetSelectHelperText(selectedPresetId),
       );
       apiUrlWrap.append(apiUrlLabel, apiUrlInput, apiUrlHelper);
 
@@ -888,7 +809,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       });
       apiKeyWrap.append(apiKeyLabel, apiKeyInput);
       if (
-        group.authMode === "codex_auth" ||
+        group.authMode === "codex_app_server" ||
         group.authMode === "copilot_auth"
       ) {
         apiKeyWrap.style.display = "none";
@@ -1131,7 +1052,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         copilotLogoutBtn.addEventListener("click", () => {
           group.apiKey = "";
           persistGroups(groups);
-          rerender();
+          setTimeout(() => rerender(), 0);
         });
 
         const copilotBtnRow = el(
@@ -1254,10 +1175,28 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           }
           if (added) {
             persistGroups(groups);
-            rerender();
+            setTimeout(() => rerender(), 0);
           }
         });
         modelsHeaderRow.appendChild(fetchModelsBtn);
+      }
+      if (group.authMode === "codex_app_server") {
+        modelsHeaderRow.firstElementChild!.textContent = t("Default model");
+        addModelBtn.style.display = "none";
+        if (codexModelsError) {
+          modelsWrap.appendChild(
+            el(
+              doc,
+              "span",
+              "font-size: 11px; color: #b3261e;",
+              `${t("Could not load Codex models:")} ${codexModelsError}`,
+            ),
+          );
+        }
+        if (!codexModelsAttempted) {
+          codexModelsAttempted = true;
+          void Promise.resolve().then(loadCodexModels);
+        }
       }
       modelsHeaderRow.appendChild(addModelBtn);
       modelsWrap.appendChild(modelsHeaderRow);
@@ -1276,7 +1215,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         if (addModelBtn.disabled) return;
         group.models.push(createProviderModelEntry(""));
         persistGroups(groups);
-        rerender();
+        setTimeout(() => rerender(), 0);
       });
 
       // ── Per-model rows ───────────────────────────────────────────
@@ -1331,25 +1270,55 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           testBtn.style.display = "none";
           advGearBtn.style.display = "none";
 
-          const modelSelect = el(
+          const modelSelect = nativeSelect(
             doc,
-            "select",
-            "flex: 1; min-width: 0; padding: 6px 10px; font-size: 13px;" +
-              " border: 1px solid var(--stroke-secondary, #c8c8c8); border-radius: 6px;" +
-              " box-sizing: border-box; background: Field; color: FieldText;",
-          ) as HTMLSelectElement;
-          for (const opt of validWebchatModels) {
-            const option = doc.createElement("option");
-            option.value = opt.value;
-            option.textContent = opt.label;
-            if (opt.value === modelEntry.model) option.selected = true;
-            modelSelect.appendChild(option);
-          }
-          modelSelect.addEventListener("change", () => {
+            validWebchatModels,
+            modelEntry.model,
+            "flex: 1; min-width: 0; margin: 0;",
+          );
+          modelSelect.addEventListener("command", () => {
             modelEntry.model = modelSelect.value;
             persistGroups(groups);
           });
           mainRow.append(modelInput, modelSelect);
+        } else if (group.authMode === "codex_app_server") {
+          const models = getCachedCodexModels();
+          const choices = models.map((model) => ({
+            value: model.model,
+            label:
+              model.displayName === model.model
+                ? model.model
+                : `${model.displayName} (${model.model})`,
+          }));
+          if (!choices.some((entry) => entry.value === modelEntry.model)) {
+            choices.unshift({
+              value: modelEntry.model,
+              label: modelEntry.model
+                ? `${modelEntry.model} (${t("not in available list")})`
+                : t("Select a model"),
+            });
+          }
+          const modelSelect = nativeSelect(
+            doc,
+            choices,
+            modelEntry.model,
+            "flex: 1; min-width: 0; margin: 0;",
+          );
+          modelSelect.disabled = models.length === 0;
+          modelSelect.addEventListener("command", () => {
+            modelEntry.model = modelSelect.value;
+            persistGroups(groups);
+            syncAddModelBtn();
+            syncAddProviderBtn();
+            syncAdvAvailability();
+          });
+          const refreshBtn = iconBtn(doc, "↻", t("Refresh models"));
+          refreshBtn.disabled = codexModelsLoading;
+          refreshBtn.title = t(
+            codexModelsLoading ? "Loading models…" : "Refresh models",
+          );
+          refreshBtn.addEventListener("click", () => void loadCodexModels());
+          mainRow.append(modelSelect, refreshBtn, testBtn, advGearBtn);
         } else {
           mainRow.append(modelInput, testBtn, advGearBtn);
         }
@@ -1362,7 +1331,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
               group.models = [createProviderModelEntry(profile.defaultModel)];
             }
             persistGroups(groups);
-            rerender();
+            setTimeout(() => rerender(), 0);
           });
           mainRow.appendChild(removeModelBtn);
         }
@@ -1437,26 +1406,22 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           "font-size: 10.5px; font-weight: 600; color: var(--fill-primary, inherit);",
           t("Protocol"),
         );
-        const protocolFieldSelect = el(
-          doc,
-          "select",
-          INPUT_SM_STYLE + " width: 120px;",
-        ) as HTMLSelectElement;
-        const autoOption = el(doc, "option") as HTMLOptionElement;
-        autoOption.value = "";
-        autoOption.textContent = t("auto");
-        protocolFieldSelect.appendChild(autoOption);
         const allowedProtocols = getProtocolOptions(
           group.authMode,
           selectedPresetId,
         );
-        for (const proto of allowedProtocols) {
-          const opt = el(doc, "option") as HTMLOptionElement;
-          opt.value = proto;
-          opt.textContent = getProviderProtocolSpec(proto).label;
-          protocolFieldSelect.appendChild(opt);
-        }
-        protocolFieldSelect.value = modelEntry.providerProtocol || "";
+        const protocolFieldSelect = nativeSelect(
+          doc,
+          [
+            { value: "", label: t("auto") },
+            ...allowedProtocols.map((proto) => ({
+              value: proto,
+              label: getProviderProtocolSpec(proto).label,
+            })),
+          ],
+          modelEntry.providerProtocol || "",
+          "width: 120px; margin: 0;",
+        );
         protocolFieldWrap.append(protocolFieldLabel, protocolFieldSelect);
 
         advFields.append(
@@ -1465,6 +1430,11 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           inputCapField.wrap,
           protocolFieldWrap,
         );
+        if (group.authMode === "codex_app_server") {
+          tempField.wrap.style.display = "none";
+          maxTokField.wrap.style.display = "none";
+          protocolFieldWrap.style.display = "none";
+        }
         advRow.append(
           advFields,
           el(
@@ -1500,7 +1470,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           f.input.addEventListener("change", commitAdvanced);
           f.input.addEventListener("blur", commitAdvanced);
         }
-        protocolFieldSelect.addEventListener("change", commitAdvanced);
+        protocolFieldSelect.addEventListener("command", commitAdvanced);
 
         const syncAdvAvailability = () => {
           const hasModel = Boolean(modelEntry.model.trim());
@@ -1540,20 +1510,14 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
             const authMode = normalizeAuthMode(group.authMode);
             const apiBase = (
               group.apiBase.trim() ||
-              (authMode === "codex_auth"
-                ? DEFAULT_CODEX_API_BASE
-                : authMode === "copilot_auth"
-                  ? DEFAULT_COPILOT_API_BASE
-                  : "")
+              (authMode === "copilot_auth" ? DEFAULT_COPILOT_API_BASE : "")
             ).replace(/\/$/, "");
             const apiKey =
-              authMode === "codex_auth"
-                ? await readCodexAccessToken()
-                : authMode === "copilot_auth"
-                  ? await resolveCopilotAccessToken({
-                      githubToken: group.apiKey.trim(),
-                    })
-                  : group.apiKey.trim();
+              authMode === "copilot_auth"
+                ? await resolveCopilotAccessToken({
+                    githubToken: group.apiKey.trim(),
+                  })
+                : group.apiKey.trim();
             const modelName = (
               modelEntry.model ||
               profile.defaultModel ||
@@ -1564,14 +1528,13 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
               selectedPresetId,
             );
 
-            if (!apiBase) throw new Error(t("API URL is required"));
-            if (!apiKey) {
+            if (!apiBase && authMode !== "codex_app_server")
+              throw new Error(t("API URL is required"));
+            if (!apiKey && authMode !== "codex_app_server") {
               throw new Error(
-                authMode === "codex_auth"
-                  ? t("codex token missing. Run `codex login` first.")
-                  : authMode === "copilot_auth"
-                    ? t("Copilot token missing. Click Login first.")
-                    : t("API Key is required"),
+                authMode === "copilot_auth"
+                  ? t("Copilot token missing. Click Login first.")
+                  : t("API Key is required"),
               );
             }
 
@@ -1620,15 +1583,27 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           divider,
           modelsWrap,
         );
-      } else if (group.authMode === "codex_auth") {
-        cardBody.append(
-          authModeWrap,
-          protocolWrap,
-          apiUrlWrap,
-          apiKeyWrap,
-          divider,
-          modelsWrap,
+      } else if (group.authMode === "codex_app_server") {
+        const binaryWrap = el(doc, "div");
+        const binaryInput = el(doc, "input", INPUT_STYLE) as HTMLInputElement;
+        binaryInput.type = "text";
+        binaryInput.placeholder = t("Auto-detect Codex executable");
+        binaryInput.value = String(
+          Zotero.Prefs.get(`${config.prefsPrefix}.codexBinaryPath`, true) || "",
         );
+        binaryInput.addEventListener("change", () => {
+          Zotero.Prefs.set(
+            `${config.prefsPrefix}.codexBinaryPath`,
+            binaryInput.value.trim(),
+            true,
+          );
+          void loadCodexModels();
+        });
+        binaryWrap.append(
+          el(doc, "label", LABEL_STYLE, t("Codex executable path")),
+          binaryInput,
+        );
+        cardBody.append(authModeWrap, binaryWrap, divider, modelsWrap);
       } else {
         cardBody.append(
           authModeWrap,
@@ -1675,7 +1650,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       if (addProviderBtn.disabled) return;
       groups.push(createEmptyProviderGroup());
       persistGroups(groups);
-      rerender();
+      setTimeout(() => rerender(), 0);
     });
 
     wrap.appendChild(addProviderBtn);
@@ -1852,24 +1827,16 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         "display: flex; flex-direction: column;",
       );
       providerWrap.appendChild(el(doc, "label", LABEL_STYLE, t("Provider")));
-      const providerSelect = el(
+      const providerSelect = nativeSelect(
         doc,
-        "select",
-        INPUT_STYLE,
-      ) as HTMLSelectElement;
-      const providerOptions: [string, string][] = [
-        ["openai", "OpenAI"],
-        ["gemini", "Google"],
-        ["custom", t("Customized")],
-      ];
-      for (const [val, label] of providerOptions) {
-        const opt = el(doc, "option") as HTMLOptionElement;
-        opt.value = val;
-        opt.textContent = label;
-        providerSelect.appendChild(opt);
-      }
-      providerSelect.value = provider;
-      providerSelect.addEventListener("change", () => {
+        [
+          { value: "openai", label: "OpenAI" },
+          { value: "gemini", label: "Google" },
+          { value: "custom", label: t("Customized") },
+        ],
+        provider,
+      );
+      providerSelect.addEventListener("command", () => {
         const selected = providerSelect.value;
         writeEmbPref("embeddingProvider", selected);
         const p = EMBEDDING_PRESETS[selected];
@@ -1881,8 +1848,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         }
         // Reset failed-embedding flags so queries retry with the new config
         resetEmbeddingFailedFlags();
-        // Defer re-render so Gecko finishes processing the select change event
-        // before we destroy the element (avoids "this.element is null" error).
+        // Let the native popup close before replacing its owner.
         doc.defaultView?.setTimeout(() => renderEmbeddingCard(), 0);
       });
       providerWrap.appendChild(providerSelect);
@@ -2009,32 +1975,25 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
 
       if (preset) {
         // Dropdown for known providers
-        const modelSelect = el(
-          doc,
-          "select",
-          INLINE_INPUT_STYLE,
-        ) as HTMLSelectElement;
         const currentModel =
           readEmbPref("embeddingModel") || preset.defaultModel;
-        for (const opt of preset.models) {
-          const option = el(doc, "option") as HTMLOptionElement;
-          option.value = opt.value;
-          option.textContent = opt.label;
-          if (opt.value === currentModel) option.selected = true;
-          modelSelect.appendChild(option);
-        }
+        const modelOptions: { value: string; label: string }[] = [
+          ...preset.models,
+        ];
         // Preserve a previously set model that's not in the preset list
         if (
-          !preset.models.some((m) => m.value === currentModel) &&
+          !modelOptions.some((m) => m.value === currentModel) &&
           currentModel
         ) {
-          const customOpt = el(doc, "option") as HTMLOptionElement;
-          customOpt.value = currentModel;
-          customOpt.textContent = currentModel;
-          customOpt.selected = true;
-          modelSelect.appendChild(customOpt);
+          modelOptions.push({ value: currentModel, label: currentModel });
         }
-        modelSelect.addEventListener("change", () => {
+        const modelSelect = nativeSelect(
+          doc,
+          modelOptions,
+          currentModel,
+          "flex: 1; min-width: 0; margin: 0;",
+        );
+        modelSelect.addEventListener("command", () => {
           writeEmbPref("embeddingModel", modelSelect.value);
           resetEmbeddingFailedFlags();
           updatePricingHint(modelSelect.value);
@@ -2127,7 +2086,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   // ── Language selector ────────────────────────────────────────────
   const localeSelect = doc.querySelector(
     `#${config.addonRef}-locale-select`,
-  ) as HTMLSelectElement | null;
+  ) as XUL.MenuList | null;
   const localeRestartHint = doc.querySelector(
     `#${config.addonRef}-locale-restart-hint`,
   ) as HTMLSpanElement | null;
@@ -2136,7 +2095,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     const currentLocale =
       (Zotero.Prefs.get(`${prefsPrefix}.locale`, true) as string) || "auto";
     localeSelect.value = currentLocale;
-    localeSelect.addEventListener("change", () => {
+    localeSelect.addEventListener("command", () => {
       Zotero.Prefs.set(`${prefsPrefix}.locale`, localeSelect.value, true);
       if (localeRestartHint) {
         localeRestartHint.style.display = "block";
