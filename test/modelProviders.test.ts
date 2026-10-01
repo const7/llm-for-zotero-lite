@@ -30,16 +30,29 @@ describe("modelProviders", function () {
   });
 
   it("exposes discovered Codex models to chat and resolves their stable selection IDs", function () {
-    setModelProviderGroups([{
-      id: "codex", apiBase: "", apiKey: "", authMode: "codex_app_server",
-      providerProtocol: "openai_responses",
-      models: [createProviderModelEntry("gpt-6-sol")],
-    }]);
-    Zotero.Prefs.set(`${config.prefsPrefix}.codexModelCatalog`, JSON.stringify({
-      binaryPath: "", models: [{ model: "gpt-6-sol" }, { model: "gpt-6.1-sol" }],
-    }), true);
+    setModelProviderGroups([
+      {
+        id: "codex",
+        apiBase: "",
+        apiKey: "",
+        authMode: "codex_app_server",
+        providerProtocol: "openai_responses",
+        models: [createProviderModelEntry("gpt-6-sol")],
+      },
+    ]);
+    Zotero.Prefs.set(
+      `${config.prefsPrefix}.codexModelCatalog`,
+      JSON.stringify({
+        binaryPath: "",
+        models: [{ model: "gpt-6-sol" }, { model: "gpt-6.1-sol" }],
+      }),
+      true,
+    );
     const entries = getRuntimeModelEntries();
-    assert.deepEqual(entries.map((entry) => entry.model), ["gpt-6-sol", "gpt-6.1-sol"]);
+    assert.deepEqual(
+      entries.map((entry) => entry.model),
+      ["gpt-6-sol", "gpt-6.1-sol"],
+    );
     const discovered = entries[1];
     assert.equal(getModelEntryById(discovered.entryId)?.model, "gpt-6.1-sol");
     assert.equal(discovered.authMode, "codex_app_server");

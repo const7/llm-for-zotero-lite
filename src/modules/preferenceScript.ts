@@ -1184,8 +1184,14 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         modelsHeaderRow.firstElementChild!.textContent = t("Default model");
         addModelBtn.style.display = "none";
         if (codexModelsError) {
-          modelsWrap.appendChild(el(doc, "span", "font-size: 11px; color: #b3261e;",
-            `${t("Could not load Codex models:")} ${codexModelsError}`));
+          modelsWrap.appendChild(
+            el(
+              doc,
+              "span",
+              "font-size: 11px; color: #b3261e;",
+              `${t("Could not load Codex models:")} ${codexModelsError}`,
+            ),
+          );
         }
         if (!codexModelsAttempted) {
           codexModelsAttempted = true;
@@ -1308,7 +1314,9 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           });
           const refreshBtn = iconBtn(doc, "↻", t("Refresh models"));
           refreshBtn.disabled = codexModelsLoading;
-          refreshBtn.title = t(codexModelsLoading ? "Loading models…" : "Refresh models");
+          refreshBtn.title = t(
+            codexModelsLoading ? "Loading models…" : "Refresh models",
+          );
           refreshBtn.addEventListener("click", () => void loadCodexModels());
           mainRow.append(modelSelect, refreshBtn, testBtn, advGearBtn);
         } else {

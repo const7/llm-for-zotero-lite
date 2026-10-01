@@ -5100,14 +5100,17 @@ export function setupHandlers(
     }
   };
 
-  if (getAvailableModelEntries().some((entry) => entry.authMode === "codex_app_server")) {
+  if (
+    getAvailableModelEntries().some(
+      (entry) => entry.authMode === "codex_app_server",
+    )
+  ) {
     void refreshCodexModels()
       .then(syncModelFromPrefs)
       .catch((error) => {
         ztoolkit.log("LLM: Codex model discovery failed", error);
       });
   }
-
 
   // [webchat] Apply webchat-specific UI changes. Safe to call any time —
   // only modifies UI when actually in webchat mode, restores defaults otherwise.

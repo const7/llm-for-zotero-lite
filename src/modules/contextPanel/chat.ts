@@ -759,7 +759,8 @@ export function getReasoningOptions(
   _apiBase?: string,
   authMode?: ModelProviderAuthMode,
 ): ReasoningOption[] {
-  if (authMode === "codex_app_server") return getCodexReasoningOptions(modelName);
+  if (authMode === "codex_app_server")
+    return getCodexReasoningOptions(modelName);
   if (provider === "unsupported") return [];
   return getRuntimeReasoningOptions(provider, modelName)
     .filter(
