@@ -23,9 +23,6 @@ export function resolveEndpoint(baseOrUrl: string, path: string): string {
   const cleaned = baseOrUrl.trim().replace(/\/$/, "");
   if (!cleaned) return "";
   const lowerCleaned = cleaned.toLowerCase();
-  if (lowerCleaned.includes("chatgpt.com/backend-api/codex/responses")) {
-    return cleaned;
-  }
   // Expand bare Gemini base URLs (e.g. https://generativelanguage.googleapis.com)
   // to include the required OpenAI-compatibility sub-path (/v1beta/openai).
   // The normalized URL already contains /openai so this branch won't fire again.

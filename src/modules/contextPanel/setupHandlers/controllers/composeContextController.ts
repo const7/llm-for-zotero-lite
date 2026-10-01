@@ -1,4 +1,5 @@
 import { normalizePaperContextRefs } from "../../normalizers";
+import { t } from "../../../../utils/i18n";
 import { sanitizeText } from "../../textUtils";
 import { resolvePaperContextDisplayMetadata as resolvePaperContextDisplayMetadataShared } from "../../paperAttribution";
 import type { PaperContextRef, PaperContentSourceMode } from "../../types";
@@ -83,42 +84,11 @@ export function formatPaperContextChipLabel(
   contentSourceMode?: PaperContentSourceMode,
 ): string {
   const base = buildCreatorYearBase(paperContext);
-  if (contentSourceMode === "text") return `${base} - Text`;
+  if (contentSourceMode === "text")
+    return `${base} - ${t("Text only (no paper images)")}`;
   if (contentSourceMode === "mineru") return `${base} - MD`;
   if (contentSourceMode === "pdf") return `${base} - PDF`;
   // No explicit source mode: keep the compact paper label.
   const attachmentTitle = resolveMultiPdfAttachmentTitle(paperContext);
   return attachmentTitle ? `${base} - ${attachmentTitle}` : base;
-}
-
-export function formatPaperContextChipTitle(
-  paperContext: PaperContextRef,
-  contentSourceMode?: PaperContentSourceMode,
-): string {
-  const metadata = resolvePaperContextDisplayMetadata(paperContext);
-  const meta = [metadata.firstCreator || "", metadata.year || ""]
-    .filter(Boolean)
-    .join(" · ");
-  const modeLabel =
-    contentSourceMode === "text"
-      ? "Source: Extracted text"
-      : contentSourceMode === "mineru"
-        ? "Source: MinerU (enhanced markdown)"
-        : contentSourceMode === "pdf"
-          ? "Source: PDF file"
-          : "";
-  const attachmentTitle =
-    contentSourceMode === "pdf"
-      ? resolveAttachmentTitle(paperContext)
-      : contentSourceMode === "mineru"
-        ? "full.md"
-        : "";
-  return [
-    paperContext.title,
-    meta,
-    attachmentTitle ? `Attachment: ${attachmentTitle}` : "",
-    modeLabel,
-  ]
-    .filter(Boolean)
-    .join("\n");
 }

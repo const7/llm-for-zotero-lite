@@ -1,3 +1,4 @@
+import { refreshCodexModels } from "../../codex/models";
 import { createElement } from "../../utils/domHelpers";
 import { t } from "../../utils/i18n";
 import type { RuntimeModelEntry } from "../../utils/modelProviders";
@@ -246,7 +247,6 @@ import {
 } from "./setupHandlers/controllers/conversationHistoryController";
 import {
   formatPaperContextChipLabel,
-  formatPaperContextChipTitle,
   normalizePaperContextEntries,
   resolvePaperContextDisplayMetadata,
   resolveAttachmentTitle,
@@ -1424,9 +1424,9 @@ export function setupHandlers(
       "llm-paper-picker-item llm-paper-picker-group-row llm-paper-chip-menu-row",
       {
         type: "button",
-        title: `Jump to ${paperContext.title}`,
       },
     ) as HTMLButtonElement;
+    card.setAttribute("aria-label", `Jump to ${paperContext.title}`);
     const rowMain = createElement(
       ownerDoc,
       "div",
@@ -1439,7 +1439,6 @@ export function setupHandlers(
     );
     const title = createElement(ownerDoc, "span", "llm-paper-picker-title", {
       textContent: paperContext.title,
-      title: paperContext.title,
     });
     titleLine.appendChild(title);
     const mode = options?.contentSourceMode;
@@ -1464,7 +1463,6 @@ export function setupHandlers(
       rowMain.appendChild(
         createElement(ownerDoc, "span", "llm-paper-picker-meta", {
           textContent: metaText,
-          title: metaText,
         }),
       );
     }
@@ -1484,9 +1482,17 @@ export function setupHandlers(
           "llm-paper-picker-meta llm-paper-context-card-attachment",
           {
             textContent: displayAttachmentText,
-            title: displayAttachmentText,
           },
         ),
+      );
+    }
+    if (mode === "text") {
+      rowMain.appendChild(
+        createElement(ownerDoc, "span", "llm-paper-picker-meta", {
+          textContent: t(
+            "Text only: paper figures are not included. Add a screenshot to analyze a figure.",
+          ),
+        }),
       );
     }
     card.appendChild(rowMain);
@@ -1649,7 +1655,6 @@ export function setupHandlers(
           paperContext,
           contentSourceMode,
         ),
-        title: formatPaperContextChipTitle(paperContext, contentSourceMode),
       },
     );
     chipHeader.append(chipLabel);
@@ -4746,6 +4751,7 @@ export function setupHandlers(
             item.id,
             entry.model,
             entry.apiBase,
+            entry.authMode,
           );
           const retryAdvanced = getAdvancedModelParams(entry.entryId);
           await retryLatestAssistantResponse(body, item, {
@@ -4780,11 +4786,15 @@ export function setupHandlers(
     }
     const { currentModel } = getSelectedModelInfo();
     const selectedProfile = getSelectedModelEntryForItem(item.id);
-    const provider = detectReasoningProvider(currentModel);
+    const provider = detectReasoningProvider(
+      currentModel,
+      selectedProfile?.authMode,
+    );
     const options = getReasoningOptions(
       provider,
       currentModel,
       selectedProfile?.apiBase,
+      selectedProfile?.authMode,
     );
     const enabledLevels = options
       .filter((option) => option.enabled)
@@ -5089,6 +5099,15 @@ export function setupHandlers(
       rebuildReasoningMenu();
     }
   };
+
+  if (getAvailableModelEntries().some((entry) => entry.authMode === "codex_app_server")) {
+    void refreshCodexModels()
+      .then(syncModelFromPrefs)
+      .catch((error) => {
+        ztoolkit.log("LLM: Codex model discovery failed", error);
+      });
+  }
+
 
   // [webchat] Apply webchat-specific UI changes. Safe to call any time —
   // only modifies UI when actually in webchat mode, restores defaults otherwise.
@@ -5781,6 +5800,8 @@ export function setupHandlers(
   };
   const openAddMenuWithSelection = () => {
     addMenuActiveIndex = 0;
+    if (!addMenu || !uploadBtn) return;
+    positionFloatingMenu(body, addMenu, uploadBtn, "above");
     setFloatingMenuOpen(addMenu, ADD_MENU_OPEN_CLASS, true);
     updateAddMenuSelection();
   };
@@ -7347,7 +7368,7 @@ export function setupHandlers(
       closeModelMenu();
       return;
     }
-    positionFloatingMenu(body, modelMenu, modelBtn);
+    positionFloatingMenu(body, modelMenu, modelBtn, "above");
     setFloatingMenuOpen(modelMenu, MODEL_MENU_OPEN_CLASS, true);
   };
 
@@ -7369,7 +7390,7 @@ export function setupHandlers(
       closeReasoningMenu();
       return;
     }
-    positionFloatingMenu(body, reasoningMenu, reasoningBtn);
+    positionFloatingMenu(body, reasoningMenu, reasoningBtn, "above");
     setFloatingMenuOpen(reasoningMenu, REASONING_MENU_OPEN_CLASS, true);
   };
 

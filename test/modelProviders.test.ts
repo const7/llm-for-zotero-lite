@@ -1,6 +1,8 @@
 import { assert } from "chai";
 import { config } from "../package.json";
 import {
+  getModelEntryById,
+  createProviderModelEntry,
   deriveProviderLabel,
   getRuntimeModelEntries,
   setModelProviderGroups,
@@ -25,6 +27,23 @@ describe("modelProviders", function () {
   after(function () {
     (globalThis as typeof globalThis & { Zotero?: typeof Zotero }).Zotero =
       originalZotero;
+  });
+
+  it("exposes discovered Codex models to chat and resolves their stable selection IDs", function () {
+    setModelProviderGroups([{
+      id: "codex", apiBase: "", apiKey: "", authMode: "codex_app_server",
+      providerProtocol: "openai_responses",
+      models: [createProviderModelEntry("gpt-6-sol")],
+    }]);
+    Zotero.Prefs.set(`${config.prefsPrefix}.codexModelCatalog`, JSON.stringify({
+      binaryPath: "", models: [{ model: "gpt-6-sol" }, { model: "gpt-6.1-sol" }],
+    }), true);
+    const entries = getRuntimeModelEntries();
+    assert.deepEqual(entries.map((entry) => entry.model), ["gpt-6-sol", "gpt-6.1-sol"]);
+    const discovered = entries[1];
+    assert.equal(getModelEntryById(discovered.entryId)?.model, "gpt-6.1-sol");
+    assert.equal(discovered.authMode, "codex_app_server");
+    assert.equal(getRuntimeModelEntries()[1].entryId, discovered.entryId);
   });
 
   it("derives provider labels from known hosts and falls back to hostname", function () {
@@ -162,7 +181,7 @@ describe("modelProviders", function () {
     assert.equal(entries[0].providerProtocol, "responses_api");
   });
 
-  it("forces stored codex auth groups onto codex_responses", function () {
+  it("forces stored codex auth groups onto codex_app_server", function () {
     (
       globalThis.Zotero.Prefs as {
         set: (key: string, value: unknown, global?: boolean) => void;
@@ -174,7 +193,7 @@ describe("modelProviders", function () {
           id: "provider-codex",
           apiBase: "https://chatgpt.com/backend-api/codex/responses",
           apiKey: "",
-          authMode: "codex_auth",
+          authMode: "codex_app_server",
           providerProtocol: "gemini_native",
           models: [
             { id: "m1", model: "gpt-5.4", temperature: 0.3, maxTokens: 4096 },
@@ -191,7 +210,43 @@ describe("modelProviders", function () {
 
     const entries = getRuntimeModelEntries();
     assert.lengthOf(entries, 1);
-    assert.equal(entries[0].authMode, "codex_auth");
-    assert.equal(entries[0].providerProtocol, "codex_responses");
+    assert.equal(entries[0].authMode, "codex_app_server");
+    assert.equal(entries[0].providerProtocol, "codex_app_server");
+  });
+  it("migrates stored Codex Auth while retaining model and provider identities", function () {
+    Zotero.Prefs.set(
+      `${config.prefsPrefix}.modelProviderGroupsMigrationVersion`,
+      3,
+      true,
+    );
+    Zotero.Prefs.set(
+      `${config.prefsPrefix}.modelProviderGroups`,
+      JSON.stringify([
+        {
+          id: "old-codex",
+          authMode: "codex_auth",
+          providerProtocol: "codex_responses",
+          apiBase: "https://chatgpt.com/backend-api/codex/responses",
+          apiKey: "obsolete",
+          models: [
+            {
+              id: "saved-model",
+              model: "gpt-5.4-mini",
+              temperature: 0.3,
+              maxTokens: 4096,
+            },
+          ],
+        },
+      ]),
+      true,
+    );
+    const [entry] = getRuntimeModelEntries();
+    assert.equal(entry.groupId, "old-codex");
+    assert.equal(entry.entryId, "saved-model");
+    assert.equal(entry.model, "gpt-5.4-mini");
+    assert.equal(entry.authMode, "codex_app_server");
+    assert.equal(entry.providerProtocol, "codex_app_server");
+    assert.equal(entry.apiBase, "");
+    assert.equal(entry.apiKey, "");
   });
 });

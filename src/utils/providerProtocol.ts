@@ -2,7 +2,7 @@ import { isResponsesBase } from "./apiHelpers";
 import { WEBCHAT_TARGETS } from "../webchat/types";
 
 export type ProviderProtocol =
-  | "codex_responses"
+  | "codex_app_server"
   | "responses_api"
   | "openai_chat_compat"
   | "anthropic_messages"
@@ -27,11 +27,12 @@ type ProviderCapabilityClass =
 
 export const PROVIDER_PROTOCOL_SPECS: ProviderProtocolSpec[] = [
   {
-    id: "codex_responses",
-    label: "Codex Responses",
-    helperText: "Use ChatGPT/Codex auth with the Codex Responses endpoint.",
+    id: "codex_app_server",
+    label: "Codex App Server",
+    helperText:
+      "Use local Codex with temporary sessions. Chat history stays in Zotero.",
     streaming: true,
-    toolCalls: true,
+    toolCalls: false,
     multimodal: true,
     fileInputs: false,
     reasoning: true,
@@ -117,8 +118,8 @@ function inferProviderProtocolFromEndpoint(params: {
   authMode?: string;
   apiBase?: string;
 }): ProviderProtocol {
-  if (params.authMode === "codex_auth") {
-    return "codex_responses";
+  if (params.authMode === "codex_app_server") {
+    return "codex_app_server";
   }
   if (params.authMode === "copilot_auth") {
     return "openai_chat_compat";
@@ -145,8 +146,8 @@ export function normalizeProviderProtocolForAuthMode(params: {
   const inferred = inferProviderProtocolFromEndpoint(params);
   const fallback = params.fallback || inferred;
   const normalized = normalizeProviderProtocol(params.protocol, fallback);
-  if (params.authMode === "codex_auth") {
-    return "codex_responses";
+  if (params.authMode === "codex_app_server") {
+    return "codex_app_server";
   }
   if (params.authMode === "copilot_auth") {
     // Copilot supports both responses_api and openai_chat_compat
@@ -157,8 +158,8 @@ export function normalizeProviderProtocolForAuthMode(params: {
   if (params.authMode === "webchat") {
     return "web_sync";
   }
-  if (normalized === "codex_responses") {
-    return fallback === "codex_responses" ? inferred : fallback;
+  if (normalized === "codex_app_server") {
+    return fallback === "codex_app_server" ? inferred : fallback;
   }
   return normalized;
 }

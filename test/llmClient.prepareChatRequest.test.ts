@@ -196,15 +196,15 @@ describe("llmClient prepareChatRequest", function () {
     );
   });
 
-  it("keeps explicit codex auth mode in prepared request", function () {
+  it("keeps explicit Codex App Server mode in prepared request", function () {
     const prepared = prepareChatRequest({
       prompt: "hello",
       model: "gpt-5.4",
-      apiBase: "https://chatgpt.com/backend-api/codex/responses",
-      authMode: "codex_auth",
+      apiBase: "",
+      authMode: "codex_app_server",
     });
 
-    assert.equal(prepared.authMode, "codex_auth");
+    assert.equal(prepared.authMode, "codex_app_server");
   });
 
   it("throws when no dedicated embedding provider is configured", async function () {
@@ -257,100 +257,5 @@ describe("llmClient prepareChatRequest", function () {
 
     assert.notEqual(initial.providerKey, endpointChanged.providerKey);
     assert.notEqual(initial.attemptKey, keyChanged.attemptKey);
-  });
-
-  it("refreshes codex auth token on 401 and retries once", async function () {
-    const prefsKey = "extensions.zotero.llmforzoterolite.modelProviderGroups";
-    const versionKey =
-      "extensions.zotero.llmforzoterolite.modelProviderGroupsMigrationVersion";
-    (
-      globalThis.Zotero.Prefs as { set: (key: string, value: unknown) => void }
-    ).set(
-      prefsKey,
-      JSON.stringify([
-        {
-          id: "provider-codex",
-          apiBase: "https://chatgpt.com/backend-api/codex/responses",
-          apiKey: "",
-          authMode: "codex_auth",
-          models: [
-            { id: "m1", model: "gpt-5.4", temperature: 0.3, maxTokens: 256 },
-          ],
-        },
-      ]),
-    );
-    (
-      globalThis.Zotero.Prefs as { set: (key: string, value: unknown) => void }
-    ).set(versionKey, 2);
-
-    const authJson = JSON.stringify({
-      tokens: { access_token: "old-access", refresh_token: "refresh-1" },
-      last_refresh: "2026-01-01T00:00:00.000Z",
-    });
-    const writes: string[] = [];
-    let apiCallCount = 0;
-    const fetchMock = async (url: string) => {
-      if (url === "https://auth.openai.com/oauth/token") {
-        return {
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => ({
-            access_token: "new-access",
-            refresh_token: "refresh-2",
-          }),
-          text: async () => "",
-        };
-      }
-      apiCallCount += 1;
-      if (apiCallCount === 1) {
-        return {
-          ok: false,
-          status: 401,
-          statusText: "Unauthorized",
-          text: async () => "unauthorized",
-          json: async () => ({}),
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        json: async () => ({ output_text: "OK after refresh" }),
-        text: async () => "",
-      };
-    };
-
-    (
-      globalThis as typeof globalThis & {
-        ztoolkit: { getGlobal: (name: string) => unknown; log: () => void };
-      }
-    ).ztoolkit = {
-      getGlobal: (name: string) => {
-        if (name === "fetch") return fetchMock;
-        if (name === "process") return { env: { HOME: "/home/tester" } };
-        if (name === "IOUtils") {
-          return {
-            exists: async () => true,
-            read: async () => new TextEncoder().encode(authJson),
-            makeDirectory: async () => undefined,
-            write: async (_path: string, data: Uint8Array) => {
-              writes.push(new TextDecoder("utf-8").decode(data));
-            },
-          };
-        }
-        return undefined;
-      },
-      log: () => undefined,
-    };
-
-    const output = await callLLM({
-      prompt: "ping",
-      model: "gpt-5.4",
-    });
-    assert.equal(output, "OK after refresh");
-    assert.equal(apiCallCount, 2);
-    assert.isAtLeast(writes.length, 1);
-    assert.include(writes[writes.length - 1], "new-access");
   });
 });
