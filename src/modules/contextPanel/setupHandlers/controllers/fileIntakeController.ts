@@ -332,7 +332,7 @@ export function createFileIntakeController(deps: FileIntakeControllerDeps): {
     }
     if (failedPersistCount > 0) {
       deps.setStatusMessage(
-        `Failed to persist ${failedPersistCount} file(s) to local chat-attachments`,
+        `Failed to persist ${failedPersistCount} file(s) to local attachment storage`,
         "error",
       );
     }

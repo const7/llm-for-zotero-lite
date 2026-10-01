@@ -1,4 +1,4 @@
-import { CHAT_ATTACHMENTS_DIR_NAME } from "./constants";
+import { getPluginDataDir, getZoteroDataDir } from "../../utils/pluginDataDir";
 import {
   fileUrlToPath,
   getLocalParentPath,
@@ -59,31 +59,8 @@ function sanitizeFileName(name: string): string {
   return sanitized || "attachment";
 }
 
-function getBaseWritableDir(): string {
-  const zotero = Zotero as unknown as {
-    DataDirectory?: { dir?: string };
-    Profile?: { dir?: string };
-    getTempDirectory?: () => { path?: string } | null;
-  };
-  const dataDir = zotero.DataDirectory?.dir;
-  if (typeof dataDir === "string" && dataDir.trim()) {
-    return dataDir.trim();
-  }
-  const profileDir = zotero.Profile?.dir;
-  if (typeof profileDir === "string" && profileDir.trim()) {
-    return profileDir.trim();
-  }
-  const tempDirObj = zotero.getTempDirectory?.();
-  if (typeof tempDirObj?.path === "string" && tempDirObj.path.trim()) {
-    return tempDirObj.path.trim();
-  }
-  throw new Error(
-    "Cannot resolve writable data directory for chat attachments",
-  );
-}
-
 function getChatAttachmentsRootDir(): string {
-  return joinLocalPath(getBaseWritableDir(), CHAT_ATTACHMENTS_DIR_NAME);
+  return getPluginDataDir("attachments");
 }
 
 async function ensureDir(path: string): Promise<void> {
@@ -98,7 +75,7 @@ async function ensureDir(path: string): Promise<void> {
   const osFile = getOSFile();
   if (osFile?.makeDir) {
     await osFile.makeDir(path, {
-      from: getLocalParentPath(path),
+      from: getZoteroDataDir(),
       ignoreExisting: true,
     });
     return;
@@ -289,9 +266,7 @@ export function extractManagedBlobHash(storedPath: string | undefined): string {
     .replace(/\/+$/, "");
   const prefix = `${root}/blobs/`;
   if (!normalized.startsWith(prefix)) return "";
-  const rest = normalized.slice(prefix.length);
-  const hash = rest.split("/")[0] || "";
-  return normalizeHash(hash) || "";
+  return normalizeHash(normalized.slice(prefix.length).split("/")[0]) || "";
 }
 
 export function isManagedBlobPath(storedPath: string | undefined): boolean {
@@ -323,6 +298,7 @@ export async function persistAttachmentBlob(
     };
   }
   const fallbackName = sanitizeFileName(fileName || "") || `${contentHash}.bin`;
+  // Preserve persisted message paths when restoring a missing blob.
   const storedPath = existingPath || getBlobPath(contentHash, fallbackName);
   await ensureDir(getLocalParentPath(storedPath));
   await writeBytes(storedPath, bytes);
