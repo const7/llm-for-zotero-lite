@@ -65,6 +65,14 @@ release artifact.
 
 ## Codex paper chat
 
+Paper context labels indicate the content source. **Text** sends extracted text
+without the paper's images; add a figure screenshot when visual analysis is
+needed. **PDF** uses the provider's PDF input path; with Codex App Server, the
+plugin renders the PDF pages as images in a hidden browser without opening or
+scrolling reader tabs, and sends them as image input instead of uploading the
+PDF file. In Text mode, right-click the paper chip to switch
+between full-text and retrieval modes.
+
 Install the Codex CLI and run `codex login`, then select **Codex App Server**
 in the provider settings. Available models load automatically from `model/list`;
 choose the default model from the dropdown, or use the refresh icon beside it
