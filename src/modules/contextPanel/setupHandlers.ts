@@ -1403,16 +1403,6 @@ export function setupHandlers(
     );
   };
 
-  const buildPaperChipAttachmentText = (
-    paperContext: PaperContextRef,
-  ): string => {
-    const attachmentTitle = sanitizeText(
-      paperContext.attachmentTitle || "",
-    ).trim();
-    const paperTitle = sanitizeText(paperContext.title || "").trim();
-    if (!attachmentTitle || attachmentTitle === paperTitle) return "";
-    return attachmentTitle;
-  };
   const buildPaperChipMenuCard = (
     ownerDoc: Document,
     paperContext: PaperContextRef,
@@ -1466,33 +1456,16 @@ export function setupHandlers(
         }),
       );
     }
-    // Attachment line: PDF shows real title, MinerU shows "full.md", Text has none
-    const displayAttachmentText =
-      mode === "pdf"
-        ? buildPaperChipAttachmentText(paperContext) ||
-          resolveAttachmentTitle(paperContext)
-        : mode === "mineru"
-          ? "full.md"
-          : ""; // text mode: no attachment line
-    if (displayAttachmentText) {
+    if (mode === "mineru") {
       rowMain.appendChild(
         createElement(
           ownerDoc,
           "span",
           "llm-paper-picker-meta llm-paper-context-card-attachment",
           {
-            textContent: displayAttachmentText,
+            textContent: "full.md",
           },
         ),
-      );
-    }
-    if (mode === "text") {
-      rowMain.appendChild(
-        createElement(ownerDoc, "span", "llm-paper-picker-meta", {
-          textContent: t(
-            "Text only: paper figures are not included. Add a screenshot to analyze a figure.",
-          ),
-        }),
       );
     }
     card.appendChild(rowMain);

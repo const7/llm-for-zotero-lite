@@ -84,8 +84,7 @@ export function formatPaperContextChipLabel(
   contentSourceMode?: PaperContentSourceMode,
 ): string {
   const base = buildCreatorYearBase(paperContext);
-  if (contentSourceMode === "text")
-    return `${base} - ${t("Text only (no paper images)")}`;
+  if (contentSourceMode === "text") return `${base} - Text`;
   if (contentSourceMode === "mineru") return `${base} - MD`;
   if (contentSourceMode === "pdf") return `${base} - PDF`;
   // No explicit source mode: keep the compact paper label.
