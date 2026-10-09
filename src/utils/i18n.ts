@@ -111,9 +111,6 @@ const zhCN: Record<string, string> = {
   "Collapse files panel": "收起文件面板",
   "Expand figures panel": "展开图片面板",
   "Collapse figures panel": "收起图片面板",
-  "Text only (no paper images)": "仅文字（不含论文图片）",
-  "Text only: paper figures are not included. Add a screenshot to analyze a figure.":
-    "当前论文仅提供文字，不包含论文图片。分析图表请添加截图。",
   "Text context pinned for next sends": "文本上下文已固定于后续发送",
   "Text context unpinned": "文本上下文已取消固定",
   "Image pinned for next sends": "图片已固定于后续发送",
