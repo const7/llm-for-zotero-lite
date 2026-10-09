@@ -65,6 +65,14 @@ release artifact.
 
 ## Codex paper chat
 
+Paper context labels indicate the content source. **Text** sends extracted text
+without the paper's images; add a figure screenshot when visual analysis is
+needed. **PDF** uses the provider's PDF input path; with Codex App Server, the
+plugin renders the PDF pages as images in a hidden browser without opening or
+scrolling reader tabs, and sends them as image input instead of uploading the
+PDF file. In Text mode, right-click the paper chip to switch
+between full-text and retrieval modes.
+
 Install the Codex CLI and run `codex login`, then select **Codex App Server**
 in the provider settings. Available models load automatically from `model/list`;
 choose the default model from the dropdown, or use the refresh icon beside it
@@ -102,13 +110,16 @@ chat integration. History storage and context-budget limits remain local to the 
 questions and retries use the same token-budget policy; older turns are no longer
 replaced by fixed-length excerpts after ten exchanges.
 
-### 本地文件目录
+### Local file storage
 
-插件文件统一使用 `<Zotero 数据目录>/llm-for-zotero-lite/`：
+Plugin files are stored under `<Zotero data directory>/llm-for-zotero-lite/`:
 
-- `attachments/`：新增聊天附件，按内容哈希去重。
-- `cache/embeddings/`：论文向量缓存。
-- `cache/mineru/`：MinerU 解析结果（每个条目包含 `full.md`、图片和 manifest）。
-- `codex/`：Codex app-server 工作目录。
+- `attachments/`: New chat attachments, deduplicated by content hash.
+- `cache/embeddings/`: Cached paper embeddings.
+- `cache/mineru/`: MinerU output, including `full.md`, images, and a manifest
+  for each item.
+- `codex/`: The Codex app-server working directory.
 
-聊天记录和附件引用仍保存在 Zotero 数据库中。代码只使用上述统一目录，不查找旧目录；已有文件和数据库路径应在升级前一次性迁移完成。
+Chat history and attachment references remain in the Zotero database. The plugin
+uses only this storage directory and does not search legacy locations. Existing
+files and database paths must be migrated once before upgrading.
