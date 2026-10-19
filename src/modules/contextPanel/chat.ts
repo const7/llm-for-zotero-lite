@@ -126,7 +126,7 @@ import { buildContextPlanSystemMessages } from "./requestSystemMessages";
 import { canEditUserPromptTurn } from "./editability";
 import {
   buildChatMessageDomKey,
-  countReusableChatMessagePrefix,
+  patchStreamingChatMessage,
   type ChatRenderedMessageState,
 } from "./chatRenderReconciler";
 import {
@@ -366,6 +366,10 @@ interface ChatScrollSnapshot {
 }
 
 const chatScrollSnapshots = new Map<number, ChatScrollSnapshot>();
+const renderedAssistantMessages = new WeakMap<
+  HTMLDivElement,
+  { message: Message; hasAnswerText: boolean }
+>();
 const followBottomStabilizers = new Map<
   number,
   { rafId: number | null; timeoutId: number | null }
@@ -3003,33 +3007,16 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
   const plannedRenderStates = history
     .slice(renderStartIndex)
     .map((_msg, offset) => getRenderState(renderStartIndex + offset));
-  const existingRenderStates =
-    existingConversationKey === conversationKey
-      ? Array.from(chatBox.children).reduce<ChatRenderedMessageState[]>(
-          (out, child) => {
-            const childEl = child as Element & {
-              dataset?: DOMStringMap;
-            };
-            if (!childEl.classList.contains("llm-message-wrapper")) return out;
-            const domKey = childEl.dataset?.messageDomKey || "";
-            const renderKey = childEl.dataset?.messageRenderKey || "";
-            if (!domKey || !renderKey) return out;
-            out.push({ domKey, renderKey });
-            return out;
-          },
-          [],
-        )
-      : [];
-  const reusablePrefix = countReusableChatMessagePrefix(
-    existingRenderStates,
-    plannedRenderStates,
-  );
-  if (reusablePrefix === 0) {
-    chatBox.innerHTML = "";
-  } else {
-    while (chatBox.childElementCount > reusablePrefix) {
-      chatBox.lastElementChild?.remove();
+  const existingRows = new Map<string, HTMLDivElement>();
+  if (existingConversationKey === conversationKey) {
+    for (const child of Array.from(chatBox.children)) {
+      const row = child as HTMLDivElement;
+      if (row.classList.contains("llm-message-wrapper")) {
+        existingRows.set(row.dataset.messageDomKey || "", row);
+      }
     }
+  } else {
+    chatBox.innerHTML = "";
   }
   chatBox.dataset.renderedConversationKey = `${conversationKey}`;
   chatBox.dataset.renderedStartIndex = `${renderStartIndex}`;
@@ -3926,16 +3913,41 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
     if (isUser && hasUserContext) {
       wrapper.classList.add("llm-user-context-aligned");
     }
+    if (!isUser) {
+      renderedAssistantMessages.set(wrapper, {
+        message: msg,
+        hasAnswerText: Boolean(msg.text),
+      });
+    }
     return wrapper;
   };
 
-  for (
-    let offset = reusablePrefix;
-    offset < plannedRenderStates.length;
-    offset += 1
-  ) {
+  for (let offset = 0; offset < plannedRenderStates.length; offset += 1) {
     const index = renderStartIndex + offset;
-    chatBox.appendChild(renderMessageWrapper(index));
+    const state = plannedRenderStates[offset];
+    const prior = existingRows.get(state.domKey);
+    let row = prior;
+    if (!prior || prior.dataset.messageRenderKey !== state.renderKey) {
+      const next = renderMessageWrapper(index);
+      const msg = history[index];
+      const rendered = prior && renderedAssistantMessages.get(prior);
+      if (
+        prior &&
+        msg.streaming &&
+        rendered?.message === msg &&
+        rendered.hasAnswerText === Boolean(msg.text)
+      ) {
+        patchStreamingChatMessage(prior, next);
+      } else {
+        row = next;
+      }
+    }
+    if (row && chatBox.children[offset] !== row) {
+      chatBox.insertBefore(row, chatBox.children[offset] || null);
+    }
+  }
+  while (chatBox.childElementCount > plannedRenderStates.length) {
+    chatBox.lastElementChild?.remove();
   }
 
   syncUserContextAlignmentWidths(body);
